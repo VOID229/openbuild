@@ -193,3 +193,35 @@ test("worker remembers Stop received before the run is admitted", async () => {
   expect(run.events).toContainEqual({ t: "done", finish: "aborted" });
   expect(existsSync(f.env.FAKE_EFFECTS)).toBe(false);
 });
+
+test("a zombie left in the previous worker's group doesn't stop a new worker from starting", async () => {
+  const { directory, socket, env } = setup();
+  // Where PID 1 doesn't reap (bun as PID 1 in a container) a dead worker stays a zombie. Model
+  // it: the child leads its own group and exits; its parent execs `sleep` and never reaps it.
+  const holder = Bun.spawn(["perl", "-e", '$|=1; my $p=fork; if(!$p){setpgrp(0,0); exit 0} print "$p\\n"; exec "sleep","60"'], { env: { ...env, OPENBUILD_PI_WORKER_TOKEN: "dead-worker" }, stdout: "pipe", stderr: "ignore" });
+  workers.push(holder);
+  const reader = holder.stdout.getReader();
+  let out = "";
+  while (!out.includes("\n")) { const { value, done } = await reader.read(); if (done) break; out += new TextDecoder().decode(value); }
+  reader.releaseLock();
+  const zombie = Number(out.trim());
+  expect(zombie).toBeGreaterThan(1);
+  await until(() => {
+    const ps = Bun.spawnSync(["ps", "-o", "pgid=,stat=", "-p", String(zombie)], { stdout: "pipe" }).stdout.toString().trim().split(/\s+/);
+    return Number(ps[0]) === zombie && ps[1]?.startsWith("Z") === true;
+  });
+  writeFileSync(join(directory, "worker.json"), JSON.stringify({ pid: zombie, socket, protocol: 1, token: "dead-worker", groupLeader: true }));
+
+  const worker = Bun.spawn([process.execPath, resolve("server/pi/worker.ts")], { env, detached: true, stdout: "pipe", stderr: "pipe" });
+  workers.push(worker);
+  let healthy = false;
+  await until(async () => {
+    if (worker.exitCode !== null) return true;
+    try { healthy = (await fetch("http://pi/health", { unix: socket } as RequestInit)).ok; } catch {}
+    return healthy;
+  });
+  if (!healthy) throw new Error(`worker exited ${worker.exitCode}: ${await new Response(worker.stderr).text()}`);
+  // The worker took over and the unrelated parent of the zombie was left alone.
+  expect((JSON.parse(readFileSync(join(directory, "worker.json"), "utf8")) as { pid: number }).pid).toBe(worker.pid);
+  expect(holder.exitCode).toBeNull();
+}, 15000);

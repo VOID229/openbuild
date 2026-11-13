@@ -34,9 +34,13 @@ function fencePreviousOwner(directory: string) {
   if (!existsSync(metadata)) return;
   const old = JSON.parse(readFileSync(metadata, "utf8")) as { pid: number; token?: string; groupLeader?: boolean };
   if (!old.token || !old.groupLeader || old.pid === process.pid) return;
-  const ps = Bun.spawnSync(["ps", "-eo", "pid=,pgid="], { stdout: "pipe", stderr: "pipe" });
+  const ps = Bun.spawnSync(["ps", "-eo", "pid=,pgid=,stat="], { stdout: "pipe", stderr: "pipe" });
   if (ps.exitCode !== 0) throw new Error("Cannot inspect previous Pi worker process group");
-  const members = ps.stdout.toString().trim().split("\n").map((line) => line.trim().split(/\s+/).map(Number)).filter(([, pgid]) => pgid === old.pid).map(([pid]) => pid!);
+  // Zombie (Z) and dead (X) entries are skipped: they run nothing, their environment can't be
+  // read back, and where PID 1 doesn't reap (bun as PID 1 in a container) a dead worker stays a
+  // zombie forever. Counting it would make every later worker refuse to start.
+  const members = ps.stdout.toString().trim().split("\n").map((line) => line.trim().split(/\s+/))
+    .filter(([, pgid, stat]) => Number(pgid) === old.pid && !/^[ZX]/.test(stat ?? "")).map(([pid]) => Number(pid));
   if (!members.length) return;
   const identity = `OPENBUILD_PI_WORKER_TOKEN=${old.token}`;
   const matches = members.some((pid) => {
