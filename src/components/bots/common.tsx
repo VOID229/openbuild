@@ -114,7 +114,35 @@ export function useStarting(botId: string | undefined): boolean {
   return on && !!since && now - since < STARTING_MS;
 }
 
-/** A conversation's picture: the bot, or a huddle of the group's or side chat's bots. */
+/** Who a side chat is between, as a sentence names them: "Pip and Manager", "Pip, Manager and Scout". */
+export function betweenNames(c: Pick<Conversation, "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
+  const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A deleted bot");
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
+}
+
+/**
+ * The mark on a side chat's bots: a speech bubble with three dots, ringed in the background it sits
+ * on, so a chat between bots reads as a DM between them and never as a group of yours.
+ */
+export function DmMark({ size }: { size: number }) {
+  return (
+    <span className="bots-dm-mark" role="img" aria-label="Between bots" style={{ "--mark": `${Math.max(14, Math.round(size * 0.4))}px` } as React.CSSProperties}>
+      <svg viewBox="-2 -2 24 22" aria-hidden>
+        <path className="bots-dm-bubble" d="M6 0h8a6 6 0 0 1 0 12h-4.5L5 16.5V12h1A6 6 0 0 1 6 0Z" />
+        <g className="bots-dm-dots">
+          <circle cx="5.6" cy="6" r="1.5" />
+          <circle cx="10" cy="6" r="1.5" />
+          <circle cx="14.4" cy="6" r="1.5" />
+        </g>
+      </svg>
+    </span>
+  );
+}
+
+/**
+ * A conversation's picture: the bot, or a huddle of the group's bots. A side chat's bots sit side by
+ * side when there are two (a huddle when there are more), with a speech bubble between them (`badge`).
+ */
 export const ConversationAvatar = memo(function ConversationAvatar({
   conversation,
   size,
@@ -164,6 +192,13 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
   if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} />;
+  if (conversation.kind === "side")
+    return (
+      <span className="bots-avatar-wrap bots-avatar-side">
+        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={zzz} pair />
+        {badge && <DmMark size={size} />}
+      </span>
+    );
   return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={zzz} />;
 });
 

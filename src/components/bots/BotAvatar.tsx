@@ -436,6 +436,9 @@ function Zzz({ size }: { size: number }) {
   );
 }
 
+/** Two bots side by side, a little above the middle to leave room for a side chat's mark between them below. */
+const PAIR: [number, number, number][] = [[0.27, 0.42, 0.56], [0.73, 0.42, 0.56]];
+
 /** Below this size a seat in the huddle is too small for a readable count, so it goes beside it. */
 export const HUDDLE_SEAT_MIN = 32;
 
@@ -445,9 +448,10 @@ export const HUDDLE_SEAT_MIN = 32;
  * its box and lines up with the others; smaller, it follows the huddle as a number. The user can sit
  * in the huddle too, as their profile picture. `active` picks, by member, who is at work: those come
  * alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every member
- * is awake and `alive` and `busy` go for all of them.
+ * is awake and `alive` and `busy` go for all of them. `pair` seats two members side by side rather than
+ * on the diagonal: a side chat between two bots, which mustn't read as a group.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, me, zzz = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
   const seats = me ? 3 : 4;
   const over = looks.length > seats;
   const seated = over && size >= HUDDLE_SEAT_MIN;
@@ -468,7 +472,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
     [[0.28, 0.29, 0.5], [0.72, 0.29, 0.5], [0.5, 0.72, 0.5]],
     [[0.28, 0.28, 0.5], [0.72, 0.28, 0.5], [0.28, 0.72, 0.5], [0.72, 0.72, 0.5]],
   ];
-  const layout = spots[Math.min(count, 4)] ?? [];
+  const layout = pair && count === 2 ? PAIR : (spots[Math.min(count, 4)] ?? []);
   const items: [React.Key, React.ReactNode][] = [];
   if (me) items.push(["me", me]);
   members.forEach((i, n) => {
@@ -486,7 +490,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   const label = `+${extra}`;
   const spot = ([x, y, s]: [number, number, number]) => ({ left: `${(x - s / 2) * 100}%`, top: `${(y - s / 2) * 100}%`, width: `${s * 100}%`, height: `${s * 100}%` });
   return (
-    <span className="bot-huddle" data-more={over ? (seated ? "seat" : "beside") : undefined} aria-hidden>
+    <span className="bot-huddle" data-pair={pair && count === 2 ? "" : undefined} data-more={over ? (seated ? "seat" : "beside") : undefined} aria-hidden>
       <span className="bot-huddle-box" style={{ width: size, height: size, ...(zzzTop !== undefined && { "--zzz-top": `${zzzTop.toFixed(1)}px` }) } as React.CSSProperties} data-dozing={dozing ? "" : undefined}>
         {items.map(([key, item], i) => {
           const [x, y, s] = layout[i] ?? [0.5, 0.5, 0.5];
