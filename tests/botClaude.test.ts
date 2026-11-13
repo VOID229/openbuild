@@ -136,6 +136,35 @@ test("each login is its own provider, and one login's auth check never sees anot
   }
 });
 
+test("a status check that fails to run keeps the login it last found; a logout still hides it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-claude-flaky-"));
+  try {
+    const command = join(root, "claude");
+    const mode = join(root, "mode");
+    // `claude auth status` answers with whatever `mode` holds: a login, nothing at all, or a logout.
+    writeFileSync(command, `#!/bin/sh\ncase "$(cat "${mode}")" in\n  ok) echo '{"loggedIn":true,"subscriptionType":"max"}' ;;\n  out) echo '{"loggedIn":false}' ;;\n  *) exit 1 ;;\nesac\n`);
+    chmodSync(command, 0o755);
+    const provider = createClaudeCodeProvider({ id: "claude-code", configDir: join(root, "config"), command });
+    const ctx = { env: async () => undefined, fileExists: async () => false };
+    const check = () => provider.auth.apiKey!.check!({ ctx, signal: new AbortController().signal } as any);
+
+    // Never seen signed in: a failed check proves nothing either way, and shows nothing.
+    writeFileSync(mode, "broken");
+    expect(await check()).toBeUndefined();
+    writeFileSync(mode, "ok");
+    expect((await check())?.type).toBe("oauth");
+    // Pi checks on every model refresh and hides the models of a provider whose check comes back empty.
+    writeFileSync(mode, "broken");
+    expect((await check())?.type).toBe("oauth");
+    writeFileSync(mode, "out");
+    expect(await check()).toBeUndefined();
+    writeFileSync(mode, "broken");
+    expect(await check()).toBeUndefined();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the extension registers each provider once", () => {
   const registered: string[] = [];
   const commands: string[] = [];

@@ -64,6 +64,10 @@ export function createClaudeCodeProvider(profile: ClaudeCodeProfile = {}) {
     ? (model, context, options) => streamClaudeCode(model, context, { ...options, env: { ...profileEnv, ...options?.env, ...pinnedEnv } })
     : streamClaudeCode;
   let discoveredIds: Set<string> | undefined;
+  // OpenBuild: the last check that found the login. Pi checks again on every model refresh and hides
+  // the provider's models when a check comes back empty, until the next one: a status check that
+  // failed to run says nothing about the login, so that one keeps this answer.
+  let lastReady: { type: "oauth" | "api_key"; source: string } | undefined;
   const externalOAuthMarker = () => ({
     type: "oauth" as const,
     access: "claude-code-external",
@@ -85,11 +89,15 @@ export function createClaudeCodeProvider(profile: ClaudeCodeProfile = {}) {
           const status = await getClaudeStatus(environment(), signal);
           // Only report the provider as configured when Claude Code is
           // installed and logged in, so Pi hides its models otherwise.
-          if (!status.available || !status.loggedIn) return undefined;
-          return {
-            type: status.subscription ? "oauth" : "api_key",
-            source: status.subscription ? `Claude Code ${status.plan ?? "subscription"}` : "Claude Code CLI",
-          };
+          if (status.available && status.loggedIn) {
+            return (lastReady = {
+              type: status.subscription ? "oauth" : "api_key",
+              source: status.subscription ? `Claude Code ${status.plan ?? "subscription"}` : "Claude Code CLI",
+            });
+          }
+          if (status.diagnostic && lastReady) return lastReady;
+          lastReady = undefined;
+          return undefined;
         },
         async resolve({ ctx, signal }) {
           signal.throwIfAborted();

@@ -50,6 +50,8 @@ export class PiProcess {
   /** Settles once the process has exited. */
   readonly ended: Promise<void>;
   lastUsed = Date.now();
+  /** When the process was started: a fresh Pi is still publishing its providers' models. */
+  readonly startedAt = Date.now();
 
   constructor(args: string[], cwd: string, env?: Record<string, string>) {
     const bin = piBin();

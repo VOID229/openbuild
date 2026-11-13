@@ -554,10 +554,47 @@ test("send_message, models and check-ins against a real bots database", async ()
       svc.updateBot(bot.id, { model: 'anthropic/gone' });
       await a.rejects(applyModel({ send: async (cmd) => { if (cmd.type === 'set_model') throw new Error('Model not found'); return {}; } }, bot.id), /Model not found/);
       // One Pi doesn't list at all, its extension switched off say, says so rather than Pi's bare refusal.
-      const refusing = (models) => ({ send: async (cmd) => { if (cmd.type === 'set_model') throw new Error('Model not found'); return cmd.type === 'get_available_models' ? { models } : {}; } });
-      await a.rejects(applyModel(refusing([{ provider: 'mock', id: 'm' }]), bot.id), /anthropic\\/gone isn't available to bots\\. Its extension may be switched off in Settings → Bots\\.$/);
+      const refusing = (models, startedAt) => ({ startedAt, send: async (cmd) => { if (cmd.type === 'set_model') throw new Error('Model not found'); return cmd.type === 'get_available_models' ? { models } : {}; } });
+      const gone = /anthropic\\/gone isn't available to bots\\. Its extension may be switched off in Settings → Bots\\.$/;
+      // A Pi that has long settled is taken at its word, so a fallback takes over at once.
+      t = Date.now();
+      await a.rejects(applyModel(refusing([{ provider: 'mock', id: 'm' }], Date.now() - 60_000), bot.id, undefined, bot.id, 5_000), gone);
+      a.ok(Date.now() - t < 300, 'a settled Pi fails over at once');
+      // One that has just started is given until it has settled.
+      t = Date.now();
+      await a.rejects(applyModel(refusing([{ provider: 'mock', id: 'm' }], Date.now()), bot.id, undefined, bot.id, 400), gone);
+      a.ok(Date.now() - t >= 350, 'a fresh Pi is given the settle time before the model counts as gone');
       // Listed but refused (no key, say) keeps Pi's reason.
-      await a.rejects(applyModel(refusing([{ provider: 'anthropic', id: 'gone' }]), bot.id), /Model not found/);
+      await a.rejects(applyModel(refusing([{ provider: 'anthropic', id: 'gone' }], Date.now()), bot.id, undefined, bot.id, 400), /Model not found/);
+
+      // A Pi that's just started lists Claude Code's models only once its sign-in check is back, so it
+      // can refuse one it lists a moment later (Dr Eggbot's "Model not found: claude-code/claude-opus-5-5").
+      // That moment is waited out and the model asked for again: the turn doesn't fail.
+      svc.updateBot(bot.id, { model: 'claude-code/claude-opus-5-5' });
+      const settling = (after) => {
+        const sent = [];
+        const born = Date.now();
+        const ready = () => Date.now() - born >= after;
+        return { sent, startedAt: born, send: async (cmd) => {
+          sent.push(cmd.type);
+          if (cmd.type === 'get_state') return { model: { provider: 'openai-codex', id: 'gpt-6.1-sol' } };
+          if (cmd.type === 'set_model') { if (!ready()) throw new Error('Model not found: claude-code/claude-opus-5-5'); return { name: 'Claude Opus 5.5' }; }
+          if (cmd.type === 'get_available_models') return { models: ready() ? [{ provider: 'claude-code', id: 'claude-opus-5-5' }] : [{ provider: 'openai-codex', id: 'gpt-6.1-sol' }] };
+          return {};
+        } };
+      };
+      proc = settling(500);
+      a.deepEqual(await applyModel(proc, bot.id, undefined, bot.id, 5_000), { model: 'claude-code/claude-opus-5-5', name: 'Claude Opus 5.5' });
+      a.deepEqual([proc.sent[1], proc.sent.at(-1)], ['set_model', 'set_model']);
+      // Listed by the time it's asked, after refusing it: asked again straight away.
+      let refusedOnce = false;
+      const raced = { startedAt: Date.now(), send: async (cmd) => {
+        if (cmd.type === 'set_model' && !refusedOnce) { refusedOnce = true; throw new Error('Model not found: claude-code/claude-opus-5-5'); }
+        if (cmd.type === 'get_available_models') return { models: [{ provider: 'claude-code', id: 'claude-opus-5-5' }] };
+        return {};
+      } };
+      a.equal((await applyModel(raced, bot.id, undefined, bot.id, 5_000)).model, 'claude-code/claude-opus-5-5');
+      svc.updateBot(bot.id, { model: 'anthropic/gone' });
 
       // Effort uses Pi's supported levels, after the model has been selected.
       svc.updateBot(bot.id, { effort: 'high' });
