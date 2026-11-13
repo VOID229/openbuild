@@ -246,7 +246,7 @@ async function via(req: Bun.BunRequest<"/api/workspace/via/:host/*">, server: Bu
     if (!streaming || !res.ok || !res.body) {
       req.signal.removeEventListener("abort", abort);
       if (res.status === 401) return Response.json({ error: `${host.name} no longer trusts this pairing. Pair it again.`, reason: "revoked" }, { status: 401, headers: out });
-      return forwardBody(res, out);
+      return forwardBody(res, out, req.signal);
     }
     let set = viaStreams.get(hostId);
     if (!set) viaStreams.set(hostId, (set = new Set()));

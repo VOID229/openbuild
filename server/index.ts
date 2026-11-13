@@ -221,7 +221,7 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
         const value = res.headers.get(name);
         if (value) out.set(name, value);
       }
-      return await forwardBody(res, out);
+      return await forwardBody(res, out, req.signal);
     } catch (err) {
       clearTimeout(deadline);
       req.signal.removeEventListener("abort", abort);
