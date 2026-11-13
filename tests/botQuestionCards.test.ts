@@ -29,7 +29,7 @@ test("question takes up to five questions in one call, and the bot is told to gr
   expect(listed.maxItems).toBe(5);
   expect(Object.keys(listed.items.properties)).toEqual(["title", "hint", "options"]);
   // One question still goes in title, so nothing is required of every call.
-  expect(question.parameters.required).toBeUndefined();
+  expect(question.parameters.required).toEqual([]);
   expect(question.description).toContain("Related questions go together in questions");
   expect(question.description).not.toContain("one question per call");
   for (const text of [ASKING, ASK_INSTEAD]) {
