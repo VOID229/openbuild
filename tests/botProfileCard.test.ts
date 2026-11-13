@@ -1,7 +1,8 @@
 // A bot's profile card from its mascot beside its messages in a group chat, in a real Chrome: hovering,
-// crossing onto the card, the keyboard, a tap, reduced motion, and both themes.
+// crossing onto the card, the keyboard, a tap, reduced motion, both themes, and its mascot holding still.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
+import { still, stillness, watchMascots } from "./stillMascots";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
 let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
@@ -88,6 +89,25 @@ describe.skipIf(!browser)("a bot's profile card", () => {
     await page.until(`bots.getState().activeId === "a"`);
     expect(await page.eval<unknown>(`!!document.querySelector('.bm-profile')`)).toBe(false);
     expect(await page.eval<unknown>(`bots.getState().detailsOpen`)).toBe(false);
+  }, 60_000);
+
+  test("its mascot holds still: no life of its own, no blinks or reactions, and it doesn't follow the pointer", async () => {
+    const page = await open();
+    const [x, y] = await page.centre(MASCOT);
+    await page.moveTo(x, y);
+    await page.until(`!!document.querySelector('.bm-profile[data-state="open"]')`);
+    await page.finished(".bm-profile");
+    await watchMascots(page, "document.querySelector('.bm-profile')");
+    // The pointer wanders over the card, round its mascot, while the bot reacts to something.
+    const card = await page.eval<{ left: number; top: number; right: number; bottom: number }>(`(() => { const r = document.querySelector('.bm-profile').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom }; })()`);
+    await page.moveTo(card.left + 12, card.top + 12);
+    await page.eval(`bots.getState().pulse("manager")`);
+    for (const [fx, fy] of [[0.9, 0.2], [0.5, 0.8], [0.1, 0.5], [0.7, 0.4]] as const) {
+      await page.moveTo(card.left + (card.right - card.left) * fx, card.top + (card.bottom - card.top) * fy);
+      await Bun.sleep(500);
+    }
+    expect(await page.card()).not.toBeNull();
+    expect(await stillness(page)).toEqual(still(1));
   }, 60_000);
 
   test("goes once the pointer leaves the mascot and card, and never shows for a pointer passing by", async () => {
