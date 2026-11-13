@@ -501,7 +501,7 @@ function piDefaultModel(): string | undefined {
  * be the fallback: the model it resolved to is kept (`primary:`), as is the fallback it's on (`fallback:`),
  * and the next primary attempt goes back, or fails rather than carry on on the fallback unannounced.
  */
-export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, fallback?: string, key = botId): Promise<{ model?: string; name?: string }> {
+export async function applyModel(proc: Pick<PiProcess, "send"> & { startedAt?: number }, botId: string, fallback?: string, key = botId, settleMs = MODEL_SETTLE_MS): Promise<{ model?: string; name?: string }> {
   const chosen = fallback || db.getBot(botId)?.model || svc.getSettings().defaultModel;
   // Each of a bot's Pis keeps its own model, so what's on a fallback is kept per Pi (`key`).
   const onFallback = db.getValue<string | null>(`fallback:${key}`) || undefined;
@@ -512,19 +512,30 @@ export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, f
   for (const model of wanted) {
     if (current === model) break;
     const slash = model.indexOf("/");
+    const select = () => proc.send<{ name?: string } | undefined>({ type: "set_model", provider: model.slice(0, slash), modelId: model.slice(slash + 1) }, 20_000);
+    let set: { name?: string } | undefined;
     try {
-      const set = await proc.send<{ name?: string } | undefined>({ type: "set_model", provider: model.slice(0, slash), modelId: model.slice(slash + 1) }, 20_000);
-      current = model;
-      name = set?.name;
-      break;
+      set = await select();
     } catch (err) {
       // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so the next candidate, or Pi's own pick, will do.
       if (!chosen) continue;
-      // One picked for it that Pi doesn't list at all came from an extension that's off now, most likely: said so, rather than as Pi's bare refusal.
       if (err instanceof PiTimeoutError) throw err;
-      if (await unlisted(proc, model)) throw new ModelFailure(modelUnavailable(model));
-      throw modelStartFailure(err);
+      // A Pi that's just started lists a provider's models only once its sign-in check is back, so it
+      // can refuse one it lists a moment later: given until it has settled, it's asked again. One
+      // that settled long ago is taken at its word, so a fallback takes over at once.
+      const listed = await listedSoon(proc, model, proc.startedAt === undefined ? 0 : proc.startedAt + settleMs - Date.now());
+      // One it still doesn't list came from an extension that's off now, most likely: said so, rather than as Pi's bare refusal.
+      if (listed === false) throw new ModelFailure(modelUnavailable(model));
+      if (!listed) throw modelStartFailure(err);
+      try {
+        set = await select();
+      } catch (again) {
+        throw again instanceof PiTimeoutError ? again : modelStartFailure(again);
+      }
     }
+    current = model;
+    name = set?.name;
+    break;
   }
   if (fallback) db.setValue(`fallback:${key}`, fallback);
   else {
@@ -535,13 +546,29 @@ export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, f
   return { model: current, name };
 }
 
-/** Pi lists no such model, with the extensions it was started with. False when it can't say. */
-async function unlisted(proc: Pick<PiProcess, "send">, model: string): Promise<boolean> {
-  try {
-    const { models } = await proc.send<{ models?: { provider: string; id: string }[] }>({ type: "get_available_models" });
-    return Array.isArray(models) && !models.some((m) => `${m.provider}/${m.id}` === model);
-  } catch {
-    return false;
+/**
+ * How long after it starts a bot's Pi may still be filling in its models. It publishes a provider's
+ * only once that provider's sign-in check is back (Claude Code's runs `claude auth status`), and a
+ * pass that a later one overtakes is thrown away, so under load that's seconds after Pi first answers.
+ * Its own model refresh at startup is given 15 s.
+ */
+const MODEL_SETTLE_MS = 15_000;
+
+/** Whether Pi lists `model`, given up to `settleMs` more to. Undefined when it can't say. */
+async function listedSoon(proc: Pick<PiProcess, "send">, model: string, settleMs: number): Promise<boolean | undefined> {
+  const deadline = Date.now() + settleMs;
+  for (let wait = 150; ; wait = Math.min(wait * 2, 1_000)) {
+    let models: { provider: string; id: string }[] | undefined;
+    try {
+      ({ models } = await proc.send<{ models?: { provider: string; id: string }[] }>({ type: "get_available_models" }));
+    } catch {
+      return undefined;
+    }
+    if (!Array.isArray(models)) return undefined;
+    if (models.some((m) => `${m.provider}/${m.id}` === model)) return true;
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
+    await new Promise((r) => setTimeout(r, Math.min(wait, left)));
   }
 }
 
