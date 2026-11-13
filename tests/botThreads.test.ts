@@ -103,6 +103,7 @@ const svc = await import("../server/bots/service");
 const projects = await import("../server/projects");
 const storage = await import("../server/storage");
 const threads = await import("../server/bots/threads");
+const db = await import("../server/bots/db");
 const { serverId } = await import("../server/devices");
 const { coversProject } = await import("../shared/bots");
 const { handle, answerRefusal, assertWithinDefaults, replyFor, resolvePermission, waitingAsks, guide, brief } = threads;
@@ -487,6 +488,42 @@ test("the bot hears when a turn ends, and the chat is brought up to date without
   expect(admitted[1].message).toContain("Next");
   const activity = svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1);
   expect(activity?.event).toMatchObject({ kind: "thread", text: "Wrote a prompt in", threadId });
+});
+
+test("its status names a thread it waits on by its few words for what it does, or by the whole title", async () => {
+  // A bot of its own, so other tests' threads aren't among what it waits on.
+  const { bot: waiter } = svc.createBot({ name: "Wren" });
+  svc.updateBot(waiter.id, { threads: { enabled: true, projects: [project.id] } });
+  const as = (action: string, p: object) => handle(waiter.id, { action, ...p }) as Promise<any>;
+  const title = "Tell the primary bot when a bot is deleted";
+  const tool = (await import("../server/bots/extension")).default;
+  const tools: any[] = [];
+  tool({ on() {}, registerTool(t: any) { tools.push(t); } } as any);
+  const openbuild = tools.find((t) => t.name === "openbuild");
+  expect(openbuild.parameters.properties.about.description).toContain("Waiting on <about>");
+  expect(openbuild.description).toContain("branch_name, about)");
+
+  // Without its words, the whole title: no "dele…".
+  await as("start", { project: project.name, prompt: "Notify the primary", title });
+  const first = admitted.at(-1).threadId;
+  expect(threads.threadWait(waiter.id)?.activity).toBe(`Waiting on ${title}`);
+
+  // With them, from the moment it starts.
+  await as("start", { project: project.name, prompt: "Notify the primary", title, about: "Waiting on the bot-deleted notice." });
+  const second = admitted.at(-1).threadId;
+  db.setValue("thread-watches", (db.getValue<any[]>("thread-watches") ?? []).filter((w) => w.threadId !== first));
+  expect(threads.threadWait(waiter.id)?.activity).toBe("Waiting on the bot-deleted notice");
+
+  // A later send can rename it, and one that says nothing keeps what it had.
+  await as("send", { thread: second, text: "Also log it", about: "the deletion notice and log" });
+  expect(threads.threadWait(waiter.id)?.activity).toBe("Waiting on the deletion notice and log");
+  await as("send", { thread: second, text: "And test it" });
+  expect(threads.threadWait(waiter.id)?.activity).toBe("Waiting on the deletion notice and log");
+  // The first thread gets its words when a send gives them.
+  await as("send", { thread: first, text: "Go on", about: "the first try" });
+  expect(threads.threadWait(waiter.id)?.activity).toBe("Waiting on 2 threads");
+  db.setValue("thread-watches", (db.getValue<any[]>("thread-watches") ?? []).filter((w) => w.threadId !== second));
+  expect(threads.threadWait(waiter.id)?.activity).toBe("Waiting on the first try");
 });
 
 test("a message to a working thread is steered in", async () => {

@@ -111,19 +111,56 @@ export interface BotStatus {
   jobs?: number;
   /**
    * Between turns, waiting on this many OpenBuild threads it started or wrote to that are still
-   * working: `activity` says which ("Waiting on <title>", or "Waiting on 3 threads"), in the
-   * conversation it was in with them. It's free to take a message anywhere.
+   * working: `activity` says which ("Waiting on the bot-deleted notice", in the bot's few words for
+   * what it does or else by its title, or "Waiting on 3 threads"), in the conversation it was in with
+   * them. It's free to take a message anywhere.
    */
   threads?: number;
   since?: number;
 }
 
-/** What a bot between turns says while OpenBuild threads it started or wrote to are still working. */
-export function waitingOnThreads(titles: string[]): string | undefined {
-  if (!titles.length) return undefined;
-  if (titles.length > 1) return `Waiting on ${titles.length} threads`;
-  const title = titles[0]!.replace(/\s+/g, " ").trim() || "a thread";
-  return `Waiting on ${title.length > 40 ? `${title.slice(0, 39).trimEnd()}…` : title}`;
+/**
+ * Text cut to `max` characters at a word, with an ellipsis, when it's longer: never mid-word, and
+ * never without saying so. A single word longer than `max` is cut where it must be.
+ */
+export function fitWords(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  const cut = flat.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut.slice(0, max - 1)).replace(/[\s,;:.\-–—]+$/, "")}…`;
+}
+
+/**
+ * How long the thread a bot's status names may be: any title a bot gives a thread (threads.ts clips
+ * them to 80), so a line like "Waiting on Tell the primary bot when a bot is deleted" reads in full.
+ */
+export const THREAD_NAME_MAX = 80;
+
+/**
+ * How long a bot's few words for what a thread does may be (its `about`): with "Waiting on " before
+ * them, the line fits a 360-pixel phone's header, which has room for about 45 characters.
+ */
+export const THREAD_ABOUT_MAX = 32;
+
+/**
+ * What a bot between turns says while OpenBuild threads it started or wrote to are still working.
+ * `names` are its few words for what each does, like "the bot-deleted notice", or else their titles.
+ */
+export function waitingOnThreads(names: string[]): string | undefined {
+  if (!names.length) return undefined;
+  if (names.length > 1) return `Waiting on ${names.length} threads`;
+  return `Waiting on ${fitWords(names[0]!, THREAD_NAME_MAX) || "a thread"}`;
+}
+
+/**
+ * A bot's few words for what a thread does, as its status follows "Waiting on" with: tidied, and
+ * without a "Waiting on" of its own. Undefined when there are none.
+ */
+export function threadAbout(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const words = raw.replace(/\s+/g, " ").trim().replace(/^waiting (?:on|for):?\s*/i, "").replace(/[.!]+$/, "");
+  return words ? fitWords(words, THREAD_ABOUT_MAX) : undefined;
 }
 
 /** Between turns: free, and only waiting on background jobs or OpenBuild threads (BotStatus.jobs, .threads). */

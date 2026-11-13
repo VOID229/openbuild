@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import openbots from "../server/bots/extension";
 import { activityFor, COMPACTING, follow, heading, liveActivity, newLive, partialArgs, RETRYING, startLine, type Live } from "../server/bots/steps";
 import type { PiRecord } from "../server/pi/rpc";
-import { betweenTurns, statusLine, TYPING, waitingOnThreads, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
+import { betweenTurns, fitWords, statusLine, THREAD_ABOUT_MAX, THREAD_NAME_MAX, threadAbout, TYPING, waitingOnThreads, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
 import { holdingLine, liveLine, workingLine } from "../src/lib/bots/activity";
 import type { BotStatus, Conversation } from "../src/lib/bots/types";
 
@@ -288,11 +288,45 @@ test("the app shows one line everywhere: the live step, Typing…, or plain work
   expect(workingLine("solo", "egg", held.egg)).toBe(holdingLine("solo", "egg"));
 });
 
+test("a thread's name in a status is whole up to any title a bot gives one, and past that ends at a word", () => {
+  // The title a bot gave a thread, which the status used to cut off at "dele…".
+  expect(waitingOnThreads(["Tell the primary bot when a bot is deleted"])).toBe("Waiting on Tell the primary bot when a bot is deleted");
+  expect(waitingOnThreads(["Make the sidebar's thread list remember where it was scrolled to"])).toBe("Waiting on Make the sidebar's thread list remember where it was scrolled to");
+  const longest = "x".repeat(THREAD_NAME_MAX);
+  expect(waitingOnThreads([longest])).toBe(`Waiting on ${longest}`);
+  // A title past what a bot can give (one the user wrote) ends at a word, and says so.
+  const long = "Make the sidebar's thread list remember where it was scrolled to, and bring it back after a reload or a restart";
+  const line = waitingOnThreads([long])!;
+  expect(line).toBe("Waiting on Make the sidebar's thread list remember where it was scrolled to, and bring it…");
+  expect(line.length).toBeLessThanOrEqual("Waiting on ".length + THREAD_NAME_MAX);
+  expect(waitingOnThreads(["  Fix   the\nlogin  "])).toBe("Waiting on Fix the login");
+});
+
+test("a bot's few words for what a thread does are tidied for its status, and kept short", () => {
+  expect(threadAbout("the bot-deleted notice")).toBe("the bot-deleted notice");
+  expect(waitingOnThreads([threadAbout("  the bot-deleted   notice. ")!])).toBe("Waiting on the bot-deleted notice");
+  // Its own "Waiting on" isn't said twice.
+  expect(threadAbout("Waiting on the bot-deleted notice")).toBe("the bot-deleted notice");
+  expect(threadAbout("waiting for: the CI fix")).toBe("the CI fix");
+  for (const none of [undefined, null, 3, "", "   ", "Waiting on"]) expect(threadAbout(none)).toBeUndefined();
+  const long = threadAbout("the notice the primary bot gets when any bot on the team is deleted")!;
+  expect(long).toBe("the notice the primary bot gets…");
+  expect(long.length).toBeLessThanOrEqual(THREAD_ABOUT_MAX);
+});
+
+test("text fitted to a length ends at a word with an ellipsis, never mid-word", () => {
+  expect(fitWords("Short enough", 40)).toBe("Short enough");
+  expect(fitWords("so a failure never goes unnoticed by anyone", 24)).toBe("so a failure never goes…");
+  expect(fitWords("Ends at a comma, then more words", 18)).toBe("Ends at a comma…");
+  // One word longer than the room is cut where it must be, still with the ellipsis.
+  expect(fitWords("https://example.com/a/very/long/path", 12)).toBe("https://exa…");
+  expect(fitWords("https://example.com/a/very/long/path", 12).length).toBe(12);
+});
+
 test("waiting on threads names the one, counts several, and is between turns like waiting on jobs", () => {
   expect(waitingOnThreads([])).toBeUndefined();
   expect(waitingOnThreads(["Fix the login redirect loop"])).toBe("Waiting on Fix the login redirect loop");
   expect(waitingOnThreads(["  "])).toBe("Waiting on a thread");
-  expect(waitingOnThreads(["Make the sidebar's thread list remember where it was scrolled to"])).toBe("Waiting on Make the sidebar's thread list remember…");
   expect(waitingOnThreads(["One", "Two", "Three"])).toBe("Waiting on 3 threads");
   expect(betweenTurns({ threads: 2 })).toBe(true);
   expect(betweenTurns({ jobs: 1 })).toBe(true);
