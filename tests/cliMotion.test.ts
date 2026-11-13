@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { animates, colorDepth, wordmarkFits } from "../bin/motion";
 
@@ -41,4 +43,28 @@ test("piped output never starts the animation", () => {
   const result = Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "bin", "motion.ts"), "track"], { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).not.toContain("\x1b");
+});
+
+test("a temp directory that can't be written drops the animation, not the command", () => {
+  // A regular file where the temp directory should be: every write under it fails, as on a full disk.
+  const blocked = join(mkdtempSync(join(tmpdir(), "openbuild-motion-test-")), "not-a-directory");
+  writeFileSync(blocked, "");
+  try {
+    const script = `
+      Object.defineProperty(process.stdout, "isTTY", { value: true });
+      const { stage } = await import(${JSON.stringify(join(import.meta.dir, "..", "bin", "motion.ts"))});
+      const opened = stage.open({ scene: "lifecycle", power: 0, steps: ["One", "Two"] });
+      stage.step("One");
+      stage.print("result");
+      stage.end("fail");
+      console.log("opened", opened);
+    `;
+    const { CI: _ci, OPENBUILD_NO_MOTION: _plain, ...rest } = process.env;
+    const result = Bun.spawnSync([process.execPath, "-e", script], { env: { ...rest, ...env, TMPDIR: blocked }, stdout: "pipe", stderr: "pipe" });
+    expect(result.stderr.toString()).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toBe("result\nopened false\n");
+  } finally {
+    rmSync(join(blocked, ".."), { recursive: true, force: true });
+  }
 });
