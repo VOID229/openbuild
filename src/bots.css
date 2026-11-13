@@ -1111,6 +1111,10 @@
   animation: bots-typing-text 1.4s ease-in-out infinite;
 }
 
+.bots-row-waiting {
+  color: var(--text-2);
+}
+
 @keyframes bots-typing-text {
   50% {
     opacity: 0.45;

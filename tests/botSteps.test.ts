@@ -1,12 +1,13 @@
 // A bot's status follows Pi's event stream step by step (server/bots/steps.ts): a tool call shows
 // from the moment the model starts writing it, with its own status line as soon as that is written,
-// and is gone the moment the tool ends. Between steps the line is plain working words, never
-// "Thinking".
+// and is gone the moment the tool ends. Between steps the line keeps saying what the bot is about
+// (its reasoning's heading, its last step, what the turn started on): plain working words only with
+// none of those, and never "Thinking".
 import { expect, test } from "bun:test";
 import openbots from "../server/bots/extension";
-import { activityFor, COMPACTING, follow, liveActivity, newLive, partialArgs, RETRYING, type Live } from "../server/bots/steps";
+import { activityFor, COMPACTING, follow, heading, liveActivity, newLive, partialArgs, RETRYING, startLine, type Live } from "../server/bots/steps";
 import type { PiRecord } from "../server/pi/rpc";
-import { statusLine, TYPING, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
+import { betweenTurns, statusLine, TYPING, waitingOnThreads, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
 import { holdingLine, liveLine, workingLine } from "../src/lib/bots/activity";
 import type { BotStatus, Conversation } from "../src/lib/bots/types";
 
@@ -69,7 +70,7 @@ test("a call shows the moment the model starts writing it, and its own status as
   ])).toEqual(["Reading a file", "Reading notes.md"]);
 });
 
-test("a step is over the moment its tool ends: the line changes at once and never lingers", () => {
+test("between steps the line stays on the last one it named, while the model works out the next", () => {
   const live = newLive();
   expect(lines(live, [
     start("read", "a", { path: "/home/x/notes.md" }),
@@ -78,20 +79,96 @@ test("a step is over the moment its tool ends: the line changes at once and neve
     update({ type: "thinking_delta", contentIndex: 0, delta: " then" }),
     start("bash", "b", { command: "gh pr checks", status: "Watching CI on #115" }),
     end("bash", "b"),
+    { type: "turn_end" },
+    { type: "message_start", message: { role: "assistant", content: [] } },
     start("bash", "c", {}),
     end("bash", "c"),
   ])).toEqual([
     "Reading notes.md",
-    // Not "Reading notes.md" until the next tool: the model is working out what's next.
-    "Getting it done",
-    "Getting it done",
-    "Getting it done",
+    // The model is working out what's next: still about the notes, not three dots.
+    "Reading notes.md",
+    "Reading notes.md",
+    "Reading notes.md",
     "Watching CI on #115",
-    "Making progress",
+    "Watching CI on #115",
+    "Watching CI on #115",
+    "Watching CI on #115",
     "Running a command",
-    "Sorting it out",
+    "Running a command",
   ]);
   expect(live.steps).toEqual([]);
+  // Words for the chat and a tool being loaded aren't what it's about: the line goes back past them.
+  expect(lines(live, [
+    start("send_message", "m", { text: "on it" }),
+    end("send_message", "m"),
+    start("load_tools", "l", { names: ["browser"] }),
+    end("load_tools", "l"),
+    start("react", "r", { emoji: "👍" }),
+    end("react", "r"),
+  ])).toEqual(["Writing a reply", "Running a command", "Getting tools ready", "Running a command", "Reacting", "Running a command"]);
+});
+
+test("a turn says what it started on until it names a step, and plain words only with nothing at all", () => {
+  const live = newLive("Reading your message");
+  expect(lines(live, [
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    update({ type: "thinking_delta", contentIndex: 0, delta: "They want the notes file changed." }),
+    start("load_tools", "l", { names: ["write"] }),
+    end("load_tools", "l"),
+    start("write", "w", { status: "Updating your notes" }),
+    end("write", "w"),
+  ])).toEqual(["Reading your message", "Reading your message", "Getting tools ready", "Reading your message", "Updating your notes", "Updating your notes"]);
+  // A turn with nothing to say it started on (an older caller) falls back to plain words.
+  expect(liveActivity(newLive())).toBe("Working on it");
+  // What woke it is what it starts on: a message someone's waiting on before anything else.
+  expect(startLine(["messages"], true)).toBe("Reading your message");
+  expect(startLine(["heartbeat", "messages"], false)).toBe("Reading the new messages");
+  expect(startLine(["routine"], false)).toBe("Getting started on a routine");
+  expect(startLine(["note", "heartbeat"], true)).toBe("Reading a note");
+  expect(startLine(["heartbeat"], true)).toBe("Checking in on things");
+  expect(startLine(["reaction"], true)).toBe("Looking at a reaction");
+  for (const kinds of [["messages"], ["routine"], ["note"], ["heartbeat"], ["reaction"]]) expect(WORKING_PHRASES as readonly string[]).not.toContain(startLine(kinds, true));
+});
+
+test("the heading of the model's reasoning is the line while it thinks, once it's written in full", () => {
+  const live = newLive("Reading your message");
+  expect(lines(live, [
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    update({ type: "thinking_start", contentIndex: 0 }),
+    update({ type: "thinking_delta", contentIndex: 0, delta: "**Inspecting the" }),
+    update({ type: "thinking_delta", contentIndex: 0, delta: " CI logs**\n\nThe failing job is" }),
+    update({ type: "thinking_delta", contentIndex: 0, delta: " lint. **not a heading** here.\n\n**Planning the fix**" }),
+    update({ type: "toolcall_start", contentIndex: 1, id: "e", toolName: "edit" }),
+    update({ type: "toolcall_delta", contentIndex: 1, delta: '{"status":"Fixing the lint error","path":"a.ts"' }),
+    start("edit", "e", { status: "Fixing the lint error", path: "a.ts" }),
+    end("edit", "e"),
+    { type: "turn_end" },
+    { type: "message_start", message: { role: "assistant", content: [] } },
+    update({ type: "thinking_start", contentIndex: 0 }),
+    update({ type: "thinking_delta", contentIndex: 0, delta: "Plain reasoning with no heading." }),
+  ])).toEqual([
+    "Reading your message",
+    "Reading your message",
+    // Half a heading isn't shown.
+    "Reading your message",
+    "Inspecting the CI logs",
+    // Bold words inside a sentence aren't a heading; a new heading of its own line is.
+    "Planning the fix",
+    "Editing a file",
+    "Fixing the lint error",
+    "Fixing the lint error",
+    "Fixing the lint error",
+    // A later response with no heading keeps what it was last on.
+    "Fixing the lint error",
+    "Fixing the lint error",
+    "Fixing the lint error",
+    "Fixing the lint error",
+  ]);
+  expect(heading("**Checking**")).toBe("Checking");
+  expect(heading("  **reviewing #101**  \nmore")).toBe("Reviewing #101");
+  expect(heading("**" + "x".repeat(70) + "**")!.length).toBe(50);
+  expect(heading("**12**")).toBeUndefined();
+  expect(heading("so **this** is it")).toBeUndefined();
 });
 
 test("tools running side by side are told apart by call id, so one ending never hides another", () => {
@@ -102,7 +179,7 @@ test("tools running side by side are told apart by call id, so one ending never 
     // The same tool twice: by name alone, this would have cleared the one still running.
     end("bash", "b"),
     end("bash", "a"),
-  ])).toEqual(["Building the app", "Running the tests", "Building the app", "Getting it done"]);
+  ])).toEqual(["Building the app", "Running the tests", "Building the app", "Building the app"]);
   // Calls written in one response show the newest while they're written, then whichever is running.
   expect(lines(live, [
     update({ type: "toolcall_start", contentIndex: 0, id: "x", toolName: "read" }),
@@ -113,7 +190,7 @@ test("tools running side by side are told apart by call id, so one ending never 
     start("browser", "y", { action: "open", url: "https://www.example.com/x" }),
     end("browser", "y"),
     end("read", "x"),
-  ])).toEqual(["Reading a file", "Reading a.md", "Browsing", "Opening example.com", "Reading a.md", "Opening example.com", "Reading a.md", "Making progress"]);
+  ])).toEqual(["Reading a file", "Reading a.md", "Browsing", "Opening example.com", "Reading a.md", "Opening example.com", "Reading a.md", "Reading a.md"]);
   // An end with no id (an older Pi) still ends the tool of that name, and one never seen is harmless.
   follow(live, { type: "tool_execution_start", toolName: "edit", args: { path: "x.ts" } });
   expect(follow(live, { type: "tool_execution_end", toolName: "edit" }).ended?.tool).toBe("edit");
@@ -124,14 +201,17 @@ test("tools running side by side are told apart by call id, so one ending never 
 test("nothing of a response is left showing once it's over, failed or was stopped", () => {
   const live = newLive();
   const writes = [update({ type: "toolcall_start", contentIndex: 0, id: "w", toolName: "bash" }), update({ type: "toolcall_delta", contentIndex: 0, delta: '{"status":"Deploying"' })];
-  // The model's call failed mid-write: that call never runs.
-  expect(lines(live, [...writes, { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "529" } }])).toEqual(["Running a command", "Deploying", "Getting it done"]);
+  // The model's call failed mid-write: that call never runs, though it's still what the bot is about.
+  expect(lines(live, [...writes, { type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "529" } }])).toEqual(["Running a command", "Deploying", "Deploying"]);
+  expect(live.steps).toEqual([]);
   // Stopped by the user.
-  expect(lines(live, [...writes, { type: "message_end", message: { role: "assistant", stopReason: "aborted" } }]).at(-1)).toBe("Making progress");
+  lines(live, [...writes, { type: "message_end", message: { role: "assistant", stopReason: "aborted" } }]);
+  expect(live.steps).toEqual([]);
   // A tool whose end never came (blocked, or lost) goes with its turn, and with the next response.
-  expect(lines(live, [start("bash", "lost", { status: "Deploying" }), { type: "turn_end" }])).toEqual(["Deploying", "Sorting it out"]);
-  expect(lines(live, [start("bash", "lost", { status: "Deploying" }), { type: "message_start", message: { role: "assistant", content: [] } }])).toEqual(["Deploying", "Keeping at it"]);
-  expect(lines(live, [start("bash", "lost", { status: "Deploying" }), { type: "agent_settled" }]).at(-1)).toBe("Working on it");
+  for (const over of [{ type: "turn_end" }, { type: "message_start", message: { role: "assistant", content: [] } }, { type: "agent_settled" }]) {
+    lines(live, [start("bash", "lost", { status: "Deploying" }), over]);
+    expect(live.steps).toEqual([]);
+  }
   // A user message arriving (a steer) ends nothing.
   expect(lines(live, [start("bash", "kept", { status: "Deploying" }), { type: "message_start", message: { role: "user", content: "and the docs?" } }])).toEqual(["Deploying", "Deploying"]);
   // A call that never streamed (a provider that sends whole messages) is taken from the finished message.
@@ -151,16 +231,18 @@ test("text on its way to the chat reads Writing a reply, and Pi's own waits say 
   expect(live.streaming).toBe(false);
   expect(liveActivity(live, { writing: true })).toBe("Updating the to-do list");
   // Steps the chat shows another way are left out of the line.
-  expect(liveActivity(live, { counts: (step) => step.tool !== "todo" })).toBe("Getting it done");
+  const other = newLive();
+  follow(other, update({ type: "toolcall_start", contentIndex: 0, id: "t", toolName: "todo" }));
+  expect(liveActivity(other, { counts: (step) => step.tool !== "todo" })).toBe("Working on it");
   follow(live, { type: "turn_end" });
   follow(live, { type: "compaction_start", reason: "threshold" });
   expect(liveActivity(live)).toBe(COMPACTING);
   follow(live, { type: "compaction_end", reason: "threshold" });
-  expect(liveActivity(live)).toBe("Making progress");
+  expect(liveActivity(live)).toBe("Updating the to-do list");
   follow(live, { type: "auto_retry_start", attempt: 1, delayMs: 2000 });
   expect(liveActivity(live)).toBe(RETRYING);
   follow(live, { type: "auto_retry_end", success: true });
-  expect(liveActivity(live)).toBe("Sorting it out");
+  expect(liveActivity(live)).toBe("Updating the to-do list");
   for (const line of [COMPACTING, RETRYING, WRITING_REPLY]) expect(line).not.toMatch(/thinking/i);
 });
 
@@ -204,4 +286,16 @@ test("the app shows one line everywhere: the live step, Typing…, or plain work
   const held: Record<string, BotStatus> = { egg: { state: "working", conversationId: "group", activity: "Running the tests", waiting: ["solo"] } };
   expect(liveLine(solo, held, [])).toBe(holdingLine("solo", "egg"));
   expect(workingLine("solo", "egg", held.egg)).toBe(holdingLine("solo", "egg"));
+});
+
+test("waiting on threads names the one, counts several, and is between turns like waiting on jobs", () => {
+  expect(waitingOnThreads([])).toBeUndefined();
+  expect(waitingOnThreads(["Fix the login redirect loop"])).toBe("Waiting on Fix the login redirect loop");
+  expect(waitingOnThreads(["  "])).toBe("Waiting on a thread");
+  expect(waitingOnThreads(["Make the sidebar's thread list remember where it was scrolled to"])).toBe("Waiting on Make the sidebar's thread list remember…");
+  expect(waitingOnThreads(["One", "Two", "Three"])).toBe("Waiting on 3 threads");
+  expect(betweenTurns({ threads: 2 })).toBe(true);
+  expect(betweenTurns({ jobs: 1 })).toBe(true);
+  expect(betweenTurns({})).toBe(false);
+  expect(betweenTurns(undefined)).toBe(false);
 });

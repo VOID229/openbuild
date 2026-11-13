@@ -107,8 +107,25 @@ export interface BotStatus {
    * it's waiting on, in the conversation they were started from. It's free to take a message anywhere.
    */
   jobs?: number;
+  /**
+   * Between turns, waiting on this many OpenBuild threads it started or wrote to that are still
+   * working: `activity` says which ("Waiting on <title>", or "Waiting on 3 threads"), in the
+   * conversation it was in with them. It's free to take a message anywhere.
+   */
+  threads?: number;
   since?: number;
 }
+
+/** What a bot between turns says while OpenBuild threads it started or wrote to are still working. */
+export function waitingOnThreads(titles: string[]): string | undefined {
+  if (!titles.length) return undefined;
+  if (titles.length > 1) return `Waiting on ${titles.length} threads`;
+  const title = titles[0]!.replace(/\s+/g, " ").trim() || "a thread";
+  return `Waiting on ${title.length > 40 ? `${title.slice(0, 39).trimEnd()}…` : title}`;
+}
+
+/** Between turns: free, and only waiting on background jobs or OpenBuild threads (BotStatus.jobs, .threads). */
+export const betweenTurns = (status: Pick<BotStatus, "jobs" | "threads"> | undefined) => !!(status?.jobs || status?.threads);
 
 /**
  * What a working bot's status says while no step of its own is live: the model is working out what to

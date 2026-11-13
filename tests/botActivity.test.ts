@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { busyBots, elsewhere, showWorking, starting, STARTING_MS } from "../src/lib/bots/activity";
+import { busyBots, DOTS_MAX, DOTS_SETTLE, elsewhere, plainPhase, plainPhaseEnds, shownLine, showWorking, trackShown, type Shown } from "../src/lib/bots/activity";
 import { useBots } from "../src/lib/bots/store";
 import { ConversationAvatar } from "../src/components/bots/common";
 import type { BotStatus, Conversation } from "../src/lib/bots/types";
@@ -52,21 +52,46 @@ test("a busy solo avatar fidgets, an idle one doesn't", () => {
   expect(render(false)).not.toContain("data-busy");
 });
 
-test("a bot has just started for a moment: working, in the open, with no step to name yet", () => {
+test("plain words are three dots only with nothing else to name, briefly, and the same for every place that asks", () => {
   const now = 1_000_000;
-  const fresh: BotStatus = { state: "working", conversationId: "solo", activity: "Working on it", since: now - 200 };
-  expect(starting(fresh, now)).toBe(true);
-  expect(starting({ ...fresh, activity: undefined }, now)).toBe(true);
-  // A step to show, and the moment is over; so it is after a while with none.
-  expect(starting({ ...fresh, activity: "Reading a file" }, now)).toBe(false);
-  expect(starting(fresh, now + STARTING_MS)).toBe(false);
-  // Plain working words between later steps aren't a start.
-  expect(starting({ ...fresh, activity: "Making progress", since: now - 60_000 }, now)).toBe(false);
-  // Quiet work, deciding whether a message is its to answer, and no work at all never are.
-  expect(starting({ ...fresh, quiet: true }, now)).toBe(false);
-  expect(starting({ ...fresh, deciding: true }, now)).toBe(false);
-  expect(starting({ state: "idle" }, now)).toBe(false);
-  expect(starting(undefined, now)).toBe(false);
-  // This device's clock behind the server's: a start that looks ahead of now is still a start.
-  expect(starting({ ...fresh, since: now + 900 }, now)).toBe(true);
+  const plain: BotStatus = { state: "working", conversationId: "solo", activity: "Working on it", since: now };
+  let shown = trackShown({}, { egg: plain }, now);
+  // Just turned plain: a moment to settle, then dots, then the mascot back with the words.
+  expect(plainPhase(plain, shown.egg, false, now)).toBe("settling");
+  expect(plainPhaseEnds(plain, shown.egg, false, now)).toBe(now + DOTS_SETTLE);
+  expect(plainPhase(plain, shown.egg, false, now + DOTS_SETTLE)).toBe("dots");
+  expect(plainPhaseEnds(plain, shown.egg, false, now + DOTS_SETTLE)).toBe(now + DOTS_SETTLE + DOTS_MAX);
+  expect(plainPhase(plain, shown.egg, false, now + DOTS_SETTLE + DOTS_MAX)).toBe("words");
+  expect(plainPhaseEnds(plain, shown.egg, false, now + DOTS_SETTLE + DOTS_MAX)).toBeUndefined();
+  // Another plain phrase is the same spell of plain words: the clock doesn't start over.
+  shown = trackShown(shown, { egg: { ...plain, activity: "Getting it done", since: now + 900 } }, now + 900);
+  expect(shown.egg!.plainSince).toBe(now);
+  // A line of its own ends it, and is kept: plain words after it say that line, never dots.
+  shown = trackShown(shown, { egg: { ...plain, activity: "Checking the build logs" } }, now + 1000);
+  expect(shown.egg).toEqual({ line: "Checking the build logs" });
+  const after: BotStatus = { ...plain, activity: "Making progress", since: now + 2000 };
+  shown = trackShown(shown, { egg: after }, now + 2000);
+  expect(plainPhase(after, shown.egg, false, now + 2000 + DOTS_SETTLE)).toBeUndefined();
+  expect(shownLine(after, shown.egg)).toBe("Checking the build logs");
+  // "Writing a reply" is over once the message is out: it's never kept.
+  const fresh: Record<string, Shown> = {};
+  const writing = trackShown(fresh, { egg: { ...plain, activity: "Writing a reply" } }, now);
+  expect(writing.egg?.line).toBeUndefined();
+  // Typing, quiet work, a group bot still deciding, and no work at all are never dots.
+  const at = now + DOTS_SETTLE;
+  const own = trackShown({}, { egg: plain }, now).egg;
+  expect(plainPhase(plain, own, true, at)).toBeUndefined();
+  expect(plainPhase({ ...plain, quiet: true }, trackShown({}, { egg: { ...plain, quiet: true } }, now).egg, false, at)).toBeUndefined();
+  expect(plainPhase({ ...plain, deciding: true }, own, false, at)).toBeUndefined();
+  expect(plainPhase({ state: "idle" }, own, false, at)).toBeUndefined();
+  expect(plainPhase(undefined, undefined, false, at)).toBeUndefined();
+  // Going idle forgets it all, and nothing changing hands back the same record.
+  expect(trackShown(shown, { egg: { state: "idle" } }, now)).toEqual({});
+  const same = trackShown({}, { egg: plain }, now);
+  expect(trackShown(same, { egg: plain }, now + 50)).toBe(same);
+  // Loaded in the middle of a long plain spell (a reload): the server's since says it's been long enough already.
+  const loaded = trackShown({}, { egg: { ...plain, since: now - 60_000 } }, now);
+  expect(plainPhase(plain, loaded.egg, false, now)).toBe("words");
+  // This device's clock behind the server's: a spell that looks ahead of now starts now.
+  expect(trackShown({}, { egg: { ...plain, since: now + 900 } }, now).egg!.plainSince).toBe(now);
 });

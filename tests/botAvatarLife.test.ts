@@ -263,11 +263,6 @@ describe.skipIf(!browser)("a bot on its own", () => {
     await page.eval("wait(false)");
     await page.until("!document.querySelector('#dots .bot-dots') && !('dots' in document.querySelector('#dots .bot').dataset)");
     expect(await read()).toEqual({ dots: null, body: 1, row: [] });
-    // Left waiting, it doesn't stay dots for good: it comes back by itself after a couple of seconds.
-    await page.eval("wait(true)");
-    await page.until("document.querySelector('#dots .bot').dataset.dots === 'in'");
-    await page.until("!document.querySelector('#dots .bot-dots')", 5000);
-    expect((await read()).body).toBe(1);
   }, 30_000);
 
   /**

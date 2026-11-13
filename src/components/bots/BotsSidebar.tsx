@@ -9,6 +9,7 @@ import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/st
 import { useWorkspace } from "../../lib/bots/workspace";
 import type { Bot, Conversation } from "../../lib/bots/types";
 import { TYPING } from "../../../shared/bots";
+import { waitingOnThreadsLine } from "../../lib/bots/activity";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
@@ -96,6 +97,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const conversation = useBots((s) => s.conversations.find((c) => c.id === peek?.id));
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => (peek ? (s.typing[peek.id]?.length ?? 0) : 0)) > 0;
+  const waiting = useBots((s) => (conversation ? waitingOnThreadsLine(conversation, s.status) : undefined));
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
   useLayoutEffect(() => {
@@ -119,7 +121,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           Between {betweenNames(conversation, bots)}
         </span>
       )}
-      <span className="bots-peek-preview">{typing ? TYPING : previewOf(conversation, bots)}</span>
+      <span className="bots-peek-preview">{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
     </div>,
     document.body,
   );
@@ -173,6 +175,8 @@ function useSelect() {
 const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek; avatar?: number }) {
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
+  // Between turns, waiting on threads it started from here: that, as the chat and its header say it.
+  const waiting = useBots((s) => waitingOnThreadsLine(conversation, s.status));
   const select = useSelect();
   const longPress = useLongPress((x, y) => onMenu({ id: conversation.id, x, y }));
   const name = conversationName(conversation, bots);
@@ -194,7 +198,7 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
             <span className="bots-row-title">{title}</span>
             {tag && <span className="bots-row-tag">· {tag}</span>}
           </span>
-          <span className={cx("bots-row-preview", typing && "bots-row-typing")}>{typing ? TYPING : previewOf(conversation, bots)}</span>
+          <span className={cx("bots-row-preview", typing && "bots-row-typing", !typing && waiting && "bots-row-waiting")}>{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
         </span>
         <span className="bots-row-side">
           <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>

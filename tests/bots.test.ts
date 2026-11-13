@@ -609,9 +609,9 @@ test("send_message, models and check-ins against a real bots database", async ()
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'browser', args: { action: 'open', url: 'https://www.example.com/x' } });
       a.equal(svc.snapshot().status[bot.id].activity, 'Opening example.com');
       a.equal(typingNow(), false);
-      // The step is over the moment its tool ends: its line doesn't stay up while the model works out the next one.
+      // The step is over when its tool ends, but its line stays up while the model works out the next one.
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'browser', result: {} });
-      a.equal(svc.snapshot().status[bot.id].activity, 'Getting it done');
+      a.equal(svc.snapshot().status[bot.id].activity, 'Opening example.com');
       onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', toolName: 'send_message', contentIndex: 0 } });
       a.equal(typingNow(), true);
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
@@ -635,7 +635,9 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.equal(svc.snapshot().status[bot.id].quiet, undefined);
       a.equal(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'bash', result: {} });
-      a.notEqual(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');
+      // Still what it's about while it works out the next step: the line stays.
+      a.equal(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');
+      a.equal(svc.snapshot().status[bot.id].state, 'working');
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'send_message', args: {} });
       a.equal(typingNow(), true);
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
