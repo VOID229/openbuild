@@ -2,7 +2,7 @@
 import { Star } from "lucide-react";
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { busyBots, plainPhase, plainPhaseEnds, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
+import { busyBots, plainPhase, plainPhaseEnds, reading, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -128,6 +128,9 @@ export function useDots(botIds: readonly string[]): boolean[] {
   return useMemo(() => phases.map((phase) => phase === "dots"), [phases]);
 }
 
+/** Whether each of these bots is reading something right now (`reading`): its mascot reads along. */
+export const useReading = (botIds: string[]): boolean[] => useBots(useShallow((s) => botIds.map((id) => reading(s.status[id]))));
+
 /** Who a side chat is between, as a sentence names them: "Pip and Manager", "Pip, Manager and Scout". */
 export function betweenNames(c: Pick<Conversation, "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A deleted bot");
@@ -197,12 +200,13 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   const shared = useDots(conversation.botIds);
   const dots = still ? NO_DOTS : shared;
   if (still) [alive, busy, track, working] = [false, false, false, undefined];
+  const reads = useReading(conversation.botIds);
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id));
   if (conversation.kind === "direct") {
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} dots={dots[0]} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} reading={reads[0]} mood={mood} dots={dots[0]} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />
@@ -213,15 +217,15 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   }
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
-  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} track={track} />;
+  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} reading={reads} track={track} />;
   if (conversation.kind === "side")
     return (
       <span className="bots-avatar-wrap bots-avatar-side">
-        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} track={track} zzz={zzz} pair />
+        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} reading={reads} track={track} zzz={zzz} pair />
         {badge && <DmMark size={size} />}
       </span>
     );
-  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} track={track} zzz={zzz} />;
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} reading={reads} track={track} zzz={zzz} />;
 });
 
 export { conversationName };

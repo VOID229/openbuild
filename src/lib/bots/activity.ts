@@ -111,6 +111,9 @@ export const shownLine = (st: BotStatus | undefined, shown: Shown | undefined) =
 /** Typing in any chat. */
 export const typingAnywhere = (typing: Record<string, string[] | undefined>, botId: string) => Object.values(typing).some((ids) => ids?.includes(botId));
 
+/** Reading something right now (BotStatus.reading): its mascot reads, line by line, wherever it shows. */
+export const reading = (st: BotStatus | undefined) => visiblyWorking(st) && !!st!.reading;
+
 /** Working in this chat, quietly or not. */
 export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;
 

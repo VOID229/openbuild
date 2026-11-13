@@ -87,6 +87,8 @@ export interface BotStatus {
   conversationId?: string;
   /** The OpenBuild thread it's acting on right now (reading, messaging, stopping, closing…), by id or the prefix it named. */
   thread?: string;
+  /** Its live step is reading something: a file, a page, messages, memory, search results, a thread (steps.ts `reads`). Its mascot reads along. */
+  reading?: boolean;
   /** Working, but nothing to show in the chat yet (a reaction it may let be, or tidying up after a reply). */
   quiet?: boolean;
   /** Other conversations with messages it'll get to once it's free. They show it holding on, not silence. */

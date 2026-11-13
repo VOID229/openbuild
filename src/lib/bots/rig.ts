@@ -29,6 +29,8 @@ export const FORMS = {
   squint: [1.3, 0.24],
   /** At work: much bigger, fat and deep, a quarter of the face between them. */
   big: [1.6, 1.48],
+  /** Reading: the big eyes of work with their lids come down a third, onto the page (lowered too: DRAWN.read). */
+  read: [1.45, 1],
 } as const satisfies Record<string, readonly [number, number]>;
 export type EyeForm = keyof typeof FORMS;
 
@@ -72,6 +74,11 @@ export interface Drawn {
 }
 export const DRAWN = {
   ...(Object.fromEntries(Object.entries(FORMS).map(([k, [w, h]]) => [k, { w, h }])) as Record<EyeForm, Drawn>),
+  /**
+   * Its top come well down from a big eye's and its foot only a little up: lowered by an eighth of an
+   * open eye. Lower still, a star's eyes would have no room left to read along a line.
+   */
+  read: { w: FORMS.read[0], h: FORMS.read[1], drop: 0.12 },
   /** Pleased: a thick arch, lifted a little, its feet squarer. */
   happy: { w: 1.36, h: 0.54, drop: -0.08, bottom: 0.22 },
   sleepy: { w: 1.25, h: 0.15 },
@@ -94,7 +101,7 @@ export function eyeLook(mood: string | undefined, eyes: EyeForm | undefined, asl
   if (mood === "sleepy") asked.add("sleepy");
   if (mood === "surprised") asked.add("round");
   if (mood === "squint" || mood === "thinking") asked.add("squint");
-  return (["happy", "sleepy", "big", "squint", "round", "wide"] as const).find((k) => asked.has(k)) ?? "open";
+  return (["happy", "sleepy", "read", "big", "squint", "round", "wide"] as const).find((k) => asked.has(k)) ?? "open";
 }
 
 

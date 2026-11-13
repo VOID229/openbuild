@@ -47,7 +47,7 @@ import { BotProfileHover } from "./BotProfileCard";
 const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
-import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots, usePlainPhases } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots, usePlainPhases, useReading } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -1340,7 +1340,8 @@ function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direc
     was.current = dots;
   }
   // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
-  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy dots={dots} mood={typing ? "thinking" : undefined} pulse={{ key: step.current ?? "", mood: "idle", action: "pop" }} />;
+  const [reads] = useReading([bot.id]);
+  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy reading={reads && !typing} dots={dots} mood={typing ? "thinking" : undefined} pulse={{ key: step.current ?? "", mood: "idle", action: "pop" }} />;
   return (
     <div className="bm-working" role="status" aria-label={typing ? `${bot.name} is typing` : `${bot.name}: ${activity}`} data-dots={dots || undefined}>
       {direct ? avatar : <span className="bm-avatar">{avatar}</span>}

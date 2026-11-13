@@ -100,3 +100,25 @@ export function nextBlink(): Step[] {
 
 /** Thinking (while typing): looking up a little, head cocked, its eyes narrowed to dashes (in CSS). */
 export const THINKING: Pose = { x: 0.12, y: -0.5, roll: -10 };
+
+/**
+ * Reading, as in a book: eyes lowered onto the page, sweeping slowly along a line from left to right,
+ * then snapping back to the left and dropping a touch, onto the next line, and along that. A few lines
+ * down it's back up at the top, as on a new page, and reads on. It leans into each line a little as it
+ * goes, and in toward the page.
+ */
+export const READING = { lines: 4, settle: 240, sweep: 1900, top: 0.4, drop: 0.12, from: -0.72, to: 0.72, roll: 5, zoom: 0.03 } as const;
+
+/** Where a reading bot looks `ms` into its reading. The snap back is the jump from one line's end to the next one's start: the springs make it quick. */
+export function readingAt(ms: number): Pose {
+  const { lines, settle, sweep, top, drop, from, to, roll, zoom } = READING;
+  const line = settle + sweep;
+  const t = ((ms % (line * lines)) + line * lines) % (line * lines);
+  const n = Math.floor(t / line);
+  const along = Math.max(0, t - n * line - settle) / sweep;
+  const x = from + (to - from) * along;
+  return { x, y: top + n * drop, roll: x * roll, zoom, eyes: "read" };
+}
+
+/** Reading with motion reduced: held still, eyes down on the middle of the first line. */
+export const READING_STILL: Pose = readingAt(READING.settle + READING.sweep / 2);

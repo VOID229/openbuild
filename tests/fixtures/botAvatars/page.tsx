@@ -2,7 +2,8 @@
 // still; a row of awake ones, idle and busy, big and small, living their lives; one of every shape
 // that only follows the pointer; a playful one to press; one that starts on something when
 // `wait(true)` is called, and has a step to show at `wait(false)`; and a busy one that's three dots
-// for as long as `hold(true)` says (`holdShape` changes its shape).
+// for as long as `hold(true)` says (`holdShape` changes its shape); and one that's busy reading for as
+// long as `read(true)` says (`readShape` changes its shape), still otherwise.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import { useState } from "react";
@@ -22,6 +23,13 @@ function Holder() {
   const [shape, setShape] = useState("sparkle");
   Object.assign(window, { hold: setOn, holdShape: setShape });
   return <BotAvatar look={{ shape, color: "orange" }} size={96} busy dots={on} />;
+}
+
+function Reader() {
+  const [on, setOn] = useState(false);
+  const [shape, setShape] = useState("blob");
+  Object.assign(window, { read: setOn, readShape: setShape });
+  return <BotAvatar look={{ shape, color: "green" }} size={96} alive={false} busy={on} reading={on} />;
 }
 
 createRoot(document.getElementById("root")!).render(
@@ -51,6 +59,9 @@ createRoot(document.getElementById("root")!).render(
     </div>
     <div className="row" id="held">
       <span className="cell"><Holder /></span>
+    </div>
+    <div className="row" id="reading">
+      <span className="cell"><Reader /></span>
     </div>
     <div className="row" id="play">
       <span className="cell"><BotAvatar look={looks[1]!} size={96} alive={false} playful /></span>

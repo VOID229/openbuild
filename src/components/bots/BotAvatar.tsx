@@ -6,12 +6,13 @@
 // leaning in. It can follow the pointer, turning and leaning toward it; a held
 // mood (thinking while typing, happy at a reaction) changes its eyes, and in a group the ones not at
 // work doze, a "zzz" floating up over them. At work with nothing at all to say what on, it can turn
-// into three dots for a moment and back (`dots`, which activity.ts decides). Nothing ever hops, and
-// nothing spins of its own accord.
+// into three dots for a moment and back (`dots`, which activity.ts decides). Reading something, it
+// reads: eyes down, along a line and back to the start of the next. Nothing ever hops, and nothing
+// spins of its own accord.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
 import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type EyeLook, type Pose } from "../../lib/bots/rig";
-import { nextBeat, nextBlink, nextIdle, THINKING, type Step } from "../../lib/bots/routines";
+import { nextBeat, nextBlink, nextIdle, READING_STILL, readingAt, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
 export type { Action, Mood };
@@ -118,6 +119,12 @@ export interface BotAvatarProps {
   /** Busy at something: brisk, rocking and peering about. */
   busy?: boolean;
   /**
+   * Busy reading something (a file, a page, messages, search results): eyes lowered, it reads line
+   * by line, slowly along each and quickly back to the start of the next (READING), for as long as
+   * it's set. Only while it's busy, and not while it's thinking what to type.
+   */
+  reading?: boolean;
+  /**
    * Dozing, as a group's members do while they aren't at work: eyes shut, head down, breathing slowly
    * if it's alive. Set (true or false) on any avatar that can doze, so it eases in and out of it.
    */
@@ -137,7 +144,7 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, playful: wantPlayful = false, plain = false, busy = false, asleep, zzz = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, playful: wantPlayful = false, plain = false, busy = false, reading = false, asleep, zzz = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
   const lively = wantLively && !plain;
   const playful = wantPlayful && !plain;
@@ -185,13 +192,18 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const held = pose ?? (shown === "thinking" ? THINKING : undefined);
   // At work, the pointer is no business of its: the working routine plays on as if it weren't there.
   const following = track && !busy;
+  // Reading takes over from the working routine; three dots or a thought of what to type, it doesn't.
+  const reads = reading && busy && !dozing && !stayDots && mood !== "thinking";
+  // A face it pulls shows over the reading, but the swell of a new step (a plain face) doesn't lift its eyes from the page.
+  const form = reads && (!flash || flash === "idle") ? "read" : flash ? undefined : eyesFor(pose, busy);
   // The form its eyes are drawn in, which says how near the edge they can go.
-  const drawn = eyeLook(shown, flash ? undefined : eyesFor(pose, busy), sleeping);
+  const drawn = eyeLook(shown, form, sleeping);
 
   // The body: springs toward wherever it's facing (a pose, the pointer, or back to rest), stepped
   // frame by frame while anything moves and written straight to the layers, so none of it renders.
   // It's drawn at rest to begin with (`rest`, below), with nothing run to put it there.
-  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; pose?: Pose; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
+  // `read` is when it began reading (held `still`, with motion reduced): while it's set, where it looks is the line it's on.
+  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; pose?: Pose; read?: { since: number; still: boolean }; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
   body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, pose: held, shape, size, busy, look: drawn };
   Object.assign(body.current, { pose: held, shape, size, busy, look: drawn });
   const write = () => {
@@ -203,6 +215,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const target = () => {
     const b = body.current!;
     const el = ref.current;
+    if (b.read) return poseTarget(b.shape, b.read.still ? READING_STILL : readingAt(performance.now() - b.read.since), true);
     if (b.pose) return poseTarget(b.shape, b.pose, b.busy);
     if (!b.tracking || !el || pointer.x < 0) return restOf(b.shape);
     const r = el.getBoundingClientRect();
@@ -217,9 +230,10 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       b.rig.spin = t >= 1 ? 0 : 360 * easeInOut(Math.max(0, t));
       if (t >= 1) b.spun = 0;
     }
-    const done = step(b.rig, target(), dt, b.pose ? "pose" : b.tracking ? "track" : "rest") && !b.spun;
+    const done = step(b.rig, target(), dt, b.read || b.pose ? "pose" : b.tracking ? "track" : "rest") && !b.spun;
     write();
-    if (!done) return;
+    // Reading, it's on the move even while it holds at the start of a line: it stops when the reading does.
+    if (!done || b.read) return;
     b.last = 0;
     moving.delete(tick.current);
   });
@@ -271,6 +285,32 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     };
   }, [following]);
 
+  // Reading: from the first line, the lines going by as the clock does, for as long as it reads, and
+  // back from wherever it got to after. Off screen it pauses, checked once a second. With motion
+  // reduced it's simply there, eyes down on the page, and back again after.
+  useEffect(() => {
+    const el = ref.current;
+    if (!reads || !el) return;
+    const b = body.current!;
+    const still = calm();
+    b.read = { since: performance.now(), still };
+    if (still) {
+      move();
+      return () => {
+        b.read = undefined;
+        move();
+      };
+    }
+    animate(tick.current);
+    const check = setInterval(() => (offScreen(el) ? moving.delete(tick.current) : animate(tick.current)), 1000);
+    return () => {
+      clearInterval(check);
+      b.read = undefined;
+      animate(tick.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reads]);
+
   // Lids snap down, held a moment, and up a touch slower (see .bot-eye-fill): never the same blink twice.
   const doBlink = (twice = false) => {
     const close = Math.round(rand(70, 110));
@@ -294,9 +334,9 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     later(() => setFlash((cur) => (cur === m ? undefined : cur)), ms);
   };
 
-  // A life of its own, one routine after another: busy, brisk poses with blinks between; idle, a rest
-  // staring straight out and then a stare, a look around, a blink or (lively) a move. Dozing, there's
-  // none of it: just the breathing, in CSS.
+  // A life of its own, one routine after another: busy, brisk poses with blinks between; reading, only
+  // a blink now and then, its eyes on the lines; idle, a rest staring straight out and then a stare, a
+  // look around, a blink or (lively) a move. Dozing, there's none of it: just the breathing, in CSS.
   useEffect(() => {
     const el = ref.current;
     if (!(alive || busy) || dozing || !el || calm()) return;
@@ -312,7 +352,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
         timer = setTimeout(next, 300);
         return;
       }
-      if (!steps.length) steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : plain ? nextBlink() : [[null, rand(800, 2600)], ...nextIdle(lively, following)];
+      if (!steps.length) steps = reads ? [[null, rand(2400, 5000)], ["blink", 300]] : busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : plain ? nextBlink() : [[null, rand(800, 2600)], ...nextIdle(lively, following)];
       const [what, ms] = steps.shift()!;
       if (what === null) setPose(undefined);
       else if (what === "blink" || what === "blink2") doBlink(what === "blink2");
@@ -327,7 +367,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, busy, lively, plain, following, dozing]);
+  }, [alive, busy, lively, plain, following, dozing, reads]);
 
   // Woken to work, it has a little stretch on the way up.
   const wasDozing = useRef(dozing);
@@ -369,8 +409,9 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-action={action}
       data-looking={held ? "" : undefined}
       data-busy={busy || undefined}
+      data-reading={reads ? "" : undefined}
       data-asleep={sleeping ? "" : undefined}
-      data-eyes={flash ? undefined : eyesFor(pose, busy)}
+      data-eyes={form}
       data-dots={dots}
       role={label ? "img" : undefined}
       aria-label={label}
@@ -450,9 +491,10 @@ export const HUDDLE_SEAT_MIN = 32;
  * in the huddle too, as their profile picture. `active` picks, by member, who is at work: those come
  * alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every member
  * is awake and `alive` and `busy` go for all of them. `pair` seats two members side by side rather than
- * on the diagonal: a side chat between two bots, which mustn't read as a group.
+ * on the diagonal: a side chat between two bots, which mustn't read as a group. `reading` picks, by
+ * member, who is reading.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, dots, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, dots, reading, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; reading?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
   const seats = me ? 3 : 4;
   const over = looks.length > seats;
   const seated = over && size >= HUDDLE_SEAT_MIN;
@@ -480,7 +522,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
     // A touch smaller than its seat when it has neighbours: the shapes reach wide (a sparkle's arms,
     // a wedge's corners), and seated side by side they'd touch each other and the count.
     const s = (layout[n + (me ? 1 : 0)]?.[2] ?? 0.5) * (count > 1 ? 0.92 : 1);
-    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} dots={dots?.[i]} track={track} />]);
+    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} dots={dots?.[i]} reading={reading?.[i]} track={track} />]);
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
   const dozing = !!active && members.some((i) => !active[i]);
@@ -518,9 +560,9 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
 /**
  * A group's members side by side, each its own mascot, for where a huddle would be too small to read
  * (the chat's header at rest). Up to `max` show, those at work first as in a huddle, and the rest as a
- * count after them ("+2" after four). `active` picks who is at work, as in BotHuddle; the rest doze, without a "zzz" each.
+ * count after them ("+2" after four). `active` picks who is at work, and `reading` who reads, as in BotHuddle; the rest doze, without a "zzz" each.
  */
-export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, dots, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; track?: boolean; max?: number }) {
+export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, dots, reading, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; reading?: boolean[]; track?: boolean; max?: number }) {
   const room = max;
   const order = looks.map((_, i) => i);
   const members = (active ? [...order.filter((i) => active[i]), ...order.filter((i) => !active[i])] : order).slice(0, room).sort((a, b) => a - b);
@@ -528,7 +570,7 @@ export const BotLineup = memo(function BotLineup({ looks, size, alive = true, bu
   return (
     <span className="bot-lineup" aria-hidden>
       {members.map((i) => (
-        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} dots={dots?.[i]} track={track} />
+        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} dots={dots?.[i]} reading={reading?.[i]} track={track} />
       ))}
       {extra > 0 && <span className="bot-lineup-more">+{extra}</span>}
     </span>
