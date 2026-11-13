@@ -13,7 +13,7 @@ const suite: Entry[] = [...new Bun.Glob("tests/**/*.test.ts").scanSync(root)].ma
 });
 
 test("every test file runs in exactly one shard, whatever order the files are found in", () => {
-  for (const total of [1, 2, 4, 7]) {
+  for (const total of [1, 2, 4, 5, 7]) {
     const shards = Array.from({ length: total }, (_, i) => shard(suite, i + 1, total).map(entry => entry.file));
     expect(shards.flat().sort()).toEqual(suite.map(entry => entry.file).sort());
     const reversed = Array.from({ length: total }, (_, i) => shard([...suite].reverse(), i + 1, total).map(entry => entry.file));
@@ -22,7 +22,7 @@ test("every test file runs in exactly one shard, whatever order the files are fo
 });
 
 test("CI's shards take about as long as each other", () => {
-  const walls = [1, 2, 3, 4].map(index => expectedWall(shard(suite, index, 4)));
+  const walls = [1, 2, 3, 4, 5].map(index => expectedWall(shard(suite, index, 5)));
   expect(Math.max(...walls) - Math.min(...walls)).toBeLessThan(20);
 });
 
