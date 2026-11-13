@@ -30,7 +30,9 @@ const open = async (view: string, width: number, height: number, count = 13) => 
  * In the page: the bots under `scope` whose eyes come within `margin` units (of the bot's 100-unit
  * box) of its rim. With the cut to the body's outline lifted, so an eye over the edge would show,
  * points across each eye are tried: wherever the eye is, the body must be too, there and `margin`
- * further out from the eye's middle.
+ * further out from the eye's middle. Each scope, and each bot in it, is scrolled into view first, and
+ * an eye no point lands on (clipped, covered or off the screen) fails too, as does a bot without its
+ * two eyes: an eye that can't be seen can't be shown clear.
  */
 const tooNear = (page: Page, scope: string, margin: number) =>
   page.eval<string[]>(`(() => {
@@ -38,23 +40,32 @@ const tooNear = (page: Page, scope: string, margin: number) =>
     lift.textContent = '.bot-skin { clip-path: none !important } .bot-skin, .bot-skin * { pointer-events: auto !important } .bot .bot-shape { pointer-events: auto }';
     document.head.append(lift);
     const near = [];
+    for (const s of document.querySelectorAll(${JSON.stringify(scope)})) s.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
     for (const b of document.querySelectorAll(${JSON.stringify(`${scope} .bot`)})) {
+      (b.closest('[aria-label]') ?? b).scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
       const body = b.querySelector('.bot-shape');
       const m = (b.getBoundingClientRect().width / 100) * ${margin};
       const name = (b.closest('[aria-label]')?.getAttribute('aria-label') ?? '') + ' ' + (b.closest('[data-mood]')?.dataset.mood ?? '');
-      for (const eye of b.querySelectorAll('.bot-eye-fill, .bot-eye-heart path')) {
+      // Each eye is drawn by one layer: a heart in love, a pill in any other face. Only that one is
+      // looked at; the other, should it be there, isn't the eye.
+      const love = b.dataset.mood === 'love';
+      const eyes = [...b.querySelectorAll('.bot-eye')].map((e) => e.querySelector(love ? '.bot-eye-heart path' : '.bot-eye-fill'));
+      if (eyes.length !== 2 || eyes.some((e) => !e)) near.push(name.trim());
+      for (const eye of eyes.filter(Boolean)) {
         const r = eye.getBoundingClientRect();
         let bad = false;
+        let hits = 0;
         for (let i = 0; i <= 5 && !bad; i++)
           for (let j = 0; j <= 5 && !bad; j++) {
             const [x, y] = [r.left + (r.width * i) / 5, r.top + (r.height * j) / 5];
             const here = document.elementsFromPoint(x, y);
             if (!here.some((h) => h === eye || eye.contains(h))) continue;
+            hits++;
             const [ox, oy] = [x - (r.left + r.width / 2), y - (r.top + r.height / 2)];
             const n = Math.hypot(ox, oy) || 1;
             if (!here.includes(body) || !document.elementsFromPoint(x + (ox / n) * m, y + (oy / n) * m).includes(body)) bad = true;
           }
-        if (bad) near.push(name.trim());
+        if (bad || hits === 0) near.push(name.trim());
       }
     }
     lift.remove();
