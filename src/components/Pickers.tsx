@@ -122,7 +122,7 @@ function useSpeedChoice(chatId: string | undefined, deviceId?: string) {
 
 /**
  * The model picker's Reasoning section: a column beside the list on a wide picker, a row of levels
- * under it on a narrow one (CSS decides). Picking a level keeps the picker open.
+ * under it on a narrow one (CSS decides). Picking a level keeps the picker open, as picking a model does.
  */
 export function ReasoningSection({ chatId, deviceId }: { chatId?: string; deviceId?: string }) {
   const { model, levels, shown, labelOf, note } = useEffortChoice(chatId, deviceId);
@@ -564,8 +564,12 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
   const effortLabel = current && !effort.note ? (effort.shown === "medium" ? effort.labelOf(effort.shown) : effort.labelOf(effort.shown, true)) : undefined;
   const pillLabel = [label, effortLabel && `${effortLabel} reasoning`, speed.current?.name].filter(Boolean).join(", ");
 
-  const choose = (id: string) => {
-    setSelection({ plan, id }, chatId);
+  // Picking keeps the picker open, so the model, its reasoning and its speed can be set in one go. It
+  // closes on a click outside, on the pill again, or on Esc.
+  const choose = (id: string) => setSelection({ plan, id }, chatId);
+  // Focus inside the picker would fall to the page as it closes: hand it back to the pill.
+  const close = () => {
+    if (document.activeElement?.closest(".mp")) anchor.current?.focus({ preventScroll: true });
     setOpen(false);
   };
 
@@ -593,7 +597,7 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
       </button>
       <Popover
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={close}
         anchor={anchor}
         className={cx("mp", layout.up ? "drop-up" : "drop-down")}
         style={{ ...layout.pos, height: layout.max }}

@@ -39,6 +39,25 @@ class PickerPage extends Page {
     await Bun.sleep(200);
     await this.settle();
   }
+  /** A real mouse click at a point of the window. */
+  async clickAt(x: number, y: number) {
+    for (const type of ["mousePressed", "mouseReleased"]) await this.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+    await this.settle();
+  }
+  /** A finger's tap in the middle of `selector`, or at a point. */
+  async tap(at: string | [number, number]) {
+    const [x, y] = typeof at === "string" ? await this.eval<[number, number]>(`(() => { const r = document.querySelector(${JSON.stringify(at)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`) : at;
+    await this.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    await this.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await Bun.sleep(50);
+    await this.settle();
+  }
+  state() {
+    return this.eval<string | null>("document.querySelector('.mp')?.getAttribute('data-state') ?? null");
+  }
+  async closed() {
+    await this.until(`document.querySelector('.mp') === null || document.querySelector('.mp').getAttribute('data-state') !== 'open'`);
+  }
   async key(key: string, code = key, keyCode = 0) {
     // Enter as typed (with its text), so it also presses a focused button.
     const text = key === "Enter" ? "\r" : undefined;
@@ -180,17 +199,74 @@ describe.skipIf(!browser)("model picker", () => {
     await page.send("Input.insertText", { text: "haiku" });
     await page.settle();
     expect(await page.eval<any>("[...document.querySelectorAll('.mp-name')].map((el) => el.textContent)")).toEqual(["Claude Haiku 5.5"]);
+    // Enter picks the first match and leaves the picker open, the search still focused.
     await page.key("Enter", "Enter", 13);
-    await page.until(`document.querySelector('.mp') === null || document.querySelector('.mp').getAttribute('data-state') !== 'open'`);
     expect((await pill(page)).label).toStartWith("Model: Claude Haiku 5.5");
-    // ↓ from the search moves into the list; Enter picks the focused row.
-    await page.openPicker();
+    expect(await page.state()).toBe("open");
+    expect(await page.eval<any>("document.activeElement?.getAttribute('aria-label')")).toBe("Search models");
+    // ↓ from the search moves into the list; Enter picks the focused row, and it keeps the focus.
+    await page.eval("document.querySelector('.mp-search input').select()");
+    await page.key("Backspace", "Backspace", 8);
     await page.key("ArrowDown", "ArrowDown", 40);
     expect(await page.eval<any>("document.activeElement?.className")).toBe("mp-pick");
     await page.key("ArrowDown", "ArrowDown", 40);
     await page.key("Enter", "Enter", 13);
-    await page.until(`document.querySelector('.mp') === null || document.querySelector('.mp').getAttribute('data-state') !== 'open'`);
     expect((await pill(page)).label).toStartWith("Model: Claude Sonnet 5.5");
+    expect(await page.state()).toBe("open");
+    expect(await page.eval<any>("document.activeElement?.querySelector('.mp-name')?.textContent")).toBe("Claude Sonnet 5.5");
+    // ↑ and Enter again: another pick, still open.
+    await page.key("ArrowUp", "ArrowUp", 38);
+    await page.key("Enter", "Enter", 13);
+    expect((await pill(page)).label).toStartWith("Model: Claude Opus 5.5");
+    expect(await page.state()).toBe("open");
+    // Esc closes it and hands the focus back to the pill.
+    await page.key("Escape", "Escape", 27);
+    await page.closed();
+    expect(await page.eval<any>("document.activeElement?.classList.contains('pill-model')")).toBe(true);
+  }, 30_000);
+
+  test("picking a model keeps the picker open, so model, reasoning and speed are set in one go; a click outside, the pill or Esc closes it", async () => {
+    const page = await open("desktop");
+    await page.openPicker();
+    // One model, then another: the picker stays, the row and the pill follow.
+    await page.click('.mp-row:nth-child(2) .mp-pick');
+    expect(await page.state()).toBe("open");
+    expect((await pill(page)).label).toBe("Model: Claude Sonnet 5.5, Medium reasoning");
+    expect(await page.eval<any>(`document.querySelector('.mp-row[aria-selected="true"] .mp-name')?.textContent`)).toBe("Claude Sonnet 5.5");
+    await page.click('.mp-row:nth-child(1) .mp-pick');
+    expect(await page.state()).toBe("open");
+    // Then its reasoning and speed.
+    await page.click('.mp-effort-level:nth-child(3)');
+    expect(await page.state()).toBe("open");
+    await page.click('.mp-speed-opt[aria-checked="false"]');
+    expect(await page.state()).toBe("open");
+    expect(await pill(page)).toMatchObject({ label: "Model: Claude Opus 5.5, High reasoning, Fast", effort: "High", bolt: true });
+    await page.shoot("picker-several-picks");
+
+    // A click outside closes it.
+    await page.clickAt(20, 20);
+    await page.closed();
+    // So does the pill again.
+    await page.openPicker();
+    await page.click(".pill-model");
+    await page.closed();
+    // And Esc.
+    await page.openPicker();
+    await page.key("Escape", "Escape", 27);
+    await page.closed();
+    expect((await pill(page)).label).toBe("Model: Claude Opus 5.5, High reasoning, Fast");
+  }, 30_000);
+
+  test("a new thread's harness can be switched without closing the picker either", async () => {
+    const page = await open("desktop", "home=1");
+    await page.openPicker();
+    const harness = await page.eval<number>("document.querySelectorAll('.mp-foot .mp-runtime').length");
+    expect(harness).toBeGreaterThan(1);
+    const checked = () => page.eval<string>(`document.querySelector('.mp-foot .mp-runtime[aria-checked="true"]').getAttribute('aria-label')`);
+    const before = await checked();
+    await page.click('.mp-foot .mp-runtime[aria-checked="false"]:not(.mp-runtime-missing)');
+    expect(await page.state()).toBe("open");
+    expect(await checked()).not.toBe(before);
   }, 30_000);
 
   test("reasoning and speed are radio groups: ←/→ move between options, and each group is one Tab stop", async () => {
@@ -232,7 +308,8 @@ describe.skipIf(!browser)("model picker", () => {
     await page.openPicker();
     await page.send("Input.insertText", { text: "legacy" });
     await page.key("Enter", "Enter", 13);
-    await page.openPicker();
+    // Still open, and the Reasoning section follows the pick at once.
+    expect(await page.state()).toBe("open");
     expect(await page.eval<any>("document.querySelectorAll('.mp-effort-level').length")).toBe(0);
     expect(await page.eval<any>("document.querySelector('.mp-effort-note')?.textContent")).toContain("uses its default reasoning");
     expect((await pill(page)).effort).toBeNull();
@@ -269,6 +346,18 @@ describe.skipIf(!browser)("model picker", () => {
       expect(r.left).toBeGreaterThanOrEqual(l.mp.left);
       expect(r.right).toBeLessThanOrEqual(l.mp.right);
     }
+    // Tapping a model, then a level, keeps the sheet up; a tap outside it puts it away.
+    await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await page.tap('.mp-row:nth-child(2) .mp-pick');
+    expect(await page.state()).toBe("open");
+    await page.tap('.mp-effort-level:nth-child(4)');
+    expect(await page.state()).toBe("open");
+    expect((await pill(page)).label).toBe("Model: Claude Sonnet 5.5, XHigh reasoning");
+    await page.shoot("picker-phone-several-picks");
+    // The sheet covers the pill, so a tap above it is the way out.
+    await page.tap([180, 20]);
+    await page.closed();
+    expect((await pill(page)).label).toBe("Model: Claude Sonnet 5.5, XHigh reasoning");
     const light = await open("phone", "theme=light");
     await light.openPicker();
     await light.shoot("picker-phone-light");
