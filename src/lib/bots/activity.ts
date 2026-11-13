@@ -4,7 +4,7 @@ import { providerName } from "../models";
 import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
-import { statusLine, TYPING, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
+import { betweenTurns, statusLine, TYPING, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -63,6 +63,11 @@ export function trackShown(prev: Record<string, Shown>, status: Record<string, B
     const st = status[id];
     if (st?.state !== "working") {
       put(id, undefined);
+      continue;
+    }
+    // Between turns, waiting on jobs or threads: its line is its own, and none of it carries into the next turn.
+    if (betweenTurns(st)) {
+      put(id, {});
       continue;
     }
     const was = prev[id];
@@ -125,7 +130,7 @@ export function busyBots(conversation: Pick<Conversation, "id" | "botIds">, stat
  */
 export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses): { botId: string; conversationId?: string }[] {
   return conversation.botIds
-    .filter((id) => visiblyWorking(status[id]) && !status[id]!.jobs && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
+    .filter((id) => visiblyWorking(status[id]) && !betweenTurns(status[id]) && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
     .map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
 }
 
@@ -181,9 +186,19 @@ export function liveLine(conversation: Pick<Conversation, "id" | "botIds">, stat
 export function stoppable(conversation: Pick<Conversation, "id" | "botIds" | "kind">, status: Statuses): string[] {
   return conversation.botIds.filter((id) => {
     const st = status[id];
-    // One still deciding has nothing to stop yet that anyone can see.
-    return visiblyWorking(st) && (conversation.kind === "direct" || st!.conversationId === conversation.id || (!!st!.waiting?.includes(conversation.id) && !st!.undecided?.includes(conversation.id)));
+    // One still deciding has nothing to stop yet that anyone can see, nor one only waiting on threads: they're the threads' to stop.
+    return visiblyWorking(st) && !(st!.threads && !st!.jobs) && (conversation.kind === "direct" || st!.conversationId === conversation.id || (!!st!.waiting?.includes(conversation.id) && !st!.undecided?.includes(conversation.id)));
   });
+}
+
+/**
+ * What the sidebar says of a conversation in place of its last message while one of its bots is between
+ * turns waiting on OpenBuild threads it started or wrote to from there (BotStatus.threads): the same
+ * line as the chat's working row and its header.
+ */
+export function waitingOnThreadsLine(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses): string | undefined {
+  const id = conversation.botIds.find((id) => !!status[id]?.threads && workingHere(status[id], conversation.id));
+  return id ? statusLine(status[id]) : undefined;
 }
 
 /** Where a coding thread a bot started is: replying, blocked on a question for the user, or done. */

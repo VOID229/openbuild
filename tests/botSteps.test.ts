@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import openbots from "../server/bots/extension";
 import { activityFor, COMPACTING, follow, heading, liveActivity, newLive, partialArgs, RETRYING, startLine, type Live } from "../server/bots/steps";
 import type { PiRecord } from "../server/pi/rpc";
-import { statusLine, TYPING, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
+import { betweenTurns, statusLine, TYPING, waitingOnThreads, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
 import { holdingLine, liveLine, workingLine } from "../src/lib/bots/activity";
 import type { BotStatus, Conversation } from "../src/lib/bots/types";
 
@@ -286,4 +286,16 @@ test("the app shows one line everywhere: the live step, Typing…, or plain work
   const held: Record<string, BotStatus> = { egg: { state: "working", conversationId: "group", activity: "Running the tests", waiting: ["solo"] } };
   expect(liveLine(solo, held, [])).toBe(holdingLine("solo", "egg"));
   expect(workingLine("solo", "egg", held.egg)).toBe(holdingLine("solo", "egg"));
+});
+
+test("waiting on threads names the one, counts several, and is between turns like waiting on jobs", () => {
+  expect(waitingOnThreads([])).toBeUndefined();
+  expect(waitingOnThreads(["Fix the login redirect loop"])).toBe("Waiting on Fix the login redirect loop");
+  expect(waitingOnThreads(["  "])).toBe("Waiting on a thread");
+  expect(waitingOnThreads(["Make the sidebar's thread list remember where it was scrolled to"])).toBe("Waiting on Make the sidebar's thread list remember…");
+  expect(waitingOnThreads(["One", "Two", "Three"])).toBe("Waiting on 3 threads");
+  expect(betweenTurns({ threads: 2 })).toBe(true);
+  expect(betweenTurns({ jobs: 1 })).toBe(true);
+  expect(betweenTurns({})).toBe(false);
+  expect(betweenTurns(undefined)).toBe(false);
 });

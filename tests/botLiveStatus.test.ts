@@ -322,3 +322,58 @@ test("a fallback taking over says so, until that model gets going", () => run("f
   await over(prompts[0]);
   a.equal(status(), undefined);
 `), 30_000);
+
+test("between turns, threads it started or wrote to that are still working show as what it's waiting on, until they finish", () => run("threads", `
+  const storage = await import('./server/storage.ts');
+  const threads = await import('./server/bots/threads.ts');
+  const chat = (id, title) => storage.putChat({ id, title, messages: [], createdAt: Date.now(), updatedAt: Date.now() });
+  const watch = (threadId, runId = 'run-' + threadId) => ({ runId, threadId, botId: alpha.bot.id, conversationId: own, told: [] });
+  chat('t-login', 'Fix the login redirect loop');
+  chat('t-docs', 'Update the setup docs');
+  chat('t-ci', 'Speed up the CI shards');
+  // Nothing to wait on: idle, as ever.
+  runner.threadsChanged(alpha.bot.id);
+  a.equal(status(), undefined);
+  // One thread it started is working: it's free, and its status says what it's waiting on, in the chat it started it from.
+  db.setValue('thread-watches', [watch('t-login')]);
+  runner.threadsChanged(alpha.bot.id);
+  a.equal(status().state, 'working');
+  a.equal(line(), 'Waiting on Fix the login redirect loop');
+  a.equal(status().threads, 1);
+  a.equal(status().conversationId, own);
+  a.equal(status().jobs, undefined);
+  // The same thread twice (a second run after it wrote to it again) is still one thread; three are counted.
+  db.setValue('thread-watches', [watch('t-login'), watch('t-login', 'run-2'), watch('t-docs'), watch('t-ci')]);
+  runner.threadsChanged(alpha.bot.id);
+  a.equal(line(), 'Waiting on 3 threads');
+  a.equal(status().threads, 3);
+  // The primary's read of the team counts it as idle and waiting, not in a turn.
+  const work = svc.botWorkStatus(svc.snapshot().bots.find((b) => b.primary)?.id ?? alpha.bot.id).bots.find((b) => b.id === alpha.bot.id);
+  a.equal(work.state, 'idle');
+  a.equal(work.runnerState, 'waiting');
+
+  // A turn takes over the status, and when it ends the wait shows again.
+  const prompt = await turn();
+  a.equal(status().threads, undefined);
+  a.equal(line(), 'Reading your message');
+  start('bash', 'w1', { status: 'Checking the threads' });
+  a.equal(line(), 'Checking the threads');
+  end('bash', 'w1');
+  await over(prompt);
+  a.equal(line(), 'Waiting on 3 threads');
+
+  // Threads finishing: one left is named again, and with none it's idle.
+  db.setValue('thread-watches', [watch('t-docs')]);
+  runner.threadsChanged(alpha.bot.id);
+  a.equal(line(), 'Waiting on Update the setup docs');
+
+  // The last one finishes as following it does: the run is over, the bot is told, and the watch goes.
+  // (No worker runs it here, so following finds the run already over.)
+  console.warn = () => {};
+  threads.resumeWatches();
+  await until(() => prompts.length === 2);
+  a.notEqual(status()?.threads, 1);
+  await over(prompts[1]);
+  await until(() => status() === undefined);
+  a.deepEqual(db.getValue('thread-watches'), []);
+`), 30_000);

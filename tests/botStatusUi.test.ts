@@ -273,3 +273,42 @@ test("the sidebar's preview says Typing… while a bot types, then goes back to 
   expect(preview().textContent).toBe("You: check the build");
   expect(preview().classList.contains("bots-row-typing")).toBe(false);
 });
+
+test("between turns, waiting on threads it started shows the mascot and that line in the chat, its header and the sidebar", async () => {
+  phone = true;
+  const Both = () => h("div", null, h(BotsSidebar), h(BotsView));
+  await show(Both);
+  const preview = () => document.querySelector(".bots-row-preview")!;
+  const stop = () => document.querySelector(".bots-stop");
+  expect(preview().textContent).toBe("You: check the build");
+  // Its turn is over, but a thread it started is still working.
+  await working("Waiting on Fix the login redirect loop", { threads: 1 });
+  expect(row()).toBe("Waiting on Fix the login redirect loop");
+  expect(head()).toBe("Waiting on Fix the login redirect loop");
+  expect(preview().textContent).toBe("Waiting on Fix the login redirect loop");
+  expect(preview().classList.contains("bots-row-waiting")).toBe(true);
+  // The mascot is awake and at work, not dozing, and never dots for it.
+  await frames(DOTS_SETTLE + 50);
+  expect(dotted()).toBe(false);
+  expect(document.querySelector(".bots-row .bot")!.hasAttribute("data-busy")).toBe(true);
+  // Nothing for the stop button to stop: that's the threads' own.
+  expect(stop()).toBeNull();
+  await working("Waiting on 3 threads", { threads: 3 });
+  expect(row()).toBe("Waiting on 3 threads");
+  expect(head()).toBe("Waiting on 3 threads");
+  expect(preview().textContent).toBe("Waiting on 3 threads");
+  // A turn starts: its own line takes over everywhere, and the sidebar goes back to the last message.
+  await working("Reading your message");
+  expect(row()).toBe("Reading your message");
+  expect(preview().textContent).toBe("You: check the build");
+  expect(stop()).not.toBeNull();
+  // Plain words in that turn don't bring the wait back: it's no line of the turn's.
+  await working("Working on it");
+  expect(row()).toBe("Reading your message");
+  // The threads finish: idle, and nothing says it's waiting.
+  await working("Waiting on 3 threads", { threads: 3 });
+  await status({ state: "idle" });
+  expect(document.querySelector(".bm-working")).toBeNull();
+  expect(preview().textContent).toBe("You: check the build");
+  expect(document.body.textContent).not.toMatch(/waiting on/i);
+});

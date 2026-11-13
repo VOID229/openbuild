@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import { applyTodo, todoExpired, betweenTurns, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -260,12 +260,12 @@ export function botWorkStatus(requester: string) {
   return { bots: db.listBots().map((bot) => {
     const current = getStatus(bot.id);
     const times = activityTimes.get(bot.id);
-    // Between turns with tool calls still out (BotStatus.jobs), it's free: idle, and waiting on those.
-    const inTurn = current?.state === "working" && !current.jobs;
+    // Between turns with tool calls or threads still out (BotStatus.jobs, .threads), it's free: idle, and waiting on those.
+    const inTurn = current?.state === "working" && !betweenTurns(current);
     return {
       id: bot.id, name: bot.name,
       state: inTurn ? "working" : "idle",
-      runnerState: current?.jobs ? "waiting" : current?.state ?? "idle",
+      runnerState: betweenTurns(current) ? "waiting" : current?.state ?? "idle",
       turnStartedAt: inTurn ? times?.turnStartedAt ?? null : null,
       conversationId: inTurn ? current.conversationId ?? null : null,
       lastActivityAt: times?.lastActivityAt ?? null,
@@ -279,7 +279,7 @@ export function setStatus(botId: string, next: BotStatus) {
   const previous = getStatus(botId);
   const now = Date.now();
   activityTimes.set(botId, {
-    turnStartedAt: next.state === "working" && !next.jobs ? (previous?.state === "working" && !previous.jobs ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
+    turnStartedAt: next.state === "working" && !betweenTurns(next) ? (previous?.state === "working" && !betweenTurns(previous) ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
     lastActivityAt: now,
   });
   if (next.state === "idle") status.delete(botId);

@@ -6,7 +6,7 @@
 // Only this server's own threads, and not Durable ones: their turns are admitted differently.
 import { homedir } from "node:os";
 import { resolve, sep } from "node:path";
-import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
+import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, waitingOnThreads, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
 import { mergeReadiness } from "../../shared/pullReadiness";
 import { REMOTE_CONTROL, remoteControlPerThread } from "../../shared/remoteControl";
 import { readEvents } from "../../shared/replies";
@@ -326,6 +326,26 @@ const hot = globalThis as { openbotsFollowing?: Set<string> };
 const following = (hot.openbotsFollowing ??= new Set<string>());
 
 /**
+ * What a bot between turns is waiting on of OpenBuild, for its status: the threads it started or
+ * wrote to whose runs it's still following (they're working), newest last, each once. The status
+ * shows in the conversation it was in with the newest.
+ */
+export function threadWait(botId: string): { activity: string; conversationId?: string; threads: number } | undefined {
+  const mine = watches().filter((w) => w.botId === botId);
+  const threads = [...new Map(mine.map((w) => [w.threadId, w])).values()];
+  const titles = threads.map((w) => (storage.getChat(w.threadId) as Chat | undefined)?.title ?? "");
+  const activity = waitingOnThreads(titles);
+  return activity ? { activity, conversationId: mine.at(-1)?.conversationId, threads: threads.length } : undefined;
+}
+
+/** A bot's followed threads changed: its status between turns says so (runner.ts). */
+async function waitsChanged(botId: string) {
+  // Imported lazily: runner imports agent.ts, which imports this file.
+  const { threadsChanged } = await import("./runner");
+  threadsChanged(botId);
+}
+
+/**
  * Which bot answered a followed run's question with openbuild answer, so its follower can tell the
  * user's answers (and other bots') from the bot's own. Saved until the run is no longer followed, so
  * reading the run again after a restart still knows.
@@ -494,6 +514,7 @@ async function follow(watch: Watch) {
     batch.cancel();
     following.delete(watch.runId);
     dropWatch(watch.runId);
+    void waitsChanged(watch.botId).catch((err) => console.error("[bots] Updating a bot's status failed:", err));
     // The run is over, so none of its questions is waiting: cards can't be closed from it anymore.
     unlinkCards(watch.threadId, new Set(asks.keys()));
   }
@@ -519,6 +540,8 @@ function settle(watch: Watch, ask: Ask | undefined, answer: string | undefined, 
 /** Follow what was being followed before the server restarted. */
 export function resumeWatches() {
   for (const watch of watches()) void follow(watch).catch((err) => console.error("[bots] Following a thread failed:", err));
+  // Their bots are waiting on them again: their status says so from the start.
+  for (const botId of new Set(watches().map((w) => w.botId))) void waitsChanged(botId).catch((err) => console.error("[bots] Updating a bot's status failed:", err));
 }
 
 function startFollowing(botId: string, threadId: string, runId: string) {
@@ -526,6 +549,7 @@ function startFollowing(botId: string, threadId: string, runId: string) {
   const watch: Watch = { runId, threadId, botId, conversationId, told: [] };
   saveWatch(watch);
   void follow(watch).catch((err) => console.error("[bots] Following a thread failed:", err));
+  void waitsChanged(botId).catch((err) => console.error("[bots] Updating a bot's status failed:", err));
 }
 
 // ------------------------------------------------------------------ queued messages

@@ -6,7 +6,7 @@ import { untrustedData } from "./transcriptData";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, type BotMessage, type Question } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, betweenTurns, type BotMessage, type Question } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -17,7 +17,7 @@ import { botsDir } from "./db";
 import * as db from "./db";
 import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus, todoText } from "./agent";
 import * as svc from "./service";
-import { resumeWatches } from "./threads";
+import { resumeWatches, threadWait } from "./threads";
 import type { Wake } from "./service";
 import type { BotStatus, PiSetup } from "../../shared/bots";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
@@ -315,9 +315,14 @@ export function waitingIn(botId: string): string[] {
 }
 
 function setStatus(botId: string, next: BotStatus) {
-  // Between turns with jobs still running, its status says which: it's free, and this is what it's waiting on.
-  const on = next.state === "idle" ? waitingLine(botId) : undefined;
-  if (on) return svc.setStatus(botId, { state: "working", activity: on.activity, conversationId: on.conversationId, jobs: on.jobs, since: on.since });
+  // Between turns with jobs still running, or OpenBuild threads it started or wrote to still working, its
+  // status says which: it's free, and this is what it's waiting on. Its jobs first: they're its own.
+  if (next.state === "idle") {
+    const jobs = waitingLine(botId);
+    const threads = threadWait(botId);
+    const conversationId = jobs?.conversationId ?? threads?.conversationId ?? svc.directId(botId);
+    if (jobs || threads) return svc.setStatus(botId, { state: "working", activity: (jobs ?? threads)!.activity, conversationId, jobs: jobs?.jobs, threads: threads?.threads, since: jobs?.since ?? Date.now() });
+  }
   const waiting = next.state === "idle" ? [] : waitingIn(botId);
   const undecided = undecidedIn(waiting);
   // A message waiting in the chat it's working in isn't quiet work: the chat shows it busy until it gets there.
@@ -1534,11 +1539,13 @@ export function toolLabel(botId: string, tool: string): string | undefined {
 }
 
 /** A bot's job board changed. Between turns its status is the board's to say; a turn's, or an error, stays as it is. */
+/** Its background jobs or followed threads changed: between turns, its status says what it's waiting on now. In a turn, the turn's status stands. */
 export function jobsChanged(botId: string) {
   const now = svc.getStatus(botId);
-  if (pumping.has(botId) || (now && !now.jobs)) return;
+  if (pumping.has(botId) || (now && !betweenTurns(now))) return;
   setStatus(botId, { state: "idle" });
 }
+export const threadsChanged = jobsChanged;
 
 export { waitedOn };
 
