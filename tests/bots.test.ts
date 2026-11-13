@@ -231,7 +231,12 @@ test("computer tools never silently fall back to unrestricted host access", asyn
       const { sendMessage, setFocus } = await import('./server/bots/agent.ts');
       const { bot, conversationId } = svc.createBot({ name: 'Sandbox' });
       setFocus(bot.id, conversationId);
-      // This server's isolation is a container until the user chooses otherwise; with no engine, nothing runs.
+      // With nothing chosen, this server's bots run on its host, engine or not.
+      await sendMessage(bot.id, { text: 'Screenshot', attach_screenshot: true });
+      a.deepEqual([calls[0].device, calls[0].op, calls[0].body.kind], ['local', 'ensure', 'host']);
+      calls.length = 0;
+      // A container chosen for it stays a container: with no engine, nothing runs, and nothing falls back to the host.
+      svc.updateSettings({ isolation: { local: 'container' } });
       await a.rejects(sendMessage(bot.id, { text: 'Screenshot', attach_screenshot: true }), /no container engine .* choose Host for .* in Settings → Devices. Nothing ran/);
       a.equal(calls.length, 0);
       engines = ['podman'];

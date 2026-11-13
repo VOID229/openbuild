@@ -3,30 +3,44 @@
 // that machine or fails saying why: nothing falls back to another. Pairing alone allows nothing
 // there; the device's own grant (its Settings → Devices → Using this device) decides, and the device
 // checks it on every request (computers/api.ts). How bots are kept apart on each machine, a
-// container or the host, is this server's choice per machine (Settings → Devices), not per bot.
+// container or the host, is this server's choice per machine (Settings → Devices), not per bot: the
+// host unless the user chose a container there.
 import { type ComputerTarget, type Isolation } from "../../shared/bots";
+import type { BotToolGrants } from "../../shared/types";
 import { computerApi, computerTargets } from "../computers/api";
 import { engines } from "../computers/index";
 import * as devices from "../devices";
 import { BotsError, getSettings, updateSettings } from "./service";
 
-/** How bots' computers are kept apart on a machine. A container unless the user chose the host. */
-export const isolationOf = (device: string): Isolation => (getSettings().isolation?.[device] === "host" ? "host" : "container");
+/** The isolation the user chose for a machine in Settings → Devices, if they chose one. */
+export const chosenIsolation = (device: string): Isolation | undefined => {
+  const kind = getSettings().isolation?.[device];
+  return kind === "container" || kind === "host" ? kind : undefined;
+};
+
+/**
+ * How bots' computers are kept apart on a machine: what the user chose there, else the host. A
+ * paired device whose owner allows only a container (no Unisolated in `grants`, or none known) gets
+ * a container until the user chooses, since the host would only fail there.
+ *
+ * Before host was the default, only a choice of host was saved and a container was the absence of
+ * one, so a machine left as it was then has nothing saved and runs on the host now. A choice made
+ * here is saved either way, so it stays put if the default changes again.
+ */
+export const isolationOf = (device: string, grants?: Pick<BotToolGrants, "unisolated">): Isolation =>
+  chosenIsolation(device) ?? (device === "local" || grants?.unisolated ? "host" : "container");
 
 /** Settings → Devices: a container or the host for bots on this server ("local") or a paired device. */
 export function setIsolation(device: string, kind: unknown): Isolation {
   if (kind !== "container" && kind !== "host") throw new BotsError("Isolation is container or host.");
   if (device !== "local" && !devices.hasDevice(device)) throw new BotsError("That device isn't paired with this server.", 404);
-  const isolation = { ...getSettings().isolation };
-  if (kind === "container") delete isolation[device];
-  else isolation[device] = kind;
-  updateSettings({ isolation });
+  updateSettings({ isolation: { ...getSettings().isolation, [device]: kind } });
   return kind;
 }
 
 /** Every machine, what it allows this server's bots right now, and how they're kept apart there. */
 export async function machines(): Promise<ComputerTarget[]> {
-  return (await computerTargets()).map((t) => ({ ...t, isolation: isolationOf(t.device) }));
+  return (await computerTargets()).map((t) => ({ ...t, isolation: isolationOf(t.device, t.grants) }));
 }
 
 const LOCAL_NAMES = ["local", "this server", "here", "server"];
@@ -60,11 +74,12 @@ export function resolveMachine(value: unknown): { device: string; name: string }
 /** A bot's computer on the machine a call names, started if need be. A paired device's runs there or not at all. */
 export async function computerOn(botId: string, machine: unknown) {
   const { device, name } = resolveMachine(machine);
-  const kind = isolationOf(device);
+  const api = computerApi(device);
+  // Nothing chosen for a paired device: the host if its owner allows it, as Settings → Devices shows.
+  const kind = device === "local" || chosenIsolation(device) ? isolationOf(device) : isolationOf(device, await api.grants());
   if (device === "local" && kind === "container" && !(await engines()).length) {
     throw new BotsError(`${name} (this server) has no container engine (Podman or Docker), so bots' computers can't run in a container here. Install one, or have the user choose Host for ${name} in Settings → Devices. Nothing ran.`);
   }
-  const api = computerApi(device);
   await api.call(botId, "ensure", { kind });
   return { api, id: botId, device, on: device === "local" ? undefined : name };
 }

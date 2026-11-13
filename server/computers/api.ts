@@ -215,6 +215,7 @@ async function operate(req: Request, server: Bun.Server<unknown>, rawId: string,
     try {
       id = guestComputerId(who.id, id);
       // A new guest computer is a container unless it asks otherwise; an existing one keeps its kind.
+      // The asking server always says which on "ensure" (the host by default, where Unisolated is allowed).
       const asked = body.kind === "host" || body.kind === "container" ? body.kind : undefined;
       const c = computer(id, asked ?? "container");
       const why = refusal(who, op, op === "ensure" && asked ? asked : c.config.kind);
@@ -256,12 +257,19 @@ export interface ComputerApi {
   call<T = any>(id: string, op: string, body?: Body, signal?: AbortSignal): Promise<T>;
   exec(id: string, body: Body, onData: (chunk: Buffer) => void, signal?: AbortSignal): Promise<{ exitCode: number | null }>;
   capabilities(): Promise<ComputerCapabilities>;
+  /**
+   * What the machine allows this server's bots: everything here; on a paired device, what it said
+   * when last found answering as itself (at most VERIFIED_FOR ago, or as Settings last listed it).
+   * For choosing a default; the device checks its grants again itself on every request.
+   */
+  grants(): Promise<BotToolGrants | undefined>;
 }
 
 const local: ComputerApi = {
   call: (id, op, body = {}, signal) => dispatch(id, op, body, signal) as Promise<any>,
   exec: (id, body, onData, signal) => dispatch(id, "exec", body, signal, onData) as Promise<{ exitCode: number | null }>,
   capabilities: () => capabilities(),
+  grants: async () => ({ files: true, terminal: true, browser: true, unisolated: true }),
 };
 
 /** Why a paired device's computer can't be used right now. A bot sees `message`; the settings show `reason`. */
@@ -274,8 +282,8 @@ export class TargetError extends Error {
   }
 }
 
-/** Where each paired device was last found answering as itself, so a burst of tool calls checks once. */
-const verified = new Map<string, { base: string; at: number }>();
+/** Where each paired device was last found answering as itself, and what it allowed then, so a burst of tool calls checks once. */
+const verified = new Map<string, { base: string; at: number; grants?: BotToolGrants }>();
 const VERIFIED_FOR = 15_000;
 
 /**
@@ -293,16 +301,18 @@ async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string
     const base = url.replace(/\/$/, "");
     try {
       const res = await fetch(`${base}/api/computers/identity`, { redirect: "error", headers: { authorization: `Bearer ${device.token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
-      void res.body?.cancel().catch(() => {});
+      const answered = res.headers.get(SERVER_HEADER);
+      let grants: BotToolGrants | undefined;
+      if (res.ok && answered === device.id) grants = ((await res.json().catch(() => ({}))) as { grants?: BotToolGrants }).grants;
+      else void res.body?.cancel().catch(() => {});
       if (res.status === 502 || res.status === 503 || res.status === 504) {
         last = `it answered HTTP ${res.status}`;
         continue;
       }
       if (res.status === 401) throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Nothing ran. Pair it again in Settings → Devices, or use another machine.`);
-      const answered = res.headers.get(SERVER_HEADER);
       if (answered === device.id) {
         devices.touchDevice(device.id, true);
-        verified.set(device.id, { base, at: Date.now() });
+        verified.set(device.id, { base, at: Date.now(), grants });
         return base;
       }
       // Another address may still be the right machine.
@@ -380,6 +390,12 @@ function remote(deviceId: string): ComputerApi {
       if (!res.ok) throw new Error(`The device answered HTTP ${res.status}. It may need a newer OpenBuild.`);
       return { ...((await res.json()) as ComputerCapabilities), device: deviceId };
     },
+    async grants() {
+      const device = devices.deviceCredentials(deviceId);
+      if (!device) throw new TargetError("unpaired", "That machine isn't paired with this server anymore. Nothing ran; use another machine.");
+      await reach(device);
+      return verified.get(deviceId)?.grants;
+    },
   };
 }
 
@@ -394,6 +410,9 @@ export async function computerTargets(): Promise<ComputerTarget[]> {
       try {
         const res = await deviceFetch(d.id, "/api/computers/identity");
         const g = ((await res.json().catch(() => ({}))) as { grants?: BotToolGrants }).grants;
+        // What Settings shows is what the next tool call goes by (deviceGrants).
+        const known = verified.get(d.id);
+        if (known) known.grants = g;
         return { device: d.id, name: d.name, status: g && (g.files || g.terminal || g.browser) ? "ready" : "access", grants: g };
       } catch (err) {
         return { device: d.id, name: d.name, status: err instanceof TargetError ? (err.reason === "denied" ? "access" : err.reason) : "offline", message: (err as Error).message };

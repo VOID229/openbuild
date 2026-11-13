@@ -16,7 +16,8 @@ const params = new URLSearchParams(location.search);
 const all = { files: true, terminal: true, browser: true, unisolated: true };
 const none = { files: false, terminal: false, browser: false, unisolated: false };
 const targets: ComputerTarget[] = [
-  { device: "local", name: "Studio iMac", status: "ready", grants: all, engines: ["podman"], isolation: "container" },
+  // What the server reports with nothing chosen: the host where it's allowed, a container where it isn't.
+  { device: "local", name: "Studio iMac", status: "ready", grants: all, engines: ["podman"], isolation: "host" },
   { device: "mbp", name: "MacBook Pro of someone with a long machine name", status: "access", grants: none, isolation: "container" },
   { device: "vm", name: "Cloud VM", status: "ready", grants: { files: true, terminal: true, browser: false, unisolated: false }, isolation: "container" },
   { device: "old", name: "Old Mini", status: "offline", message: "Old Mini is unreachable", isolation: "container" },

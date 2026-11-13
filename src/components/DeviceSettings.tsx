@@ -32,20 +32,21 @@ const ISOLATION: Record<Isolation, string> = { container: "Container", host: "Ho
 /**
  * What this server's bots may do on one machine, and how they're kept apart there. Whether a paired
  * device allows them is up to that device (it's checked there on every request), so here it's only
- * shown, with where to change it. The isolation is this server's choice; host on a paired device
- * also needs that device's Unisolated.
+ * shown, with where to change it. The isolation is this server's choice, the host unless the user
+ * picks a container; host on a paired device also needs that device's Unisolated, and one without it
+ * offers only a container.
  */
 function BotsOnDevice({ target, here, onChanged }: { target: ComputerTarget; here: string; onChanged: (isolation: Isolation) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const local = target.device === "local";
-  const kind = target.isolation ?? "container";
+  const hostAllowed = local || !!target.grants?.unisolated;
+  const kind = target.isolation ?? (hostAllowed ? "host" : "container");
   const note = targetNote(target, here);
   const noEngine = local && kind === "container" && target.engines?.length === 0;
-  const hostAllowed = local || !!target.grants?.unisolated;
   // Until a device answers and allows bots, its grants aren't known: there's nothing to choose yet, unless host is to be undone.
   const choosable = local || target.status === "ready" || kind === "host";
-  const options = (["container", "host"] as const).filter((k) => k === "container" || hostAllowed || kind === "host").map((k) => ({ value: k, label: ISOLATION[k] }));
+  const options = (["host", "container"] as const).filter((k) => k === "container" || hostAllowed || kind === "host").map((k) => ({ value: k, label: ISOLATION[k] }));
   const change = async (next: Isolation) => {
     if (next === kind) return;
     if (next === "host" && !confirm(`Run bots unisolated on ${target.name}? They could read and change anything ${local ? "the user running OpenBuild here" : `the user running OpenBuild on ${target.name}`} can.`)) return;
@@ -82,7 +83,7 @@ function BotsOnDevice({ target, here, onChanged }: { target: ComputerTarget; her
             <span className="pi-row-name">Isolation</span>
             <span className="pi-row-desc">
               {hostAllowed
-                ? "Containers are isolated. Host is unisolated: bots run as the user running OpenBuild."
+                ? "Host is the default: bots run as the user running OpenBuild. A container isolates them."
                 : `Container only: ${target.name} hasn't allowed Unisolated for this server's bots.`}
             </span>
           </div>

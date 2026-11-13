@@ -127,14 +127,18 @@ for (const [device, width, height] of sizes) {
       await page.settle();
       expect(await page.eval<string>("document.querySelector('#device-local').textContent")).toContain("This server's bots · always allowed");
 
-      // This server takes Host, saved for this server alone.
+      // This server is on the host, the default, until a container is chosen, saved for this server alone.
+      expect(await page.eval<string>(`document.querySelector('[aria-label="Isolation on Studio iMac"]').textContent`)).toBe("Host (unisolated)");
+      expect(await page.eval<string>(`document.querySelector('#device-local .bot-access-title').textContent`)).toContain("Files, terminal and browser · Host (unisolated)");
+      expect(await page.eval<string>(`document.querySelector('#device-local .bot-access-row .pi-row-desc').textContent`)).toBe("Host is the default: bots run as the user running OpenBuild. A container isolates them.");
+      await shoot(page, `${device}-${theme}-this-server`);
       await page.click('[aria-label="Isolation on Studio iMac"]');
       await page.until(`!!document.querySelector('[role="listbox"][aria-label="Isolation on Studio iMac"]')`);
-      expect(await page.eval<string[]>(`[...document.querySelectorAll('[role="listbox"][aria-label="Isolation on Studio iMac"] [role="option"]')].map((o) => o.textContent)`)).toEqual(["Container", "Host (unisolated)"]);
+      expect(await page.eval<string[]>(`[...document.querySelectorAll('[role="listbox"][aria-label="Isolation on Studio iMac"] [role="option"]')].map((o) => o.textContent)`)).toEqual(["Host (unisolated)", "Container"]);
       await page.click('[role="listbox"][aria-label="Isolation on Studio iMac"] [role="option"]:nth-child(2)');
-      await page.until(`document.querySelector('[aria-label="Isolation on Studio iMac"]').textContent === "Host (unisolated)"`);
-      expect(await page.eval<unknown>("window.saved")).toEqual([{ device: "local", isolation: "host" }]);
-      expect(await page.eval<string>(`document.querySelector('#device-local .bot-access-title').textContent`)).toContain("Host (unisolated)");
+      await page.until(`document.querySelector('[aria-label="Isolation on Studio iMac"]').textContent === "Container"`);
+      expect(await page.eval<unknown>("window.saved")).toEqual([{ device: "local", isolation: "container" }]);
+      expect(await page.eval<string>(`document.querySelector('#device-local .bot-access-title').textContent`)).toContain("Files, terminal and browser · Container");
     });
   }
 }

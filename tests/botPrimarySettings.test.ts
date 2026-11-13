@@ -46,7 +46,7 @@ test("manage_bot computers lists every machine for any bot, and runs_on or isola
     for (const who of [primary.id, helper.id]) {
       const listed = await manage(who, { action: 'computers' });
       a.deepEqual(listed.computers.map((c) => [c.id, c.name, c.status, c.tools, c.isolation]), [
-        ['local', 'Studio (this server)', 'ready', ['files', 'terminal', 'browser'], 'container'],
+        ['local', 'Studio (this server)', 'ready', ['files', 'terminal', 'browser'], 'host'],
         ['dev1', 'Laptop', 'ready', ['files', 'terminal'], 'host'],
         ['dev2', 'Tower', 'offline', [], 'container'],
         ['dev3', 'MacBook', 'access', [], 'container'],
@@ -59,7 +59,7 @@ test("manage_bot computers lists every machine for any bot, and runs_on or isola
     // Each bot's context lists them, with what's wrong where and how the owner allows it.
     const note = await machinesNote();
     a.match(note, /run on this server unless you pass machine/);
-    a.match(note, /- Studio \\(this server, used when you don't name one\\): files, terminal, browser; container\\./);
+    a.match(note, /- Studio \\(this server, used when you don't name one\\): files, terminal, browser; host \\(unisolated\\)\\./);
     a.match(note, /- Laptop \\(machine id dev1\\): files, terminal \\(not browser\\); host chosen, but it only allows a container, so its tools fail\\./);
     a.match(note, /- Tower \\(machine id dev2\\): unreachable right now/);
     a.match(note, /- MacBook \\(machine id dev3\\): hasn't allowed this server's bots anything. Its owner allows them on MacBook, in Settings → Devices → Using this device → /);
@@ -94,9 +94,9 @@ test("a computer saved by an earlier build stays as it was and doesn't steer any
     svc.setHooks({ wake() {}, stop() {} });
     const primary = svc.createBot({ name: 'Boss' }).bot;
     db.putBot({ ...db.getBot(primary.id), computer: { device: 'dev1', kind: 'host' } });
-    // The default is this server, in its container, not the saved device or kind.
+    // The default is this server, on its host, not the saved device or kind.
     await computerOn(primary.id, undefined);
-    a.deepEqual(calls.at(-1), ['local', 'ensure', 'container']);
+    a.deepEqual(calls.at(-1), ['local', 'ensure', 'host']);
     // The app can't change it either: a computer in a patch is ignored.
     svc.updateBot(primary.id, { computer: { device: 'local', kind: 'container' }, name: 'Boss' }, { by: 'me' });
     a.deepEqual(db.getBot(primary.id).computer, { device: 'dev1', kind: 'host' });
