@@ -221,6 +221,9 @@ test("done items don't pile up: a list still going drops the ones finished a whi
     a.deepEqual(todoTidy(going, now, now).map((t) => t.id), ['d3', 'd4', 'd5', 'o', 't'].slice(3 - TODO_DONE_RECENT));
     // Not yet: the same list back, unchanged.
     a.equal(todoTidy(going, now, old + 1), going);
+    // Finished in the same moment, the ones further down stay.
+    const tied = [...['a', 'b', 'c', 'd', 'e'].map((id) => item(id, 'done', 0)), item('o', 'todo')];
+    a.deepEqual(todoTidy(tied, now, now).map((t) => t.id), ['a', 'b', 'c', 'd', 'e', 'o'].slice(5 - TODO_DONE_RECENT));
     // A few done items are no pile: they stay however old.
     const few = [item('d1', 'done', 0), item('o', 'todo')];
     a.equal(todoTidy(few, now, now), few);

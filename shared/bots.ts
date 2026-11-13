@@ -441,7 +441,8 @@ export function todoTidy(list: TodoItem[], updatedAt: number, now = Date.now()):
   const done = list.filter((t) => t.status === "done");
   // A finished list stays whole until it goes, so it shows the work done.
   if (done.length <= TODO_DONE_RECENT || done.length === list.length) return list;
-  const recent = new Set(done.sort((a, b) => doneAt(b) - doneAt(a)).slice(0, TODO_DONE_RECENT));
+  // Finished in the same moment, the one further down counts as later.
+  const recent = new Set(done.reverse().sort((a, b) => doneAt(b) - doneAt(a)).slice(0, TODO_DONE_RECENT));
   const next = list.filter((t) => t.status !== "done" || recent.has(t) || now - doneAt(t) < TODO_DONE_ITEM_MS);
   return next.length === list.length ? list : next;
 }
