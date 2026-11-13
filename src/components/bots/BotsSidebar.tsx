@@ -95,7 +95,6 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const conversation = useBots((s) => s.conversations.find((c) => c.id === peek?.id));
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => (peek ? (s.typing[peek.id]?.length ?? 0) : 0)) > 0;
-  const working = useBusyBots(conversation);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
   useLayoutEffect(() => {
@@ -107,7 +106,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   return createPortal(
     <div ref={ref} role="tooltip" className="bots-peek" data-side={pos?.side ?? peek.side} data-state={pos ? "open" : "measuring"} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0 }}>
       <span className="bots-peek-head">
-        <ConversationAvatar conversation={conversation} size={18} alive={false} working={working} badge={false} lineup />
+        <ConversationAvatar conversation={conversation} size={18} still badge={false} lineup />
         <span className="bots-peek-name">
           {title}
           {tag && <span className="bots-peek-tag"> · {tag}</span>}

@@ -221,7 +221,8 @@ function ProfileCard({ id, bot, anchor, card, onPlaced, onDone, ...handlers }: {
       {...handlers}
     >
       <div className="bm-profile-head">
-        <BotAvatar look={bot.look} size={44} />
+        {/* A picture of the bot, held still: no life of its own, and no following the pointer. */}
+        <BotAvatar look={bot.look} size={44} alive={false} />
         <span className="bm-profile-name">{bot.name}</span>
       </div>
       <div className="bm-profile-actions">

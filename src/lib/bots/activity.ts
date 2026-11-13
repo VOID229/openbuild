@@ -154,19 +154,6 @@ export function threadOpensIn(conversation: Pick<Conversation, "id" | "kind" | "
   return threadStarter(conversation, chat) && threadActivity(chat) !== "idle" ? "details" : "over";
 }
 
-/** Whether the bot is acting on this thread right now: in an openbuild call that names it (see BotStatus.thread). */
-export function actingOn(st: BotStatus | undefined, threadId: string): boolean {
-  return st?.state === "working" && !!st.thread && threadId.startsWith(st.thread);
-}
-
-/**
- * How the mascot beside a thread shows it: awake and fidgeting while its bot is acting on the thread
- * (reading it, messaging it, stopping or closing it), and dozing otherwise, however busy the thread is.
- */
-export function threadMascot(acting: boolean): { busy: boolean; asleep: boolean } {
-  return acting ? { busy: true, asleep: false } : { busy: false, asleep: true };
-}
-
 /** Who serves a native harness's models when its thread doesn't say otherwise. */
 const SERVED_BY: Partial<Record<ThreadRuntime, string>> = { codex: "openai", claude: "anthropic", cursor: "cursor", grok: "xai", fx: "vercel", opencode: "opencode", hermes: "hermes" };
 /** Opencode's own plans, which Pi threads can run on too. */

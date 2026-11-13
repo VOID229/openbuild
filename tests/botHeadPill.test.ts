@@ -4,6 +4,7 @@
 // toggles the details.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
+import { still, stillness, watchMascots } from "./stillMascots";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
 let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
@@ -219,6 +220,28 @@ describe.skipIf(!browser)("the sidebar's hover card", () => {
       }
     }, 30_000);
   }
+
+  test("holds its mascots still, whatever their bots are doing: no work, reactions or dots", async () => {
+    const page = await open("dark");
+    await page.eval("store.setState({ botsSidebarOpen: false })");
+    await page.until(`!!document.querySelector('.bots-rail-item[aria-label="OpenBuild Dev"] .bot')`);
+    await page.settle();
+    await page.eval(`Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {}))).then(() => true)`);
+    // Moss is at work in OpenBuild Dev (the fixture): in the rail it fidgets, in the card it doesn't.
+    await peek(page, "OpenBuild Dev");
+    await page.finished(".bots-peek");
+    await watchMascots(page, "document.querySelector('.bots-peek')");
+    await Bun.sleep(2500);
+    expect(await stillness(page)).toEqual(still(4));
+    // Dr Eggbot's own card, while the bot starts on something (three dots) and reacts to a message.
+    await peek(page, "Dr Eggbot");
+    await page.finished(".bots-peek");
+    await watchMascots(page, "document.querySelector('.bots-peek')");
+    await page.eval(`bots.setState((s) => ({ status: { ...s.status, egg: { state: "working", conversationId: "dm", since: Date.now() } } }))`);
+    await page.eval(`bots.getState().pulse("egg")`);
+    await Bun.sleep(2500);
+    expect(await stillness(page)).toEqual(still(1));
+  }, 30_000);
 
   test("hovered, the name opens out whole, never squeezed; moving away folds it, even after a click opened the details", async () => {
     const page = await open("dark");

@@ -127,6 +127,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   badge = true,
   zzz = false,
   lineup,
+  still = false,
 }: {
   conversation: Conversation;
   size: number;
@@ -142,17 +143,24 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   zzz?: boolean;
   /** A group's members in a row, each its own mascot, rather than huddled together. */
   lineup?: boolean;
+  /**
+   * A picture of it, as in a hover card: held still, whatever its bots are doing. No life of its own,
+   * no work, reactions or dots, and no following the pointer; it overrides the rest.
+   */
+  still?: boolean;
 }) {
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
   // A bot's own mascot is three dots for the moment it has started and has no step to show yet.
-  const waiting = useStarting(conversation.kind === "direct" ? conversation.botIds[0] : undefined);
+  const starting = useStarting(conversation.kind === "direct" ? conversation.botIds[0] : undefined);
+  const waiting = starting && !still;
+  if (still) [alive, busy, track, working] = [false, false, false, undefined];
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id));
   if (conversation.kind === "direct") {
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} waiting={waiting} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} waiting={waiting} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />
