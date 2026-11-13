@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, TYPING } from "../../../shared/bots";
+import { answerLabel, answersText, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, TYPING } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -479,7 +479,160 @@ function StashAction({ text, images }: { text: string; images: string[] }) {
   );
 }
 
+/** One question's choices as rows, with the picked one checked: a typed answer shows as a row of its own. */
+function QuestionOptions({ q, settled, onPick }: { q: QuestionStep; settled: boolean; onPick: (key: string, label: string) => void }) {
+  return (
+    <div className="bm-options">
+      {q.options.map((o) => (
+        <button key={o.key} type="button" className={cx("bm-option", q.answer === o.key && "bm-option-on", settled && q.answer !== o.key && "bm-option-off")} disabled={settled} aria-pressed={q.answer === o.key} onClick={() => onPick(o.key, o.label)}>
+          <span className="bm-option-key">{q.answer === o.key ? <Check size={13} strokeWidth={3} /> : o.key}</span>
+          <span className="bm-option-label">{o.label}</span>
+        </button>
+      ))}
+      {q.answer && !q.options.some((o) => o.key === q.answer) && (
+        <div className="bm-option bm-option-on">
+          <span className="bm-option-key">
+            <Check size={13} strokeWidth={3} />
+          </span>
+          <span className="bm-option-label">{q.answer}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A card of several questions, one at a time: picking an answer moves on, the arrows (and the arrow
+ * keys) move without answering, and the last one has Submit. Answers are kept as they're picked, so
+ * a reload keeps them, but the bot hears nothing until Submit sends them all in one message.
+ */
+function QuestionSteps({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
+  const q = message.question!;
+  // Picked here, ahead of the workspace's copy: an echo of an earlier pick can't take a later one back.
+  const [picked, setPicked] = useState<Record<number, string>>({});
+  const steps = q.steps!.map((s, i) => (picked[i] === undefined ? s : { ...s, answer: picked[i] }));
+  const first = steps.findIndex((s) => s.answer === undefined);
+  const [at, setAt] = useState(first < 0 ? steps.length - 1 : first);
+  const [own, setOwn] = useState<Record<number, string>>({});
+  const card = useRef<HTMLDivElement>(null);
+  if (q.submitted) {
+    return (
+      <ol className="bm-question bm-answered" aria-label="Your answers">
+        {steps.map((s, i) => (
+          <li key={i} className="bm-answered-row">
+            <span className="bm-answered-title">{s.title}</span>
+            <span className="bm-answered-answer">
+              <Check size={13} strokeWidth={3} aria-hidden />
+              {answerLabel(s)}
+            </span>
+          </li>
+        ))}
+      </ol>
+    );
+  }
+  const step = steps[at]!;
+  const last = at === steps.length - 1;
+  const left = steps.flatMap((s, i) => (s.answer === undefined ? [i] : []));
+  // Earlier ones passed over with the arrows: Submit waits for them, and says which.
+  const skipped = left.filter((i) => i !== at);
+  const go = (to: number) => {
+    if (to < 0 || to >= steps.length) return;
+    setAt(to);
+    // The button just used goes with its step: focus stays in the card, so the arrow keys keep working.
+    card.current?.focus({ preventScroll: true });
+  };
+  const answer = (key: string) => {
+    const next = { ...picked, [at]: key };
+    setPicked(next);
+    useBots.getState().answerSteps(conversation.id, message.id, steps.map((s, i) => next[i] ?? s.answer ?? null), false);
+    go(last ? at : at + 1);
+  };
+  const submit = () => {
+    if (left.length) return;
+    const st = useBots.getState();
+    st.answerSteps(conversation.id, message.id, steps.map((s) => s.answer ?? null), true);
+    st.post(conversation.id, { author: "me", text: answersText(steps), replyTo: message.id });
+    noticeAnswer(conversation.id, message.author, "");
+  };
+  return (
+    <div
+      ref={card}
+      className="bm-question bm-steps"
+      tabIndex={-1}
+      onKeyDown={(e) => {
+        if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+        if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+        // In the answer being typed, the arrows move the caret.
+        if (e.target instanceof HTMLInputElement && e.target.value) return;
+        e.preventDefault();
+        go(at + (e.key === "ArrowLeft" ? -1 : 1));
+      }}
+    >
+      <div className="bm-steps-head">
+        <span className="bm-steps-count" aria-live="polite">
+          {at + 1} of {steps.length}
+        </span>
+        <IconButton label="Previous question" tooltip={false} className="bm-steps-arrow" disabled={at === 0} onClick={() => go(at - 1)}>
+          <ChevronLeft size={16} />
+        </IconButton>
+        <IconButton label="Next question" tooltip={false} className="bm-steps-arrow" disabled={last} onClick={() => go(at + 1)}>
+          <ChevronRight size={16} />
+        </IconButton>
+      </div>
+      <div className="bm-question-title">{step.title}</div>
+      {step.hint && <div className="bm-question-hint">{step.hint}</div>}
+      <QuestionOptions key={at} q={step} settled={false} onPick={answer} />
+      <form
+        className="bm-own"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const text = (own[at] ?? "").trim();
+          if (!text) return;
+          setOwn({ ...own, [at]: "" });
+          answer(text);
+        }}
+      >
+        <input className="input input-sm" value={own[at] ?? ""} maxLength={2000} placeholder="Type your own answer…" aria-label="Your own answer" onChange={(e) => setOwn({ ...own, [at]: e.target.value })} />
+        <IconButton label={last ? "Use answer" : "Next with this answer"} tooltip={false} type="submit" disabled={!(own[at] ?? "").trim()}>
+          <ArrowUp size={16} />
+        </IconButton>
+      </form>
+      {last && (
+        <div className="bm-steps-foot">
+          {skipped.length > 0 && (
+            <button type="button" className="bm-steps-left" onClick={() => go(skipped[0]!)}>
+              {skipped.length === 1 ? `Question ${skipped[0]! + 1} needs an answer` : `${skipped.length} questions need an answer`}
+            </button>
+          )}
+          <button type="button" className="btn btn-sm btn-primary bm-steps-submit" disabled={left.length > 0} onClick={submit}>
+            Submit
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** My answers to a card of several questions, as the message that sent them shows: numbered, one a line. */
+function AnswersEcho({ steps }: { steps: QuestionStep[] }) {
+  return (
+    <ol className="bm-echo">
+      {steps.map((s, i) => (
+        <li key={i} className="bm-echo-row" title={s.title}>
+          <span className="bm-echo-n">{i + 1}</span>
+          <span className="bm-echo-answer">{answerLabel(s)}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function QuestionCard({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
+  if (message.question!.steps) return <QuestionSteps conversation={conversation} message={message} />;
+  return <SingleQuestion conversation={conversation} message={message} />;
+}
+
+function SingleQuestion({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
   const q = message.question!;
   const [own, setOwn] = useState("");
   // Answered here, or closed from the coding thread whose question it passed on.
@@ -802,6 +955,9 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
   const filesAt = useBots((s) => s.workspace);
+  // The message that submitted a card of several questions shows its answers as a short list.
+  const asked = mine && quoted?.question?.submitted ? quoted.question.steps : undefined;
+  const echoed = asked && m.text === answersText(asked) ? asked : undefined;
   const emojiOnly = !m.images?.length && !m.files?.length && !m.question && !m.plan && !m.poll && !m.connect && !m.html && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
   const card = !!(m.question || m.plan || m.poll || m.connect || m.html);
   const everyone = useMemo(() => everyoneIn(conversation, bots), [conversation.kind, conversation.botIds, bots]);
@@ -865,7 +1021,8 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
                 ))}
               </div>
             )}
-            {m.text && !m.question && !m.poll && !m.connect && (
+            {echoed && <AnswersEcho steps={echoed} />}
+            {m.text && !echoed && !m.question && !m.poll && !m.connect && (
               <div className="bm-text">
                 <RichText text={m.text} bots={bots} everyone={everyone} botId={m.author === "me" ? undefined : m.author} />
               </div>

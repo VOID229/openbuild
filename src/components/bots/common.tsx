@@ -54,9 +54,12 @@ export function dividerTime(t: number) {
 }
 
 
+/** What follows the first question of a card that asks several. */
+const more = (q: { steps?: unknown[] }) => (q.steps && q.steps.length > 1 ? ` (+${q.steps.length - 1} more)` : "");
+
 /** A message as one line of text: for previews, reply quotes and copying. */
 export function messageText(m: BotMessage): string {
-  if (m.question) return `? ${m.question.title}`;
+  if (m.question) return `? ${m.question.title}${more(m.question)}`;
   if (m.poll) return `📊 ${m.poll.question}`;
   if (m.plan) return `📋 Plan: ${m.plan.title}`;
   if (m.html) return `📄 ${m.html.title}`;
@@ -75,7 +78,7 @@ export function messageLine(m: BotMessage): ReactNode {
   if (!m.question) return messageText(m);
   return (
     <>
-      <span className="bots-question-mark" aria-hidden>?</span> {m.question.title}
+      <span className="bots-question-mark" aria-hidden>?</span> {m.question.title}{more(m.question)}
     </>
   );
 }

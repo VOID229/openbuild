@@ -72,6 +72,14 @@ test("the sidebar previews a question with the same muted ?", async () => {
   expect(preview.querySelector(".bots-question-mark")).not.toBeNull();
 });
 
+test("a card of several questions previews its first one and says how many more there are", async () => {
+  const steps = [{ title: "Which branch?", options: [] }, { title: "Squash?", options: [] }, { title: "Delete it after?", options: [] }];
+  const many = { id: "q2", author: "scout", at: 1, text: "", question: { ...steps[0], steps } };
+  expect(messageText(many as any)).toBe("? Which branch? (+2 more)");
+  await show([many], BotsSidebar);
+  expect(document.querySelector(".bots-row-preview")!.textContent).toBe("? Which branch? (+2 more)");
+});
+
 test("copied text keeps a plain ? and other previews keep their icons", () => {
   expect(messageText(question as any)).toBe("? Which branch?");
   expect(messageText({ id: "p", author: "scout", at: 1, text: "", plan: { title: "Ship it", steps: [] } } as any)).toBe("📋 Plan: Ship it");

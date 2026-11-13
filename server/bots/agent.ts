@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type Question, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -259,7 +259,7 @@ export const RESPONSIVE =
 
 /** Questions the user has to answer are cards, not messages: a tap answers one, and it stays visible as unanswered. */
 export const ASKING =
-  "When you need the user to decide or tell you something before you can go on, ask with question, never in a message: one call per question, its choices as options (a suggested answer counts; they can always type their own). Several questions are several calls in one turn. Then stop until they're answered. A passing question, or one for another bot, stays a message.";
+  "When you need the user to decide or tell you something before you can go on, ask with question, never in a message: its choices as options (a suggested answer counts; they can always type their own). Related questions go in one call as questions, up to 5: one card, answered together. Then stop until they're answered. A passing question, or one for another bot, stays a message.";
 
 /**
  * A bot's context as named system prompt sections, steadiest first. Pi re-sends a whole section
@@ -433,7 +433,7 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
 }
 
 /** What send_message answers to a message that lists questions for the user. */
-export const ASK_INSTEAD = "Not sent: this lists questions or choices for the user. Ask with question instead: one call per question, its choices (or your suggested answer) as options, and say anything else in a short message first. If it isn't for the user to answer, send it again as it is.";
+export const ASK_INSTEAD = "Not sent: this lists questions or choices for the user. Ask with question instead: each one's choices (or your suggested answer) as options, related ones together in one call as questions, and say anything else in a short message first. If it isn't for the user to answer, send it again as it is.";
 
 const asked = new Map<string, string>();
 
@@ -503,35 +503,52 @@ function react(botId: string, p: Record<string, unknown>) {
   return { ok: true };
 }
 
-export function askUser(botId: string, p: Record<string, unknown>) {
-  const conversationId = conversationFor(botId, p.conversation);
+const lettered = (labels: string[]) => labels.map((label, i) => ({ key: String.fromCharCode(65 + i), label }));
+
+/** One question as the tool gives it: a title, an optional hint, and its choices. */
+function askedStep(raw: unknown): QuestionStep {
+  const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : { title: raw };
   const title = String(p.title ?? p.question ?? "").trim().slice(0, 300);
   if (!title) throw new svc.BotsError("Write the question.");
+  return { title, hint: typeof p.hint === "string" ? p.hint.slice(0, 200) : undefined, options: lettered(asStrings(p.options).slice(0, 8)) };
+}
+
+export function askUser(botId: string, p: Record<string, unknown>) {
+  const conversationId = conversationFor(botId, p.conversation);
+  const listed = Array.isArray(p.questions) ? p.questions : [];
+  if (listed.length > QUESTION_STEPS) throw new svc.BotsError(`A card takes up to ${QUESTION_STEPS} questions. Ask the ${QUESTION_STEPS} that matter most now, and the rest once they're answered.`);
+  // Several questions are one card the user steps through. One question in the list is the plain card.
+  if (listed.length > 1) {
+    if (p.offer || p.thread || p.thread_question) throw new svc.BotsError("offer, thread and thread_question go with one question, not a list of them.");
+    return postQuestion(botId, conversationId, listed.map(askedStep));
+  }
+  const only = listed.length ? askedStep(listed[0]) : askedStep(p);
   // The first-run questions are the app's to act on, so they have fixed choices: taking the team, or saying they code, is A.
   const offer = (p.offer === "team" || p.offer === "developer") && requireBot(botId).primary && conversationId === svc.directId(botId) ? p.offer : undefined;
   if (offer === "team" && svc.developerAnswer()?.kind === "no") throw new svc.BotsError("The user said they don't write code, so the starter team isn't for them. Don't offer it.");
-  const options = offer === "team" ? ["Set up the team", "Not now"] : offer === "developer" ? ["Yes, I write code", "No, not really"] : asStrings(p.options).slice(0, 8);
+  const step = { ...only, options: offer === "team" ? lettered(["Set up the team", "Not now"]) : offer === "developer" ? lettered(["Yes, I write code", "No, not really"]) : only.options };
   // Passing on a coding thread's question: linked, so the card closes if it's answered in the thread first.
-  if (!offer && (p.thread || p.thread_question)) return threads.cardTarget(botId, p.thread, p.thread_question).then((thread) => postQuestion(botId, conversationId, title, p, options, undefined, thread));
-  return postQuestion(botId, conversationId, title, p, options, offer);
+  if (!offer && (p.thread || p.thread_question)) return threads.cardTarget(botId, p.thread, p.thread_question).then((thread) => postQuestion(botId, conversationId, [step], undefined, thread));
+  return postQuestion(botId, conversationId, [step], offer);
 }
 
-function postQuestion(botId: string, conversationId: string, title: string, p: Record<string, unknown>, options: string[], offer: Question["offer"], thread?: Question["thread"]) {
+function postQuestion(botId: string, conversationId: string, steps: QuestionStep[], offer?: Question["offer"], thread?: Question["thread"]) {
+  const first = steps[0]!;
   const message: BotMessage = {
     id: crypto.randomUUID(),
     author: botId,
     at: Date.now(),
-    text: title,
+    text: first.title,
     question: {
-      title,
-      hint: typeof p.hint === "string" ? p.hint.slice(0, 200) : undefined,
-      options: options.map((label, i) => ({ key: String.fromCharCode(65 + i), label })),
+      ...first,
       offer,
       ...(thread ? { thread } : {}),
+      ...(steps.length > 1 ? { steps } : {}),
     },
   };
   svc.postMessage(conversationId, message);
   if (thread) threads.linkCard({ threadId: thread.id, ask: thread.ask, conversationId, messageId: message.id });
+  if (steps.length > 1) return { id: message.id, note: `The user steps through the ${steps.length} questions in one card. Nothing reaches you until they submit it; then every answer comes together, each with its question. Don't invent their answers; stop here and wait.` };
   return { id: message.id, note: `The user answers in the chat.${thread ? " If they answer in the thread instead, the card closes and you'll be told." : ""} Don't invent their answer; stop here and wait.` };
 }
 

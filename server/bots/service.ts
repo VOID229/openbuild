@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, betweenTurns, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import { applyTodo, todoExpired, betweenTurns, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1411,12 +1411,33 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
   if (question.closed) throw new BotsError("That question was settled in its thread.", 409);
+  if (question.steps) throw new BotsError("That card asks several questions: answer them together.");
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
   // The first-run offers are the app's, not the bot's: taking the team makes it here, once, and whether they code is kept for the bot's context.
   const primary = !question.answer && !!db.getBot(row.message.author)?.primary;
   if (primary && question.offer === "team" && key === "A") createTeam(row.message.author);
   if (primary && question.offer === "developer") db.setValue(DEVELOPER, key === "A" ? { kind: "yes" } : key === "B" ? { kind: "no" } : { kind: "own", text: key.slice(0, 300) });
   return patched;
+}
+
+/**
+ * The user's answers so far to a card of several questions, one per question in order (null where
+ * there's none yet). They're kept so a reload shows them, and stay the user's alone: the card counts
+ * as answered only when it's submitted, which takes an answer to every question and is final.
+ */
+export function answerSteps(conversationId: string, messageId: string, answers: unknown[], submit: boolean) {
+  const row = db.getMessage(messageId);
+  const question = row?.conversationId === conversationId ? row.message.question : undefined;
+  if (!row || !question?.steps) throw new BotsError("That message isn't a card of several questions.", 404);
+  // Sent again after it landed (a retry): it stays as submitted.
+  if (question.submitted) return row.message;
+  const steps = question.steps.map(({ answer: _, ...step }, i): QuestionStep => {
+    const answer = typeof answers[i] === "string" ? (answers[i] as string).trim().slice(0, 2000) : "";
+    return answer ? { ...step, answer } : step;
+  });
+  const left = steps.flatMap((s, i) => (s.answer === undefined ? [i + 1] : []));
+  if (submit && left.length) throw new BotsError(`Question ${left.join(", ")} still needs an answer.`);
+  return patchMessage(conversationId, messageId, { question: { ...question, steps, ...(submit ? { submitted: true } : {}) } });
 }
 
 /** A changed answer on a closed poll has to stay this long before the poll's author hears of it, so a slip stays quiet. */
