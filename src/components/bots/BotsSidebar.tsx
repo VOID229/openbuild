@@ -1,12 +1,13 @@
 // OpenBots' sidebar: pinned bots and groups as big tiles, then every other conversation as a row
 // with its latest message, filed under the user's own sections. Closed on a desktop, it narrows to
-// a rail of avatars instead of going away.
+// a rail of avatars instead of going away; the chats between bots sit at its end, as in the list,
+// each marked as a DM between them.
 import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
-import type { Conversation } from "../../lib/bots/types";
+import type { Bot, Conversation } from "../../lib/bots/types";
 import { TYPING } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
@@ -19,7 +20,7 @@ import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
-import { ConversationAvatar, previewOf, shortTime, useBusyBots } from "./common";
+import { betweenNames, ConversationAvatar, DmMark, previewOf, shortTime, useBusyBots } from "./common";
 
 type Dialog =
   | { kind: "bot" }
@@ -53,7 +54,7 @@ type Peek = (id: string, side: Side) => {
 
 const PEEK_DELAY = 450;
 
-/** A hover card for rows and rail avatars, whose names and messages get cut short: the full name and the latest message. */
+/** A hover card for rows and rail avatars, whose names and messages get cut short: the full name, who a side chat is between, and the latest message. */
 function usePeek() {
   const [peek, setPeek] = useState<PeekState>();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -113,6 +114,12 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
         </span>
       </span>
+      {conversation.kind === "side" && (
+        <span className="bots-peek-between">
+          <DmMark size={14} />
+          Between {betweenNames(conversation, bots)}
+        </span>
+      )}
       <span className="bots-peek-preview">{typing ? TYPING : previewOf(conversation, bots)}</span>
     </div>,
     document.body,
@@ -450,7 +457,13 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   );
 }
 
-function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conversation[]; rest: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
+/** A rail item's name for a screen reader: a side chat's says who it's between, as its mark and hover card show. */
+const railLabel = (c: Conversation, bots: Bot[]) => {
+  const name = conversationName(c, bots);
+  return c.kind === "side" ? `${name}, between ${betweenNames(c, bots)}` : name;
+};
+
+function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned: Conversation[]; rest: Conversation[]; side: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
   const remote = !!useRemoteWorkspace();
   const avatar = useStore((s) => s.settings.profile.avatar);
@@ -474,13 +487,13 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
       el.removeEventListener("scroll", edges);
       resize.disconnect();
     };
-  }, [pinned.length, rest.length]);
+  }, [pinned.length, rest.length, side.length]);
   const item = (c: Conversation) => (
     <button
       key={c.id}
       type="button"
       className={cx("bots-rail-item", c.id === activeId && "bots-rail-item-active")}
-      aria-label={conversationName(c, bots)}
+      aria-label={railLabel(c, bots)}
       aria-current={c.id === activeId ? "page" : undefined}
       {...peek(c.id, "right")}
       onClick={() => {
@@ -507,6 +520,13 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
           {pinned.map(item)}
           {pinned.length > 0 && rest.length > 0 && <div className="bots-rail-sep" />}
           {rest.map(item)}
+          {/* As in the list, the chats between bots come last, apart from the user's own. */}
+          {side.length > 0 && pinned.length + rest.length > 0 && <div className="bots-rail-sep" />}
+          {side.length > 0 && (
+            <div role="group" aria-label="Between bots" className="bots-rail-group">
+              {side.map(item)}
+            </div>
+          )}
         </nav>
       </div>
       <div className="bots-rail-foot">
@@ -622,7 +642,7 @@ export function BotsSidebar() {
         {/* Closing, the rail is there from the start and the list fades away over it as the sidebar
             narrows: one sheet collapsing, not a list leaving and a rail arriving after. */}
         {(rail || closing) && (
-          <Rail pinned={pinned} rest={[...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
+          <Rail pinned={pinned} rest={[...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} side={side} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
         )}
         {!rail && (
           <div className="sidebar-inner bots-sidebar-inner">
