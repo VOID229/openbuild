@@ -380,9 +380,10 @@ export function allTodos(): { conversationId: string; list: TodoItem[]; updatedA
     .all()
     .map((r) => ({ conversationId: r.conversation_id, list: todos(r.conversation_id), updatedAt: r.updated_at }));
 }
-export function setTodos(conversationId: string, list: TodoItem[]) {
+/** Keep a conversation's to-do list, as changed at `updatedAt` (now). An empty list goes. */
+export function setTodos(conversationId: string, list: TodoItem[], updatedAt = Date.now()) {
   if (!list.length) return void db.query("DELETE FROM todos WHERE conversation_id = ?").run(conversationId);
-  db.query("INSERT INTO todos (conversation_id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET data = ?2, updated_at = ?3").run(conversationId, JSON.stringify(list), Date.now());
+  db.query("INSERT INTO todos (conversation_id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET data = ?2, updated_at = ?3").run(conversationId, JSON.stringify(list), updatedAt);
 }
 
 // ------------------------------------------------------------------ cursors

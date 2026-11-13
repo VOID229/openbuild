@@ -399,7 +399,7 @@ export interface PlanStep {
  * (the todo tool) and shown read-only in the chat's details, so its progress shows at a glance. Unlike a
  * plan message, which is a snapshot in the chat, the list belongs to the conversation and stays current.
  * It's temporary: it clears when bots clear it, when new work follows a finished list, and on its own
- * after a while (todoExpired).
+ * (todoTidy): a finished list soon after, and in a long one still going, the items done a while ago.
  */
 export interface TodoItem {
   id: string;
@@ -410,18 +410,41 @@ export interface TodoItem {
   /** Who added it. */
   by: Author;
   at: number;
+  /** When it was marked done; only while it is. */
+  doneAt?: number;
 }
 
 export const TODO_LIMIT = 50;
 export const TODO_TEXT_LIMIT = 200;
 /** A to-do list is temporary: once every item is done, it clears this long after its last change. */
-export const TODO_DONE_KEEP_MS = 30 * 60_000;
+export const TODO_DONE_KEEP_MS = 5 * 60_000;
+/** In a list still going, a done item drops this long after it was finished… */
+export const TODO_DONE_ITEM_MS = 10 * 60_000;
+/** …except the few finished last, which stay to show where the work has got to. */
+export const TODO_DONE_RECENT = 3;
 /** And a list nobody has touched for this long clears whatever state it's in. */
 export const TODO_STALE_MS = 12 * 60 * 60_000;
+
+const doneAt = (t: TodoItem) => t.doneAt ?? t.at;
 
 /** Whether a list last changed at `updatedAt` has had its time, by `now`. */
 export const todoExpired = (list: readonly TodoItem[], updatedAt: number, now = Date.now()) =>
   list.length > 0 && (now - updatedAt >= TODO_STALE_MS || (list.every((t) => t.status === "done") && now - updatedAt >= TODO_DONE_KEEP_MS));
+
+/**
+ * The list once done items have had their time, by `now`: empty when the whole list has
+ * (todoExpired); otherwise without the done items finished over TODO_DONE_ITEM_MS ago, bar the
+ * TODO_DONE_RECENT finished last. The same list back when nothing goes.
+ */
+export function todoTidy(list: TodoItem[], updatedAt: number, now = Date.now()): TodoItem[] {
+  if (todoExpired(list, updatedAt, now)) return [];
+  const done = list.filter((t) => t.status === "done");
+  // A finished list stays whole until it goes, so it shows the work done.
+  if (done.length <= TODO_DONE_RECENT || done.length === list.length) return list;
+  const recent = new Set(done.sort((a, b) => doneAt(b) - doneAt(a)).slice(0, TODO_DONE_RECENT));
+  const next = list.filter((t) => t.status !== "done" || recent.has(t) || now - doneAt(t) < TODO_DONE_ITEM_MS);
+  return next.length === list.length ? list : next;
+}
 
 /** A change to a to-do list, from a bot's todo tool or the user's details panel. */
 export type TodoChange =
@@ -447,7 +470,13 @@ export function applyTodo(list: TodoItem[], change: TodoChange, by: Author, now 
       if (!texts.length) throw new Error("Write the item.");
       // New steps after a finished list start a new one: the old work is over.
       if (list.length && list.every((t) => t.status === "done")) list = [];
-      if (list.length + texts.length > TODO_LIMIT) throw new Error(`A to-do list holds up to ${TODO_LIMIT} items. Clear the done ones first.`);
+      // A full list makes room by dropping the items finished first.
+      const over = list.length + texts.length - TODO_LIMIT;
+      if (over > 0) {
+        const old = new Set(list.filter((t) => t.status === "done").sort((a, b) => doneAt(a) - doneAt(b)).slice(0, over));
+        list = list.filter((t) => !old.has(t));
+      }
+      if (list.length + texts.length > TODO_LIMIT) throw new Error(`A to-do list holds up to ${TODO_LIMIT} items.`);
       const ids = Array.isArray(change.ids) ? change.ids : [];
       const taken = new Set(list.map((t) => t.id));
       const added = texts.map((text, i): TodoItem => {
@@ -466,8 +495,9 @@ export function applyTodo(list: TodoItem[], change: TodoChange, by: Author, now 
       const status = change.status ?? item.status;
       // Whoever starts it is on it; back to to-do, nobody is.
       const bot = status === "todo" ? undefined : status !== item.status && by !== "me" ? by : item.bot;
-      const next: TodoItem = { ...item, text, status, bot };
+      const next: TodoItem = { ...item, text, status, bot, doneAt: status !== "done" ? undefined : item.status === "done" ? item.doneAt : now };
       if (!next.bot) delete next.bot;
+      if (next.doneAt === undefined) delete next.doneAt;
       return list.map((t) => (t.id === item.id ? next : t));
     }
     case "remove":
