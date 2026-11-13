@@ -355,3 +355,36 @@ export function liveActivity(live: Live, opts: { writing?: boolean; counts?: (st
   }
   return workingPhrase(live.phrase);
 }
+
+// Which of a bot's tool calls are it reading something: a file, a page, its messages or memory,
+// search results, a thread's output. While one runs its status says so (BotStatus.reading), and its
+// mascot reads, eyes down, along one line after another. Apart from the status line's words above,
+// which can change without changing this.
+/** Tools that only ever read. */
+const READERS = new Set(["read", "search", "bot_web_search"]);
+
+/** The actions of other tools that read: a page's text, a thread, a program's output, a job's result, an app's skill. */
+const READING_ACTIONS: Record<string, readonly string[]> = {
+  browser: ["snapshot"],
+  openbuild: ["read", "list"],
+  process: ["read"],
+  jobs: ["result"],
+  apps: ["skill"],
+};
+
+/** A command that only reads: looking at a file or a log, searching through them. */
+const READING_COMMAND = /^\s*(?:cd\s+\S+\s*(?:&&|;)\s*)?(?:cat|head|tail|less|more|bat|nl|grep|egrep|rg|ag|jq|sed\s+-n|git\s+(?:log|show|diff|blame))\b/;
+
+/** An app's or extension's tool named for reading: get_file, search_pages, list_issues, fetch… */
+const READING_NAME = /(?:^|[_\-.:/])(?:read|get|fetch|search|list|find|query|view|lookup|browse)(?:[_\-.:/]|s?$)/i;
+
+/** Whether a tool call, as the model wrote it, is the bot reading. */
+export function reads(tool: string, args: unknown): boolean {
+  const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  if (READERS.has(tool)) return true;
+  if (tool in READING_ACTIONS) return READING_ACTIONS[tool]!.includes(String(a.action ?? ""));
+  if (tool === "bash") return typeof a.command === "string" && READING_COMMAND.test(a.command);
+  if (tool === "use_app") return typeof a.tool === "string" && READING_NAME.test(a.tool);
+  // Another extension's tool, or an MCP server's: by its name, the "mcp__server__" in front of it aside.
+  return READING_NAME.test(tool.replace(/^mcp__.*?__/, ""));
+}

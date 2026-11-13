@@ -25,7 +25,7 @@ import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
 import { TodoList } from "./BotTodos";
-import { ConversationAvatar, useBusyBots } from "./common";
+import { ConversationAvatar, useBusyBots, useReading } from "./common";
 
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -339,6 +339,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   const removable = shared ? members.length > 0 : members.length > 2;
   // As in the group's huddle: awake at work, dozing otherwise.
   const working = useBusyBots(conversation);
+  const readers = useReading(conversation.botIds);
   const open = (bot: Bot) => {
     const c = directOf(useBots.getState().conversations, bot.id);
     if (!c) return;
@@ -370,7 +371,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
             <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
-              <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} asleep={!working.includes(b.id)} zzz />
+              <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} reading={readers[conversation.botIds.indexOf(b.id)]} asleep={!working.includes(b.id)} zzz />
               <span className="bots-card-text">{b.name}</span>
             </button>
             {editable && removable && (

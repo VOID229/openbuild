@@ -27,7 +27,7 @@ import { board as jobBoard, cancelAll as cancelCalls, DETACHABLE, forget as forg
 import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
 import { BOT_TOOLS, noteToolUse, preloadTools } from "./toolPreload";
 import { TurnMeter, unloadedResult, type TurnOutcome } from "./turnMetrics";
-import { follow, liveActivity, newLive, ownStatus, startLine, type Live, type Step } from "./steps";
+import { follow, liveActivity, newLive, ownStatus, reads, startLine, type Live, type Step } from "./steps";
 
 const IDLE = 20 * 60 * 1000;
 
@@ -73,6 +73,8 @@ interface Mind {
   said?: string;
   /** The OpenBuild thread its current openbuild call is about (BotStatus.thread). */
   thread?: string;
+  /** Its current tool call is it reading something (BotStatus.reading). */
+  reading?: boolean;
   /** Between handing Pi the prompt and it settling: a message now can be steered into the turn. */
   steerable?: boolean;
   /** Per conversation, the last message this turn has put in front of the bot, images and all. */
@@ -684,12 +686,12 @@ export async function applyEffort(proc: Pick<PiProcess, "send">, botId: string) 
 /** Tools that put words in the chat: while they're being written, the bot is typing. */
 const WRITING = new Set(["send_message", "question", "poll"]);
 
-const saying = (mind: Mind, activity: string) => JSON.stringify([activity, mind.quiet, mind.thread ?? ""]);
+const saying = (mind: Mind, activity: string) => JSON.stringify([activity, mind.quiet, mind.thread ?? "", !!mind.reading]);
 
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
   mind.said = saying(mind, mind.activity);
-  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, deciding: mind.quiet === "deciding" || undefined, thread: mind.thread, since: Date.now() });
+  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, deciding: mind.quiet === "deciding" || undefined, thread: mind.thread, reading: mind.reading || undefined, since: Date.now() });
 }
 
 /** A reaction shows on its message, and a group turn still making up its mind shows nothing: neither is a step in the status. */
@@ -718,6 +720,7 @@ function refresh(botId: string, mind: Mind, boundary = false) {
   const running = live.steps.findLast((s) => s.state === "running" && works(s));
   mind.tool = running ? { name: running.tool, since: running.since, activity: running.activity, label: ownStatus((running.args as { status?: unknown } | undefined)?.status) } : undefined;
   mind.thread = live.steps.map((s) => (s.state === "running" ? threadOf(s.tool, s.args) : undefined)).findLast(Boolean);
+  mind.reading = !!running && reads(running.tool, running.args);
   // Between turns nothing is its to show: a record that trails in must not put the bot back to work.
   if (!mind.busy) return;
   const activity = liveActivity(live, { writing: writing(mind, live), counts: counts(mind) });
@@ -973,6 +976,7 @@ async function runTurn(botId: string, all: Wake[]) {
     mind.busy = true;
     // A turn cut off mid-call doesn't leave the next one on that thread.
     mind.thread = undefined;
+    mind.reading = false;
     mind.meter = meter;
     meter.pi(!!mind.fresh, mind.preloaded ?? 0);
     mind.fresh = false;
@@ -1162,6 +1166,7 @@ async function runTurn(botId: string, all: Wake[]) {
       mind.tool = undefined;
       mind.live = undefined;
       mind.thread = undefined;
+      mind.reading = false;
       mind.said = undefined;
       mind.helperSaid = undefined;
       mind.waitingUser = false;

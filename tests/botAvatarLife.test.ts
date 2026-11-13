@@ -367,6 +367,69 @@ describe.skipIf(!browser)("a bot on its own", () => {
     await page.until("getComputedStyle(document.querySelector('#held .bot-act')).opacity === '1' && !document.querySelector('#held .bot-dots')", 1000);
   }, 20_000);
 
+  test("reading, it looks down and reads line by line: slowly along to the right, quickly back to the left a touch lower, and stops when it's done", async () => {
+    const page = await open();
+    await page.eval("read(true)");
+    type Sample = { t: number; yaw: number; pitch: number; reading: boolean; eyes: string };
+    const samples = await page.eval<Sample[]>(`new Promise((done) => {
+      const b = document.querySelector('#reading .bot');
+      const out = [];
+      const t0 = performance.now();
+      const timer = setInterval(() => {
+        out.push({ t: performance.now() - t0, ...${STANCE}(b), reading: 'reading' in b.dataset, eyes: b.dataset.eyes ?? '' });
+        if (out.length >= 170) { clearInterval(timer); done(out); }
+      }, 40);
+    })`);
+    // Once it's got there: reading, eyes lowered onto the page, looking down all along.
+    const on = samples.filter((s) => s.t > 500);
+    for (const s of on) expect([s.reading, s.eyes]).toEqual([true, "read"]);
+    expect(Math.min(...on.map((s) => s.pitch))).toBeGreaterThan(4);
+    // Each snap back to the left: a big turn back in a moment.
+    const snaps = on.slice(1).flatMap((s, i) => (on[i]!.yaw - s.yaw > 6 ? [i + 1] : []));
+    const backs = snaps.filter((i, n) => n === 0 || i - snaps[n - 1]! > 3);
+    expect(backs.length).toBeGreaterThanOrEqual(2);
+    // Between two of them, a line: it goes along it to the right steadily, taking well over a second,
+    // and the next line is a touch lower.
+    const lines = backs.slice(1).map((end, n) => on.slice(backs[n]! + 6, end));
+    for (const line of lines) {
+      expect(line.at(-1)!.t - line[0]!.t).toBeGreaterThan(1000);
+      expect(line.at(-1)!.yaw - line[0]!.yaw).toBeGreaterThan(18);
+      // No sudden move along the line: the sweep is slow all the way.
+      for (let i = 1; i < line.length; i++) expect(Math.abs(line[i]!.yaw - line[i - 1]!.yaw)).toBeLessThan(6);
+    }
+    // The snap back itself: from the end of one line to the start of the next in well under half a second.
+    for (const i of backs) {
+      const from = on.slice(Math.max(0, i - 3), i).reduce((m, s) => (s.yaw > m.yaw ? s : m));
+      const to = on.slice(i, i + 12).reduce((m, s) => (s.yaw < m.yaw ? s : m));
+      expect(from.yaw - to.yaw).toBeGreaterThan(25);
+      expect(to.t - from.t).toBeLessThan(450);
+    }
+    const mean = (line: Sample[]) => line.reduce((n, s) => n + s.pitch, 0) / line.length;
+    if (lines.length >= 2) expect(mean(lines[1]!)).toBeGreaterThan(mean(lines[0]!));
+    // Done reading: it's back to itself at once.
+    await page.eval("read(false)");
+    await page.until("!('reading' in document.querySelector('#reading .bot').dataset) && document.querySelector('#reading .bot').dataset.eyes !== 'read'", 500);
+  }, 20_000);
+
+  test("with reduced motion, a reading bot is simply looking down at the page, holding still, and back after", async () => {
+    const page = await Page.open(chrome!.ws, "about:blank", 1100, 900, "true");
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await page.send("Page.navigate", { url: server!.url.href });
+    await page.until(READY);
+    const layers = "JSON.stringify(['.bot-whole', '.bot-body', '.bot-eye-left', '.bot-eye-right'].map((l) => document.querySelector('#reading ' + l).style.transform))";
+    const rest = await page.eval<string>(layers);
+    await page.eval("read(true)");
+    await page.until("document.querySelector('#reading .bot').dataset.eyes === 'read'", 1000);
+    const reading = await page.eval<string>(layers);
+    expect(reading).not.toBe(rest);
+    expect(await page.eval<number>(`${STANCE}(document.querySelector('#reading .bot')).pitch`)).toBeGreaterThan(4);
+    await Bun.sleep(1500);
+    expect(await page.eval<string>(layers)).toBe(reading);
+    expect(await page.eval<number>("document.getAnimations().filter((a) => a.playState === 'running').length")).toBe(0);
+    await page.eval("read(false)");
+    await page.until(`${layers} === ${JSON.stringify(rest)}`, 1000);
+  }, 20_000);
+
   test("out of view, awake bots spend no frames", async () => {
     const page = await open();
     await page.eval("document.body.style.paddingTop = '3000px'");

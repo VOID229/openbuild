@@ -5,6 +5,7 @@
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
+import { READING, readingAt } from "../src/lib/bots/routines";
 import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
@@ -470,6 +471,21 @@ test("however it turns, swings past, nods or darts its eyes, no eye ever comes n
           if (f % 4 === 1) check(shape, rig, look, `turning ${i} frame ${f}`);
         }
       }
+  expect([...near]).toEqual([]);
+}, 60_000);
+
+test("reading, line after line, no shape's eyes ever come near the rim", () => {
+  const near = new Set<string>();
+  const line = READING.settle + READING.sweep;
+  for (const shape of SHAPES) {
+    // From rest into a page and a bit of reading, frame by frame: the snap back to each line's start
+    // swings past and the eyes dart ahead of the head.
+    const rig = newRig(restOf(shape));
+    for (let f = 0; f * (1000 / 60) < line * (READING.lines + 1); f++) {
+      step(rig, poseTarget(shape, readingAt(f * (1000 / 60)), true), 1000 / 60, "pose");
+      if (f % 3 === 0 && tooNear(shape, frame(rig, shape, 100, "read"), "read", MARGIN).length) near.add(`${shape.id} frame ${f}`);
+    }
+  }
   expect([...near]).toEqual([]);
 }, 60_000);
 

@@ -252,6 +252,57 @@ test("tools side by side each keep their line until their own end, and a sent me
   await over(prompt);
 `), 30_000);
 
+test("while its step reads something the status says it's reading, and not a moment past that step's end", () => run("reading", `
+  const first = await turn();
+  a.equal(status().reading, undefined);
+  // A file: reading from the moment it starts until it ends.
+  start('read', 'r1', { path: '/home/x/notes.md' });
+  a.equal(status().reading, true);
+  a.equal(line(), 'Reading notes.md');
+  // A command started beside it is the live step now, and it's no reading.
+  start('bash', 'b1', { command: 'bun run build' });
+  a.equal(status().reading, undefined);
+  end('bash', 'b1');
+  a.equal(status().reading, true);
+  end('read', 'r1');
+  a.equal(status().reading, undefined);
+  // Reading a thread, a page, its memory, the web, or a log: reading. Telling a thread something, clicking: not.
+  for (const [tool, args, on] of [
+    ['openbuild', { action: 'read', thread: '1a2b3c4d' }, true],
+    ['openbuild', { action: 'send', thread: '1a2b3c4d', text: 'Rebase it.' }, undefined],
+    ['browser', { action: 'snapshot' }, true],
+    ['browser', { action: 'click', ref: '4' }, undefined],
+    ['search', { query: 'deploy' }, true],
+    ['bot_web_search', { query: 'bun release notes' }, true],
+    ['bash', { command: 'tail -n 50 server.log' }, true],
+  ]) {
+    start(tool, 'x', args);
+    a.equal(status().reading, on, tool + ' ' + JSON.stringify(args));
+    end(tool, 'x');
+    a.equal(status().reading, undefined);
+  }
+  // The same words either way: what changes is only whether it's reading, and that's sent too. Every
+  // status with those words is reading while the read runs, and none is once it's over.
+  sent.length = 0;
+  start('read', 'r2', { status: 'Looking into it', path: 'a.md' });
+  const during = sent.length;
+  end('read', 'r2');
+  start('bash', 'b2', { status: 'Looking into it', command: 'make' });
+  const said = (list) => list.filter((s) => s.activity === 'Looking into it').map((s) => !!s.reading);
+  a.deepEqual(said(sent.slice(0, during)), [true]);
+  a.ok(said(sent.slice(during)).length >= 1 && said(sent.slice(during)).every((on) => !on), JSON.stringify(said(sent)));
+  end('bash', 'b2');
+  // A turn that ends mid-read leaves nothing of it to the next.
+  start('read', 'r3', { path: 'b.md' });
+  a.equal(status().reading, true);
+  await over(first);
+  a.equal(status(), undefined);
+  const second = await turn();
+  a.equal(status().reading, undefined);
+  a.equal(mind.reading, false);
+  await over(second);
+`), 30_000);
+
 test("a record that trails in after the turn doesn't put the bot back to work, and the next turn starts clean", () => run("trailing", `
   const first = await turn();
   start('bash', 't1', { status: 'Deploying the site', command: './deploy.sh' });

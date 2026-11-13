@@ -124,6 +124,14 @@
   --fh: 1.48;
 }
 
+/* Reading: the big eyes of work with the lids come down a third onto the page, mostly from the top
+   (FORMS.read, DRAWN.read). */
+.bot[data-eyes="read"] .bot-eye-fill {
+  --fw: 1.45;
+  --fh: 1;
+  --lift: -0.12;
+}
+
 .bot[data-mood="sleepy"] .bot-eye-fill {
   --fw: 1.25;
   --fh: 0.15;
