@@ -216,7 +216,7 @@ production build keeps the old route's 404 for scripts from an older build.
   the app with `server/client.ts`, as production does now, it did in 4 of 60 fresh processes; serving
   it through Bun's HTML route, as production did before, in 10 of 60. Either way the server answers
   the API but never the page until it's restarted. Never seen on Bun 1.4.0 (0 of 110). `install.sh`
-  still accepts 1.3.8 and CI runs on it, so tests that build the app give up on a stuck build and start
+  still accepts 1.3.8, so tests that build the app give up on a stuck build and start
   again (`serveFixture`, `tests/productionClient.test.ts`). Requiring Bun 1.4, or building in a process
   the server can kill and start again, would take it out of production.
 - **`bun test` on many-core machines**: an HTML import route (or Bun.build inside the test process) can
