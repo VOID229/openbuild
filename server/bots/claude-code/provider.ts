@@ -43,6 +43,10 @@ export interface ClaudeCodeProfile {
   command?: string;
 }
 
+/** How long, and through how many failed status checks in a row, a login found earlier is kept. */
+export const KEEP_LOGIN_MS = 5 * 60_000;
+export const KEEP_LOGIN_FAILED_CHECKS = 3;
+
 export function createClaudeCodeProvider(profile: ClaudeCodeProfile = {}) {
   const id = profile.id ?? PROVIDER_ID;
   const pinnedEnv: ProviderEnv = {
@@ -66,8 +70,10 @@ export function createClaudeCodeProvider(profile: ClaudeCodeProfile = {}) {
   let discoveredIds: Set<string> | undefined;
   // OpenBuild: the last check that found the login. Pi checks again on every model refresh and hides
   // the provider's models when a check comes back empty, until the next one: a status check that
-  // failed to run says nothing about the login, so that one keeps this answer.
-  let lastReady: { type: "oauth" | "api_key"; source: string } | undefined;
+  // failed to run says nothing about the login, so that one keeps this answer. Only for a while,
+  // though: a status check that keeps failing would leave the models listed, and a turn on one would
+  // then fail at sign-in instead of moving to a fallback when the model is picked.
+  let lastReady: { auth: { type: "oauth" | "api_key"; source: string }; at: number; failed: number } | undefined;
   const externalOAuthMarker = () => ({
     type: "oauth" as const,
     access: "claude-code-external",
@@ -90,12 +96,14 @@ export function createClaudeCodeProvider(profile: ClaudeCodeProfile = {}) {
           // Only report the provider as configured when Claude Code is
           // installed and logged in, so Pi hides its models otherwise.
           if (status.available && status.loggedIn) {
-            return (lastReady = {
-              type: status.subscription ? "oauth" : "api_key",
+            const auth = {
+              type: status.subscription ? ("oauth" as const) : ("api_key" as const),
               source: status.subscription ? `Claude Code ${status.plan ?? "subscription"}` : "Claude Code CLI",
-            });
+            };
+            lastReady = { auth, at: Date.now(), failed: 0 };
+            return auth;
           }
-          if (status.diagnostic && lastReady) return lastReady;
+          if (status.diagnostic && lastReady && ++lastReady.failed <= KEEP_LOGIN_FAILED_CHECKS && Date.now() - lastReady.at < KEEP_LOGIN_MS) return lastReady.auth;
           lastReady = undefined;
           return undefined;
         },

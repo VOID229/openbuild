@@ -569,7 +569,15 @@ test("send_message, models and check-ins against a real bots database", async ()
       t = Date.now();
       await a.rejects(applyModel(refusing([{ provider: 'mock', id: 'm' }], Date.now()), bot.id, undefined, bot.id, 400), gone);
       a.ok(Date.now() - t >= 350, 'a fresh Pi is given the settle time before the model counts as gone');
-      // Listed but refused (no key, say) keeps Pi's reason.
+      // Listed but refused (no key, say) keeps Pi's reason, and isn't asked for a second time to hear it again.
+      const keyless = { startedAt: Date.now(), sent: [], send: async (cmd) => {
+        keyless.sent.push(cmd.type);
+        if (cmd.type === 'set_model') throw new Error('No API key for anthropic/gone');
+        return cmd.type === 'get_available_models' ? { models: [{ provider: 'anthropic', id: 'gone' }] } : {};
+      } };
+      await a.rejects(applyModel(keyless, bot.id, undefined, bot.id, 5_000), /No API key for anthropic\\/gone/);
+      a.deepEqual(keyless.sent.filter((c) => c !== 'get_state'), ['set_model']);
+      // Pi saying it doesn't list it while it does, a moment later, is the fresh Pi still settling: asked once more.
       await a.rejects(applyModel(refusing([{ provider: 'anthropic', id: 'gone' }], Date.now()), bot.id, undefined, bot.id, 400), /Model not found/);
 
       // A Pi that's just started lists Claude Code's models only once its sign-in check is back, so it

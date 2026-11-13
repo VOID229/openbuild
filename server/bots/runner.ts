@@ -522,6 +522,8 @@ export async function applyModel(proc: Pick<PiProcess, "send"> & { startedAt?: n
       // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so the next candidate, or Pi's own pick, will do.
       if (!chosen) continue;
       if (err instanceof PiTimeoutError) throw err;
+      // Pi refuses one it lists for a reason of its own (no key, say): asked again, it would only say it again.
+      if (!refusedAsUnlisted(err)) throw modelStartFailure(err);
       // A Pi that's just started lists a provider's models only once its sign-in check is back, so it
       // can refuse one it lists a moment later: given until it has settled, it's asked again. One
       // that settled long ago is taken at its word, so a fallback takes over at once.
@@ -555,6 +557,11 @@ export async function applyModel(proc: Pick<PiProcess, "send"> & { startedAt?: n
  * Its own model refresh at startup is given 15 s.
  */
 const MODEL_SETTLE_MS = 15_000;
+
+/** Pi's `set_model` says "Model not found" only for one it doesn't list at that moment; one it lists but can't use gets a reason of its own. */
+function refusedAsUnlisted(err: unknown): boolean {
+  return /model not found/i.test(err instanceof Error ? err.message : String(err));
+}
 
 /** Whether Pi lists `model`, given up to `settleMs` more to. Undefined when it can't say. */
 async function listedSoon(proc: Pick<PiProcess, "send">, model: string, settleMs: number): Promise<boolean | undefined> {
