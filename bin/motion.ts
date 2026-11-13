@@ -59,9 +59,10 @@ class Stage {
   open({ steps = [], ...opening }: Opening) {
     if (this.state) return false;
     if (!animates(process.env, process.stdout, steps.length)) return false;
-    this.dir = mkdtempSync(join(tmpdir(), "openbuild-motion-"));
+    // No room for the state file (a full or over-quota temp directory): the command still runs, plainly.
+    try { this.dir = mkdtempSync(join(tmpdir(), "openbuild-motion-")); } catch { return false; }
     this.state = { power: 1, powers: [], ...opening, steps: steps.map(label => ({ label })), current: 0 };
-    this.save();
+    if (!this.save()) return false;
     this.child = spawn(process.execPath, [join(import.meta.dir, "motionRender.ts"), join(this.dir, "state"), String(this.state.power)], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
     this.child.unref();
     process.once("exit", () => this.abort());
@@ -97,7 +98,7 @@ class Stage {
   end(outcome: "done" | "fail" = "done") {
     if (!this.state) return;
     this.state.end = outcome;
-    this.save();
+    if (!this.save()) return;
     const marker = join(this.dir!, "state.done");
     for (let i = 0; i < 800 && !existsSync(marker); i++) Bun.sleepSync(10);
     // The renderer died: the cursor it hid is still ours to give back.
@@ -114,10 +115,26 @@ class Stage {
     this.close();
   }
 
+  /**
+   * False when the state can't be written. The animation is only decoration, so it is dropped
+   * there and then: the command it decorates, and the error `fail` is about to report, go on.
+   */
   private save() {
     const next = join(this.dir!, "state.next");
-    writeFileSync(next, JSON.stringify(this.state), { mode: 0o600 });
-    renameSync(next, join(this.dir!, "state"));
+    try {
+      writeFileSync(next, JSON.stringify(this.state), { mode: 0o600 });
+      renameSync(next, join(this.dir!, "state"));
+      return true;
+    } catch {
+      if (this.child) {
+        this.child.kill("SIGTERM");
+        const marker = join(this.dir!, "state.done");
+        for (let i = 0; i < 50 && !existsSync(marker); i++) Bun.sleepSync(10);
+        if (!existsSync(marker)) process.stdout.write("\x1b[?2026l\x1b[0m\x1b[?25h\n");
+      }
+      this.close();
+      return false;
+    }
   }
 
   private close() {
