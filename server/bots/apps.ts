@@ -346,8 +346,8 @@ const reachOf = (s: StoredApp | undefined): Reach => (s?.status === "connected" 
 /** Apps the user is connecting or signing in to right now: the GitHub change that can set off is told by that, once. */
 const changing = (kept.openbotsAppsChanging ??= new Set<string>());
 
-/** When each bot last called each app's tools: which bots rely on an app, as far as that's known. */
-const USERS = "app-users";
+/** When each bot last called each app's tools: which bots rely on an app, as far as that's known. Deleting a bot drops its entries (db.deleteBot). */
+const USERS = db.APP_USERS;
 const RECENT_USE = 30 * 24 * 60 * 60_000;
 const appUsers = () => db.getValue<Record<string, Record<string, number>>>(USERS) ?? {};
 

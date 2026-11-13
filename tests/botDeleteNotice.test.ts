@@ -17,6 +17,25 @@ async function run(name: string, script: string) {
   }
 }
 
+test("a deleted bot's app use is forgotten with it; other bots' stays", () => run("app-users", `
+  import { strict as a } from 'node:assert';
+  import { mock } from 'bun:test';
+  mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }), computerTargets: async () => [] }));
+  const db = await import('./server/bots/db.ts');
+  const svc = await import('./server/bots/service.ts');
+  svc.setHooks({ wake() {}, stop() {} });
+  svc.createBot({ name: 'Boss' });
+  const gone = svc.createBot({ name: 'Gone' }).bot;
+  const stays = svc.createBot({ name: 'Stays' }).bot;
+  db.setValue(db.APP_USERS, { linear: { [gone.id]: 1, [stays.id]: 2 }, vercel: { [gone.id]: 3 } });
+  await svc.deleteBot(gone.id, { by: 'me' });
+  // Its entries go, and an app nobody else used goes with them.
+  a.deepEqual(db.getValue(db.APP_USERS), { linear: { [stays.id]: 2 } });
+  await svc.deleteBot(stays.id);
+  a.deepEqual(db.getValue(db.APP_USERS), {});
+  process.exit(0);
+`));
+
 test("the user deleting a bot tells the primary who it was and what it left; the primary's own deletions don't", () => run("notice", `
   import { strict as a } from 'node:assert';
   import { mock } from 'bun:test';
