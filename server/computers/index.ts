@@ -4,7 +4,7 @@
 //     Python, git and the usual tools. The home folder is a folder here bind-mounted at /home/bot,
 //     so files survive the container being rebuilt; or
 //   - a plain folder on this machine, with no isolation: commands run as the user who runs
-//     OpenBuild. For machines without a container engine.
+//     OpenBuild. The default, unless the user chose a container for this machine (Settings → Devices).
 // A paired device's server runs the computers there, and this one reaches them through
 // /api/computers there (api.ts).
 //

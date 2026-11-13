@@ -590,8 +590,9 @@ export interface BotsSettings {
   claude?: { off: string[]; changedAt?: number };
   /**
    * How bots' computers are kept apart on each machine, by device id ("local" for this server), set
-   * in Settings → Devices. A container where unset. Host on a paired device also needs that device's
-   * own Unisolated grant.
+   * in Settings → Devices. The host where unset, except on a paired device that doesn't allow
+   * Unisolated, which gets a container until the user chooses. Builds before host was the default
+   * saved only "host", so an unset machine may be one left at the old default of a container.
    */
   isolation?: Record<string, Isolation>;
 }

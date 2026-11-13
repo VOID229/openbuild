@@ -190,7 +190,7 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
     next.claude = { off, changedAt: Number.isFinite(patch.claude?.changedAt) ? Number(patch.claude!.changedAt) : Date.now() };
   }
   if ("isolation" in patch) {
-    const kinds = Object.entries(patch.isolation && typeof patch.isolation === "object" ? patch.isolation : {}).filter(([device, kind]) => device.length <= 80 && kind === "host");
+    const kinds = Object.entries(patch.isolation && typeof patch.isolation === "object" ? patch.isolation : {}).filter(([device, kind]) => device.length <= 80 && (kind === "host" || kind === "container"));
     next.isolation = kinds.length ? Object.fromEntries(kinds.slice(0, 200)) : undefined;
   }
   db.setValue("settings", next);

@@ -34,13 +34,24 @@ a moved address never runs anything.
 | Setting | Where | Who |
 | --- | --- | --- |
 | Whether this server's bots may use a device, per tool (Files, Terminal, Browser) and Unisolated | That device's Settings → Devices → Using this device | The device's owner. Pairing alone allows nothing. |
-| Isolation on each machine (Container or Host) | This server's Settings → Devices, on each device's row | The user. A container where unset. Host on a paired device also needs its Unisolated grant. |
+| Isolation on each machine (Container or Host) | This server's Settings → Devices, on each device's row | The user. The host where unset; a paired device that doesn't allow Unisolated gets a container until the user chooses. |
 
 Settings → Bots (and the Advanced tab in OpenBots) shows the machines read-only: whether each allows
 bots, what with, and why not. Each one opens that device in Settings → Devices.
 
 The bot's context lists the machines with the same status on every turn. `manage_bot computers`
 returns them for any bot (`id`, `name`, `status`, `tools`, `isolation`).
+
+## Host by default
+
+A machine nobody chose for runs bots on the host. A paired device's host also needs its Unisolated
+grant, so one that allows only a container keeps a container until the user picks. A choice made in
+Settings → Devices is saved, Container as well as Host, and stays.
+
+Builds before this saved only Host and treated nothing saved as Container, so an explicit Container
+choice there looked the same as never choosing. Every machine without a saved choice moves to the
+host; its bots' home folders are the same folder either way, so their files stay. Choose Container
+again on any machine that should keep one.
 
 ## Older saved choices
 

@@ -13,7 +13,7 @@ export const GRANT_ROWS: { key: keyof BotToolGrants; label: string; desc: string
   { key: "files", label: "Files", desc: "Read and write files in their computer here." },
   { key: "terminal", label: "Terminal", desc: "Run commands, which can also change files and start programs." },
   { key: "browser", label: "Browser", desc: "Open and drive a browser here." },
-  { key: "unisolated", label: "Unisolated", desc: "Run as you, outside a container. They can reach everything you can." },
+  { key: "unisolated", label: "Unisolated", desc: "Run as you, outside a container, as their server does unless its user chooses a container. They can reach everything you can." },
 ];
 
 export function BotAccess({ client }: { client: PairedClient }) {
@@ -22,7 +22,7 @@ export function BotAccess({ client }: { client: PairedClient }) {
   const [error, setError] = useState<string>();
 
   const change = async (key: keyof BotToolGrants, value: boolean) => {
-    if (key === "unisolated" && value && !confirm(`Let bots from ${client.name} run outside a container on this device? They could read and change anything your user can.`)) return;
+    if (key === "unisolated" && value && !confirm(`Let bots from ${client.name} run outside a container on this device? Their server runs them that way unless its user chooses a container, and they could read and change anything your user can.`)) return;
     setBusy(key);
     setError(undefined);
     try {

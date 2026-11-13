@@ -47,7 +47,8 @@ const devices = [
 beforeEach(() => {
   requests = [];
   targets = [
-    { device: "local", name: "Studio iMac", status: "ready", grants: all, engines: ["podman"], isolation: "container" },
+    // What the server reports with nothing chosen: the host where it's allowed, a container where it isn't.
+    { device: "local", name: "Studio iMac", status: "ready", grants: all, engines: ["podman"], isolation: "host" },
     { device: "mbp", name: "MacBook", status: "access", grants: none, isolation: "container" },
     { device: "vm", name: "Cloud VM", status: "ready", grants: { files: true, terminal: true, browser: false, unisolated: false }, isolation: "container" },
     { device: "old", name: "Old Mini", status: "offline", message: "Old Mini is unreachable", isolation: "container" },
@@ -103,7 +104,7 @@ for (const surface of ["settings", "advanced"] as const) {
     await mount(surface);
     expect(machineRows().map((r) => r.querySelector(".pi-row-name")!.firstChild!.textContent)).toEqual(["Studio iMac", "MacBook", "Cloud VM", "Old Mini"]);
     expect(rowText("Studio iMac")).toContain("This server");
-    expect(rowText("Studio iMac")).toContain("Files, terminal and browser · Container");
+    expect(rowText("Studio iMac")).toContain("Files, terminal and browser · Host (unisolated)");
     expect(rowText("MacBook")).toContain("Doesn't allow bots");
     expect(noteOf("MacBook").short).toBe("How to allow");
     expect(noteOf("MacBook").full).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
@@ -170,7 +171,7 @@ test("Settings → Devices: each device says what this server's bots may do ther
   await devicePage();
 });
 
-test("Settings → Devices: isolation is per machine, host asks first, and a device without Unisolated offers only a container", async () => {
+test("Settings → Devices: isolation is per machine, the host is the default, choosing it asks first, and a device without Unisolated offers only a container", async () => {
   await act(async () => root.render(createElement(DevicesSection)));
   await frames();
   const trigger = (name: string) => document.querySelector<HTMLButtonElement>(`button[aria-haspopup="listbox"][aria-label="Isolation on ${name}"]`)!;
@@ -185,20 +186,32 @@ test("Settings → Devices: isolation is per machine, host asks first, and a dev
   await devicePage("mbp");
   expect(trigger("MacBook")).toBeNull();
 
+  // This server starts on the host, the default, listed first; a container keeps bots apart from it.
   await devicePage("local");
+  expect(trigger("Studio iMac").textContent).toBe("Host (unisolated)");
+  expect(host.querySelector("#device-local")!.textContent).toContain("Host is the default: bots run as the user running OpenBuild. A container isolates them.");
   let asked = "";
+  g.confirm = (text: string) => ((asked = text), true);
+  await click(trigger("Studio iMac"));
+  expect(options("Studio iMac").map((o) => o.textContent)).toEqual(["Host (unisolated)", "Container"]);
+  await click(options("Studio iMac")[1]!);
+  await frames();
+  // A container needs no asking, and is saved as a choice of its own.
+  expect(asked).toBe("");
+  expect(patches()).toEqual([{ path: "/api/bots/targets/local", method: "PATCH", body: { isolation: "container" } }]);
+  expect(trigger("Studio iMac").textContent).toBe("Container");
+  // Back to the host asks first.
   g.confirm = (text: string) => ((asked = text), false);
   await click(trigger("Studio iMac"));
-  expect(options("Studio iMac").map((o) => o.textContent)).toEqual(["Container", "Host (unisolated)"]);
-  await click(options("Studio iMac")[1]!);
+  await click(options("Studio iMac")[0]!);
   await frames();
   expect(asked).toContain("Run bots unisolated on Studio iMac");
-  expect(patches()).toEqual([]);
+  expect(patches()).toHaveLength(1);
   g.confirm = () => true;
   await click(trigger("Studio iMac"));
-  await click(options("Studio iMac")[1]!);
+  await click(options("Studio iMac")[0]!);
   await frames();
-  expect(patches()).toEqual([{ path: "/api/bots/targets/local", method: "PATCH", body: { isolation: "host" } }]);
+  expect(patches().at(-1)).toEqual({ path: "/api/bots/targets/local", method: "PATCH", body: { isolation: "host" } });
   expect(trigger("Studio iMac").textContent).toBe("Host (unisolated)");
   // Only that machine changed.
   await devicePage("vm");
@@ -206,8 +219,16 @@ test("Settings → Devices: isolation is per machine, host asks first, and a dev
   await devicePage();
 });
 
-test("Settings → Devices: this server without a container engine says its bots' tools fail until there's one or Host", async () => {
+test("Settings → Devices: this server without a container engine is fine on the host, and says so once a container is chosen", async () => {
   targets[0] = { ...targets[0]!, engines: [] };
+  await act(async () => root.render(createElement(DevicesSection)));
+  await frames();
+  await devicePage("local");
+  expect(host.querySelector("#device-local")!.textContent).not.toContain("There's no container engine here");
+  await devicePage();
+  targets[0] = { ...targets[0]!, isolation: "container" };
+  act(() => root.unmount());
+  root = createRoot(host);
   await act(async () => root.render(createElement(DevicesSection)));
   await frames();
   await devicePage("local");
@@ -232,6 +253,7 @@ test("Settings → Devices: each grant is its own switch, all off after pairing,
   await click(switches()[3]!);
   await frames();
   expect(asked).toContain("outside a container");
+  expect(asked).toContain("Their server runs them that way unless its user chooses a container");
   expect(patches()).toHaveLength(1);
   g.confirm = () => true;
   await click(switches()[3]!);

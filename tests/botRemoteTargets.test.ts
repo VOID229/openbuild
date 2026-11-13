@@ -33,7 +33,7 @@ const devices = await import("../server/devices");
 const svc = await import("../server/bots/service");
 const agent = await import("../server/bots/agent");
 const { computerTargets, guestComputerId } = await import("../server/computers/api");
-const { setIsolation } = await import("../server/bots/machines");
+const { machines, setIsolation } = await import("../server/bots/machines");
 
 let port = 0;
 let server: ReturnType<typeof Bun.spawn> | undefined;
@@ -135,6 +135,21 @@ test("a paired device can't grant itself anything, and an unknown token is refus
   expect(identity.headers.get("x-openbuild-server")).toBe(target);
   expect(await identity.json()).toEqual({ serverId: target, machine: "Target Box", grants: { files: false, terminal: false, browser: false, unisolated: false } });
 });
+
+test("with nothing chosen for the target, its bots get the host once it allows Unisolated, and a container until then", async () => {
+  expect(svc.getSettings().isolation?.[target]).toBeUndefined();
+  await grant({ terminal: true });
+  // Settings → Devices shows what a tool call would get: a container, since the host would only fail there.
+  expect((await machines()).find((t) => t.device === target)).toMatchObject({ status: "ready", isolation: "container" });
+  await grant({ unisolated: true });
+  expect((await machines()).find((t) => t.device === target)).toMatchObject({ status: "ready", isolation: "host" });
+  const run = await tool(bot, "bash", { command: "pwd" });
+  expect(run.error).toBeUndefined();
+  expect(run.result.output.trim()).toBe(join(targetData, "computers", guestComputerId(clientId, bot), "home"));
+  // Nothing was saved for the target: it's still the default, not a choice.
+  expect(svc.getSettings().isolation?.[target]).toBeUndefined();
+  await grant({ terminal: false, unisolated: false });
+}, 30_000);
 
 test("each grant opens only its own tools, and unisolated access is a grant of its own", async () => {
   await grant({ terminal: true });
