@@ -2,7 +2,7 @@
 // backends can't leak between files (this also works on Bun 1.3.8, which has no --isolate flag).
 //
 //   bun run test [filter…]      files whose path includes a filter; all of them without one
-//   --shard 2/4                 only the second quarter of them (CI runs the quarters side by side)
+//   --shard 2/5                 only the second fifth of them (CI runs the fifths side by side)
 //   --timings                   after a full passing run, record how long each file took (the shards' balance)
 //
 // Files run in parallel: TEST_JOBS at once, at most TEST_BROWSER_JOBS of them driving a headless
