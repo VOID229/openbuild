@@ -90,5 +90,8 @@
   "tests/sidebarMotion.test.ts": 7.4,
   "tests/sidebarSections.test.ts": 3.8,
   "tests/sync.test.ts": 5.4,
-  "tests/transportAuditAdmission.test.ts": 2.0
+  "tests/transportAuditAdmission.test.ts": 2.0,
+  "tests/botChatStill.test.ts": 35.4,
+  "tests/botSendScroll.test.ts": 13.2,
+  "tests/threadSendScroll.test.ts": 10.0
 }
