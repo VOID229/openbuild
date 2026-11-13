@@ -143,7 +143,7 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
     case "apps":
       return p.action === "connect" ? offerApp(botId, p) : apps.appsTool(p);
     case "use_app":
-      return apps.useApp(p);
+      return apps.useApp(p, botId);
     case "routine":
       return routine(botId, p);
     case "ask_bot":
@@ -923,7 +923,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
   const target = p.bot ? resolveBot(String(p.bot)) : botId;
   if (action === "delete") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can delete bots.");
-    return svc.deleteBot(target).then(() => ({ ok: true }));
+    return svc.deleteBot(target, { by: botId }).then(() => ({ ok: true }));
   }
   if (action === "update") {
     const patch: Partial<Bot> = {};

@@ -51,6 +51,8 @@ function migrate(db: Database): Database {
 const MEMORY_REVIEW = "memory-review:";
 /** Per bot: when its recent turns used each catalog tool (toolPreload.ts). */
 const TOOL_USAGE = "tool-usage:";
+/** When each bot last called each app's tools, by app id then bot id (apps.ts). */
+export const APP_USERS = "app-users";
 
 /**
  * Memory from before the profile/journal split has no kind. It was all in the prompt then, standing
@@ -147,6 +149,14 @@ export function deleteBot(id: string) {
     db.query("DELETE FROM cursors WHERE bot_id = ?").run(id);
     db.query("DELETE FROM kv WHERE key = ?").run(MEMORY_REVIEW + id);
     db.query("DELETE FROM kv WHERE key = ?").run(TOOL_USAGE + id);
+    const users = getValue<Record<string, Record<string, number>>>(APP_USERS);
+    if (users && Object.values(users).some((byBot) => id in byBot)) {
+      const kept = Object.entries(users).flatMap(([app, byBot]) => {
+        const { [id]: _gone, ...rest } = byBot;
+        return Object.keys(rest).length ? [[app, rest] as const] : [];
+      });
+      setValue(APP_USERS, Object.fromEntries(kept));
+    }
   })();
 }
 
