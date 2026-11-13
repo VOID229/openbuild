@@ -152,6 +152,9 @@ test("other extensions' tool guidelines survive the bot's own system prompt, and
   expect(toolRules({})).toEqual({});
 });
 
+// Every bot sends its always-on prompt with each turn, so it must stay well under main's old 18,634 chars.
+const ALWAYS_ON_MAX_CHARS = 18_634 * 0.6;
+
 test("the size report shows the always-on prompt text smaller than on main", async () => {
   const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "scripts", "bot-prompt-size.ts")], { stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -159,7 +162,7 @@ test("the size report shows the always-on prompt text smaller than on main", asy
   expect(code).toBe(0);
   const report = JSON.parse(out);
   expect(report.before.total).toBe(18634);
-  expect(report.after.total).toBeLessThan(report.before.total * 0.6);
+  expect(report.after.total).toBeLessThan(ALWAYS_ON_MAX_CHARS);
   expect(report.after.context).toBeLessThan(report.before.context);
   expect(report.after.apps).toBeLessThan(report.before.apps / 2);
   expect(report.after.approxTokens).toBe(Math.round(report.after.total / 4.28));

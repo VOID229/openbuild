@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, betweenTurns, BOT_EFFORTS, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1350,7 +1350,9 @@ export function editTodos(conversationId: string, change: TodoChange, by: Author
   if (by !== "me" && !c.botIds.includes(by)) throw new BotsError("That bot isn't in this conversation.");
   let next: TodoItem[];
   try {
-    next = applyTodo(db.todos(conversationId), change, by);
+    // Done items that have had their time go with the change, so they don't come back to a bot.
+    const now = Date.now();
+    next = todoTidy(applyTodo(db.todos(conversationId), change, by, now), now, now);
   } catch (err) {
     throw new BotsError(err instanceof Error ? err.message : String(err));
   }
@@ -1359,11 +1361,15 @@ export function editTodos(conversationId: string, change: TodoChange, by: Author
   return next;
 }
 
-/** Lists that have had their time (todoExpired) clear, and the app hears. */
+/**
+ * Lists that have had their time clear, and done items that have drop from lists still going
+ * (todoTidy); the app hears. Dropping items isn't a change to the work: the list keeps its clock.
+ */
 export function clearOldTodos(now = Date.now()) {
   for (const { conversationId, list, updatedAt } of db.allTodos()) {
-    if (!todoExpired(list, updatedAt, now)) continue;
-    db.setTodos(conversationId, []);
+    const next = todoTidy(list, updatedAt, now);
+    if (next === list) continue;
+    db.setTodos(conversationId, next, updatedAt);
     emitConversation(conversationId);
   }
 }

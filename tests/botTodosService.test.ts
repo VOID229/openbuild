@@ -108,7 +108,9 @@ test("todo keeps a conversation's list in its own table, for its bots and the us
     a.throws(() => todo(pip.bot.id, { action: 'update', item: '2', state: 'finished' }), /todo, doing or done/);
     a.throws(() => todo(pip.bot.id, { action: 'add', items: [] }), /Write the item/);
     a.throws(() => todo(pip.bot.id, { action: 'shuffle' }), /add, update, remove, clear or list/);
-    a.throws(() => todo(pip.bot.id, { action: 'add', items: Array.from({ length: 48 }, (_, i) => 'Step ' + i) }), /up to 50/);
+    // Room made by dropping done items still isn't enough: two open items and 49 new ones.
+    a.throws(() => todo(pip.bot.id, { action: 'add', items: Array.from({ length: 49 }, (_, i) => 'Step ' + i) }), /up to 50/);
+    a.equal(db.todos(group.id).length, 3);
     a.throws(() => svc.editTodos(group.id, { action: 'add', items: ['Sneak in'] }, kit.bot.id), /isn't in this conversation/);
     const side = svc.createConversation({ kind: 'side', botIds: [pip.bot.id, sal.bot.id] });
     a.throws(() => svc.editTodos(side.id, { action: 'add', items: ['Nope'] }, pip.bot.id), /Side chats don't have/);
@@ -197,5 +199,95 @@ test("a to-do list is temporary: new work after a finished list starts over, and
     // And any list nobody has touched in hours.
     svc.clearOldTodos(Date.now() + TODO_STALE_MS + 1000);
     a.deepEqual(db.todos(direct), []);
+    process.exit(0);
+  `));
+
+test("done items don't pile up: a list still going drops the ones finished a while ago, and bots are told to clear them", () =>
+  run("todos-tidy", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    import * as svc from './server/bots/service.ts';
+    import { todo, setFocus, contextFor } from './server/bots/agent.ts';
+    import { TODO_DONE_ITEM_MS, TODO_DONE_KEEP_MS, TODO_DONE_RECENT, TODO_LIMIT, todoTidy } from './shared/bots.ts';
+    svc.setHooks({ wake: () => {}, stop: () => {} });
+    // Timings a user would call a short while, and a few kept for context.
+    a.ok(TODO_DONE_KEEP_MS <= 10 * 60_000 && TODO_DONE_ITEM_MS <= 15 * 60_000 && TODO_DONE_RECENT >= 1);
+
+    // The rule itself: done items go once finished long enough ago, bar the last few; open ones stay.
+    const item = (id, status, doneAt) => ({ id, text: id, status, by: 'me', at: 0, ...(doneAt === undefined ? {} : { doneAt }) });
+    const now = 10 * TODO_DONE_ITEM_MS;
+    const old = now - TODO_DONE_ITEM_MS;
+    const going = [item('d1', 'done', old - 4), item('d2', 'done', old - 3), item('d3', 'done', old - 2), item('d4', 'done', old - 1), item('d5', 'done', old), item('o', 'doing'), item('t', 'todo')];
+    a.deepEqual(todoTidy(going, now, now).map((t) => t.id), ['d3', 'd4', 'd5', 'o', 't'].slice(3 - TODO_DONE_RECENT));
+    // Not yet: the same list back, unchanged.
+    a.equal(todoTidy(going, now, old + 1), going);
+    // Finished in the same moment, the ones further down stay.
+    const tied = [...['a', 'b', 'c', 'd', 'e'].map((id) => item(id, 'done', 0)), item('o', 'todo')];
+    a.deepEqual(todoTidy(tied, now, now).map((t) => t.id), ['a', 'b', 'c', 'd', 'e', 'o'].slice(5 - TODO_DONE_RECENT));
+    // A few done items are no pile: they stay however old.
+    const few = [item('d1', 'done', 0), item('o', 'todo')];
+    a.equal(todoTidy(few, now, now), few);
+    // Items from before doneAt count from when they were added.
+    a.equal(todoTidy([...going.slice(0, 4).map((t) => ({ ...t, doneAt: undefined })), going[5]], now, now).length, TODO_DONE_RECENT + 1);
+    // A finished list goes whole, a short while after its last change.
+    const finished = going.filter((t) => t.status === 'done');
+    a.equal(todoTidy(finished, now, now + TODO_DONE_KEEP_MS - 1), finished);
+    a.deepEqual(todoTidy(finished, now, now + TODO_DONE_KEEP_MS), []);
+
+    // Through the tool: done stamps when it was finished, and going back unstamps it.
+    const pip = svc.createBot({ name: 'Pip' });
+    setFocus(pip.bot.id, pip.conversationId);
+    const steps = Array.from({ length: 8 }, (_, i) => 'Step ' + (i + 1));
+    todo(pip.bot.id, { action: 'add', items: steps });
+    let list = db.todos(pip.conversationId);
+    todo(pip.bot.id, { action: 'done', item: list[0].id.slice(0, 6) });
+    a.ok(Math.abs(db.todos(pip.conversationId)[0].doneAt - Date.now()) < 5000);
+    todo(pip.bot.id, { action: 'update', item: list[0].id.slice(0, 6), state: 'doing' });
+    a.equal('doneAt' in db.todos(pip.conversationId)[0], false);
+    for (const t of list.slice(0, 6)) todo(pip.bot.id, { action: 'done', item: t.id.slice(0, 6) });
+    // Re-marking a done item keeps when it was finished.
+    const first = db.todos(pip.conversationId)[0].doneAt;
+    todo(pip.bot.id, { action: 'update', item: list[0].id.slice(0, 6), state: 'done', text: 'Step one' });
+    a.equal(db.todos(pip.conversationId)[0].doneAt, first);
+
+    // The scheduler drops the done items finished a while ago from the list still going, and the app
+    // hears; the list keeps its clock, so it isn't kept alive by being tidied.
+    const events = [];
+    svc.subscribe((e) => events.push(e));
+    const stamp = () => db.db.query('SELECT updated_at AS t FROM todos WHERE conversation_id = ?').get(pip.conversationId).t;
+    const before = stamp();
+    svc.clearOldTodos(Date.now() + TODO_DONE_ITEM_MS - 60_000);
+    a.equal(db.todos(pip.conversationId).length, 8);
+    a.equal(events.length, 0);
+    svc.clearOldTodos(Date.now() + TODO_DONE_ITEM_MS + 1000);
+    list = db.todos(pip.conversationId);
+    a.deepEqual(list.map((t) => t.text), ['Step 4', 'Step 5', 'Step 6', 'Step 7', 'Step 8'].slice(3 - TODO_DONE_RECENT));
+    a.equal(stamp(), before);
+    a.deepEqual(events.filter((e) => e.t === 'conversation').at(-1).conversation.todos.map((t) => t.text), list.map((t) => t.text));
+    // Finishing the rest makes a finished list, which clears a short while after.
+    for (const t of list.filter((t) => t.status !== 'done')) todo(pip.bot.id, { action: 'done', item: t.id.slice(0, 6) });
+    svc.clearOldTodos(Date.now() + TODO_DONE_KEEP_MS - 60_000);
+    a.ok(db.todos(pip.conversationId).length > 0);
+    svc.clearOldTodos(Date.now() + TODO_DONE_KEEP_MS + 1000);
+    a.deepEqual(db.todos(pip.conversationId), []);
+
+    // A full list makes room for new steps by dropping the items finished first.
+    todo(pip.bot.id, { action: 'add', items: Array.from({ length: TODO_LIMIT }, (_, i) => 'Item ' + (i + 1)) });
+    list = db.todos(pip.conversationId);
+    todo(pip.bot.id, { action: 'done', item: list[1].id.slice(0, 6) });
+    // Finished later, not just further up the list.
+    await Bun.sleep(5);
+    todo(pip.bot.id, { action: 'done', item: list[0].id.slice(0, 6) });
+    todo(pip.bot.id, { action: 'add', items: ['One more'] });
+    list = db.todos(pip.conversationId);
+    a.equal(list.length, TODO_LIMIT);
+    a.deepEqual([list[0].text, list.at(-1).text], ['Item 1', 'One more']);
+
+    // Bots are told to clear done items themselves, and what happens if they don't.
+    const prompt = contextFor(pip.bot.id);
+    a.match(prompt, /once the work is finished and you've said so, todo clear in that turn; in a long list still going, todo clear which done/);
+    a.doesNotMatch(prompt, /clears by itself after a while/);
+    const src = await Bun.file('./server/bots/extension.ts').text();
+    a.match(src, /don't leave done items on it: clear it once the last item is done and you've said so, clear which done when several are done/);
     process.exit(0);
   `));
