@@ -22,6 +22,7 @@ reinstall=0
 track=stable
 current=1
 detail=
+bun_upgraded=
 
 die() {
   [ -z "$ui_pid" ] || stop_ui fail
@@ -247,11 +248,35 @@ swap_install() {
   target=$install_dir
 }
 
+# Bun's major and minor version, or nothing when `bun --version` doesn't print one.
+bun_version() {
+  version=$(bun --version 2>/dev/null </dev/null) || return 0
+  case $version in [0-9]*.[0-9]*) ;; *) return 0 ;; esac
+  minor=${version#*.}
+  printf '%s %s\n' "${version%%.*}" "${minor%%[!0-9]*}"
+}
+
+bun_is_new_enough() {
+  set -- $(bun_version)
+  [ $# -eq 2 ] && { [ "$1" -gt 1 ] || { [ "$1" -eq 1 ] && [ "$2" -ge 4 ]; }; }
+}
+
+# Bun 1.3 now and then stalls loading the server or never finishes building the app, so 1.4 is the
+# floor (CI runs on it, package.json pins it). An older Bun is upgraded in place.
+require_bun() {
+  bun_is_new_enough && return 0
+  old_bun=$(bun --version 2>/dev/null </dev/null) || old_bun=
+  [ -n "$old_bun" ] || old_bun='an unknown version'
+  run bun upgrade || true
+  bun_is_new_enough && { bun_upgraded=$old_bun; return 0; }
+  die "OpenBuild needs Bun 1.4 or newer, but $(command -v bun) is $old_bun and \`bun upgrade\` could not update it. Upgrade Bun the way you installed it (\`bun upgrade\`, \`brew upgrade bun\`, or https://bun.sh/docs/installation), then run this installer again."
+}
+
 install() {
   step 1
   command -v git >/dev/null 2>&1 || die 'Install Git first.'
-  command -v bun >/dev/null 2>&1 || die 'Install Bun 1.3.8 or newer first: https://bun.sh/docs/installation'
-  bun -e 'const [a,b,c] = Bun.version.split(".").map(Number); process.exit(a > 1 || (a === 1 && (b > 3 || (b === 3 && c >= 8))) ? 0 : 1)' </dev/null || die 'Bun 1.3.8 or newer is required.'
+  command -v bun >/dev/null 2>&1 || die 'Install Bun 1.4 or newer first: https://bun.sh/docs/installation'
+  require_bun
   target=$install_dir
   [ "$reinstall" -eq 0 ] || target=$install_dir.new.$$
   mkdir -p "$(dirname "$install_dir")"
@@ -329,6 +354,7 @@ main() {
     printf 'Dry run: nothing was checked, downloaded or changed.\n'
     return
   fi
+  [ -z "$bun_upgraded" ] || printf 'Upgraded Bun from %s to %s.\n' "$bun_upgraded" "$(bun --version 2>/dev/null </dev/null)"
   if [ "$reinstall" -eq 1 ]; then
     printf 'OpenBuild reinstalled in %s\nIf it is running, run ob restart to use the new version.\n' "$install_dir"
     return
