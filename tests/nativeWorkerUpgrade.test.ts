@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-const { workerSocket, WORKER_FEATURES } = await import(process.env.WORKER);
+const { workerSocket, secureSocketPath, WORKER_FEATURES } = await import(process.env.WORKER);
 const data = process.env.OPENCHAT_DATA_DIR;
 const generation = "agent-worker-" + createHash("sha256").update(JSON.stringify([...WORKER_FEATURES].sort())).digest("hex").slice(0,16);
 const request = (threadId, id, runtime = "cursor") => ({ threadId, runtime, cwd: data, model: runtime + "/test", effort: "off", prior: 0, message: "once", stream: { id } });
@@ -23,6 +23,7 @@ for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => s
 function lane(name, features, records = [], idle = []) {
   const directory = join(data, name); mkdirSync(directory, { recursive: true });
   const socket = workerSocket(directory), paths = [], starts = [], answers = [];
+  secureSocketPath(socket); // creates the private socket directory, which a fresh runner lacks
   const state = { name, socket, paths, starts, answers, records };
   const server = Bun.serve({ unix: socket, async fetch(req) {
     const url = new URL(req.url), path = url.pathname; paths.push(path);
