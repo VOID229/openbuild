@@ -22,6 +22,7 @@ export function browserFlags(profile: string) {
     "--mute-audio",
     "--disable-features=Translate,MediaRouter,OptimizationHints",
     "--password-store=basic",
+    "--use-mock-keychain",
     `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
     `--user-data-dir=${profile}`,
     "--remote-debugging-pipe",
