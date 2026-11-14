@@ -3,6 +3,7 @@
 // - one its pull request's merge closed, even with it off, when nothing would be lost: HEAD is still
 //   the commit GitHub merged (so its branch can go too).
 // Never forced: uncommitted work stays, and so does a worktree an open thread still works in.
+// A thread deleted by hand takes its worktree with it straight away (removeDeletedThreadWorktree).
 import { existsSync } from "node:fs";
 import type { Chat } from "../src/lib/types";
 import { removeWorktree } from "./projects";
@@ -78,6 +79,28 @@ export async function sweepClosedWorktrees(removeRemote?: RemoteRemove, now = Da
       if (!kept.has(key)) console.warn(`[worktrees] Kept the worktree ${cwd}: ${(err as Error).message}`);
       kept.add(key);
     }
+  }
+}
+
+/**
+ * Remove the worktree of a thread that's being deleted, right away: nothing would bring the thread
+ * back to it. Called before the thread is deleted, with it still stored. Not forced, so uncommitted
+ * work stays, and neither is a worktree another open thread works in.
+ */
+export async function removeDeletedThreadWorktree(id: string, removeRemote?: RemoteRemove): Promise<void> {
+  const chat = storage.getChat(id) as Chat | undefined;
+  const ws = chat?.workspace;
+  if (!ws?.worktree) return;
+  const key = `${ws.deviceId ?? ""}\0${ws.cwd}`;
+  const inUse = storage.pullRequestChatSummaries().some((c) => c.id !== id && !c.archived && c.workspace?.worktree && `${c.workspace.deviceId ?? ""}\0${c.workspace.cwd}` === key);
+  if (inUse || removed.has(key)) return;
+  if (ws.deviceId && !removeRemote) return;
+  try {
+    await (ws.deviceId ? removeRemote!(ws.deviceId, ws.cwd) : removeWorktree(ws.cwd));
+    removed.add(key);
+    console.log(`[worktrees] Removed the worktree of "${chat!.title}", deleted`);
+  } catch (err) {
+    console.warn(`[worktrees] Kept the worktree ${ws.cwd} of a deleted thread: ${(err as Error).message}`);
   }
 }
 
