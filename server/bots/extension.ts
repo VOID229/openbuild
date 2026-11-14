@@ -171,10 +171,17 @@ function tool(name: string, label: string, description: string, parameters: obje
   };
 }
 
-/** A sent message, as its bot reads the result: the short id every later reference uses, not the JSON around the whole one. */
+/**
+ * A sent message, as its bot reads the result: the short id every later reference uses, not the JSON
+ * around the whole one. In a group it also says which bots the message reached, and what the service
+ * had to say about @tags that reached nobody.
+ */
 export function sentBrief(value: unknown): string | undefined {
-  const sent = value as { id?: unknown; conversation?: unknown } | null;
-  return sent && typeof sent.id === "string" && typeof sent.conversation === "string" && Object.keys(sent).length === 2 ? `Sent as [${sent.id.slice(0, 8)}] in conversation ${sent.conversation}.` : undefined;
+  const sent = value as { id?: unknown; conversation?: unknown; reached?: unknown; note?: unknown } | null;
+  if (!sent || typeof sent.id !== "string" || typeof sent.conversation !== "string") return undefined;
+  if (Object.keys(sent).some((key) => !["id", "conversation", "reached", "note"].includes(key))) return undefined;
+  const reached = Array.isArray(sent.reached) && sent.reached.length ? ` It reached ${sent.reached.join(", ")}.` : "";
+  return `Sent as [${sent.id.slice(0, 8)}] in conversation ${sent.conversation}.${reached}${typeof sent.note === "string" && sent.note ? ` ${sent.note}` : ""}`;
 }
 
 /** What send_message's `done` tells the bot. */
@@ -191,13 +198,16 @@ export const posted = (result: { details?: unknown } | undefined): boolean => ty
  * result is marked terminating (Pi's `terminate`), and the run stops there. Pi only stops when
  * every result of the step is terminating, so a last message sent beside other work doesn't cut
  * that work's results off from the model, and a message that was held back never ends anything.
+ * Nor does one that went out with a note the bot hasn't read.
  */
 export function ending<T extends { execute: (id: string, params: Params, signal?: unknown) => Promise<{ details?: unknown }> }>(definition: T, ends: (params: Params) => boolean): T {
   return {
     ...definition,
     async execute(id: string, params: Params, signal?: unknown) {
       const result = await definition.execute(id, params, signal);
-      return ends(params) && posted(result) ? { ...result, terminate: true } : result;
+      // A note with it (an @tag that reached nobody, say) is for the bot to read: that turn isn't over.
+      const noted = typeof (result.details as { note?: unknown } | null | undefined)?.note === "string";
+      return ends(params) && posted(result) && !noted ? { ...result, terminate: true } : result;
     },
   };
 }
@@ -324,7 +334,7 @@ export default function openbots(pi: any) {
 
   register(
     ending(
-      tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from. done true on your last message ends the turn with it.", { type: "object", properties: { text: str("The message."), done: { type: "boolean", description: DONE }, machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, ({ done: _, ...p }, signal) => call("send_message", p, signal), sentBrief),
+      tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. In a group, @Name or reply_to is what makes another bot read it, and the result says who it reached. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from. done true on your last message ends the turn with it.", { type: "object", properties: { text: str("The message."), done: { type: "boolean", description: DONE }, machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, ({ done: _, ...p }, signal) => call("send_message", p, signal), sentBrief),
       (params) => params?.done === true,
     ),
   );

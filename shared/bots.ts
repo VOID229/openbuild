@@ -233,6 +233,8 @@ export interface BotHarnessSettings {
 export interface Bot {
   id: string;
   name: string;
+  /** Names it went by before, newest first: a bot that still @s the old one reaches it (see resolveMentions). */
+  formerNames?: string[];
   look: BotLook;
   /** The bot in charge of the others. Exactly one bot is primary. */
   primary?: boolean;
@@ -1120,6 +1122,85 @@ export function findTags<B extends Pick<Bot, "name">>(text: string, bots: B[]): 
     .map((m) => ({ start: m.index, end: m.index + m[0].length }))
     .filter((a) => !named.some((m) => m.start === a.start && m.end > a.end));
   return [...named.filter((m) => !all.some((a) => a.start === m.start)), ...all].sort((a, b) => a.start - b.start);
+}
+
+/** How many of a bot's earlier names still reach it. */
+export const FORMER_NAMES = 5;
+
+const squash = (text: string) => text.toLowerCase().replace(/[^\p{L}\d]+/gu, "");
+const nameWords = (text: string) => text.toLowerCase().split(/[^\p{L}\d]+/u).filter(Boolean);
+
+/**
+ * The bots a loosely written @tag could mean, by the first of these that fits any of them: the whole
+ * name however it's spaced or joined ("@local-gemma", "@LocalGemma"), one word of it ("@Dr", "@Gemma"),
+ * a name it used to go by, a name with something stuck to it ("@tracer-ob"), or the start of the name.
+ */
+export function looseMention<B extends Pick<Bot, "name" | "formerNames">>(tag: string, bots: B[]): B[] {
+  const key = squash(tag);
+  if (!key) return [];
+  const words = nameWords(tag);
+  const whole = (b: B) => squash(mentionName(b.name));
+  const tiers: ((b: B) => boolean)[] = [
+    (b) => whole(b) === key,
+    (b) => words.length === 1 && nameWords(mentionName(b.name)).includes(words[0]!),
+    (b) => (b.formerNames ?? []).some((n) => squash(mentionName(n)) === key),
+    (b) => words.includes(whole(b)),
+    (b) => key.length >= 3 && whole(b).startsWith(key),
+  ];
+  for (const fits of tiers) {
+    const hits = bots.filter(fits);
+    if (hits.length) return hits;
+  }
+  return [];
+}
+
+/** An @tag in a bot's message that reached nobody: `could` names the bots it might mean, `absent` a bot that isn't in the chat. */
+export interface MissedMention {
+  tag: string;
+  could?: string[];
+  absent?: string;
+}
+
+/**
+ * A bot's message with its @tags made exact. Bots write names the way people do ("@Dr", an old name
+ * after a rename), and only a whole current name is a mention (findMentions), so a tag that means one
+ * bot here is rewritten to that bot's name before the message is posted: the chat, the other bots and
+ * the wake all read the same thing. What means nobody, or more than one, comes back in `missed`, for
+ * the sender to hear. `skip` are names that aren't bots and need no word, like the user's.
+ */
+export function resolveMentions<B extends Pick<Bot, "name" | "formerNames">>(text: string, here: B[], elsewhere: B[] = [], skip: string[] = []): { text: string; missed: MissedMention[] } {
+  const exact = findTags(text, here);
+  const missed: MissedMention[] = [];
+  const edits: { start: number; end: number; name: string }[] = [];
+  const quiet = new Set(["mention", "mentions", ...skip.flatMap((s) => [squash(s), ...nameWords(s)])]);
+  for (const m of text.matchAll(/(?<![\p{L}\d_`])@([\p{L}\d][\p{L}\d_.-]*)/gu)) {
+    const start = m.index;
+    if (exact.some((t) => t.start === start)) continue;
+    const tag = m[1]!.replace(/[._-]+$/, "");
+    if (!tag || quiet.has(squash(tag))) continue;
+    const hits = looseMention(tag, here);
+    if (hits.length === 1) {
+      const name = mentionName(hits[0]!.name);
+      let end = start + 1 + tag.length;
+      // "@Dr. Eggbot": the rest of the name, if it follows, is part of the tag.
+      const rest = nameWords(name).slice(nameWords(tag).length);
+      const tail = rest.length && nameWords(name).slice(0, nameWords(tag).length).join() === nameWords(tag).join()
+        ? new RegExp(`^${rest.map((w) => `[\\s._-]{1,3}${w}`).join("")}(?![\\p{L}\\d_])`, "iu").exec(text.slice(end))
+        : null;
+      if (tail) end += tail[0].length;
+      edits.push({ start, end, name });
+      continue;
+    }
+    if (hits.length > 1) {
+      missed.push({ tag, could: hits.map((b) => mentionName(b.name)) });
+      continue;
+    }
+    const away = looseMention(tag, elsewhere);
+    missed.push(away.length === 1 ? { tag, absent: mentionName(away[0]!.name) } : { tag });
+  }
+  let out = text;
+  for (const e of edits.reverse()) out = `${out.slice(0, e.start)}@${e.name}${out.slice(e.end)}`;
+  return { text: out, missed };
 }
 
 /**

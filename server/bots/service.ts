@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -40,6 +40,8 @@ export interface Wake {
   reaction?: { messageId: string; emoji: string; by: string; to?: string };
   /** A request sent to several bots: the one of them that answers it (see pickLead). */
   lead?: string;
+  /** Messages that answer something this bot asked another bot (see settleHandoffs): shown as its answer. */
+  replies?: string[];
 }
 
 type Hooks = {
@@ -280,7 +282,9 @@ export function botWorkStatus(requester: string) {
       backgroundJobs: current?.jobs ?? 0,
       pendingAssignments: hooks.pendingAssignments?.(bot.id) ?? [],
     };
-  }), pendingMeaning: "Exact assigned user-message deliveries still queued or in the current turn; delivery is not proof of an unanswered request.", handoffs: "not_tracked" };
+  }), pendingMeaning: "Exact assigned user-message deliveries still queued or in the current turn; delivery is not proof of an unanswered request.",
+    // What one bot asked another in a group and hasn't been settled yet (see settleHandoffs): references only, no text.
+    handoffs: handoffs().map((h) => ({ conversationId: h.conversationId, from: h.from, to: h.to, messageId: h.id, at: h.at })) };
 }
 
 export function setStatus(botId: string, next: BotStatus) {
@@ -544,6 +548,11 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
   if (typeof patch.name === "string") {
     const name = clip(patch.name, 80);
     if (!name) throw new BotsError("A bot needs a name.");
+    // Its old names still reach it: other bots' sessions are full of them.
+    if (name !== bot.name) {
+      const former = [bot.name, ...(bot.formerNames ?? [])].filter((n, i, all) => n.toLowerCase() !== name.toLowerCase() && all.findIndex((o) => o.toLowerCase() === n.toLowerCase()) === i);
+      bot.formerNames = former.length ? former.slice(0, FORMER_NAMES) : undefined;
+    }
     bot.name = name;
   }
   if (typeof patch.instructions === "string") bot.instructions = patch.instructions.slice(0, 8000);
@@ -594,7 +603,7 @@ export function rememberModelNames(models: { provider: string; id: string; name?
 
 /** Fields read whole by settingChanges, and ones that aren't settings worth a line (or are said elsewhere). */
 const HANDLED = new Set(["model", "effort", "fallbackModels", "noFallbacks", "proactivity", "computer", "threads", "name", "primary", "role"]);
-const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look"]);
+const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look", "formerNames"]);
 const CHECK_INS: Record<string, string> = { off: "off", low: "every 8 hours", normal: "every 3 hours", high: "every hour" };
 const THREAD_FLAGS = [
   ["others", "control others' threads"],
@@ -1124,6 +1133,99 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
   return [...new Set([...mentioned, ...replied])];
 }
 
+/** The bots a message reaches by naming or quoting them, as a bot hears of its own message (agent.ts). */
+export function reaches(conversationId: string, message: BotMessage): string[] {
+  const c = db.getConversation(conversationId);
+  return c ? wakeTargets(c, message) : [];
+}
+
+// ------------------------------------------------------------------ handoffs between bots
+
+/**
+ * One bot's @mention of another in a group, until it's settled. A mention is how bots hand work to
+ * each other, and by itself it's fire and forget: the answer reached the asker only if it named them
+ * back, and a mention the other bot never got to (its turn failed, it was stuck elsewhere) was simply
+ * gone. So each one is kept here with who asked, and settled by settleHandoffs.
+ */
+export interface Handoff {
+  /** The message that asked. */
+  id: string;
+  conversationId: string;
+  from: string;
+  to: string;
+  at: number;
+  seq: number;
+}
+/** How long a mention may sit unread before whoever wrote it is told. */
+export const HANDOFF_WAIT_MS = 10 * 60_000;
+/** How long a bot that's still working is waited on before the asker hears what there is. */
+export const HANDOFF_MAX_MS = 30 * 60_000;
+const handoffs = () => db.getValue<Handoff[]>("handoffs") ?? [];
+export const openHandoffs = handoffs;
+
+/** A bot's message in a group of its own: who it asks, and whose question it answers by naming them. */
+function noteHandoffs(c: db.StoredConversation, message: BotMessage, seq: number, targets: string[]) {
+  if (c.kind !== "group" || c.huddle || c.friend) return;
+  const list = handoffs();
+  // Naming whoever asked answers them, and they're woken by it: settled, and not a request back.
+  const answered = list.filter((h) => h.conversationId === c.id && h.to === message.author && targets.includes(h.from));
+  const next = list.filter((h) => !answered.includes(h));
+  for (const to of targets) {
+    if (answered.some((h) => h.from === to)) continue;
+    next.push({ id: message.id, conversationId: c.id, from: message.author, to, at: Date.now(), seq });
+  }
+  if (answered.length || next.length !== list.length) db.setValue("handoffs", next);
+}
+
+/**
+ * Settle what bots have asked each other. Once the asked bot has read the message and is done (its
+ * turn there is over and no job of its is running), whatever it wrote in that chat since is the answer:
+ * the asker is woken to read it, unless it has already, whether or not it was named. A bot that read
+ * it and wrote nothing has answered too, by staying silent. One that never read it within
+ * HANDOFF_WAIT_MS (its turn failed, or it's held up elsewhere) is the asker's to know about. `working`
+ * says a bot may still be writing its answer. Called as each turn ends and on the tick.
+ */
+export function settleHandoffs(working: (botId: string) => boolean, now = Date.now()) {
+  const list = handoffs();
+  if (!list.length) return;
+  const keep: Handoff[] = [];
+  for (const h of list) {
+    const c = db.getConversation(h.conversationId);
+    const asked = db.getBot(h.to);
+    if (!c || !asked || !db.getBot(h.from) || !c.botIds.includes(h.from) || !c.botIds.includes(h.to)) continue;
+    const age = now - h.at;
+    const busy = working(h.to);
+    // Still at it: what it has said so far isn't the whole answer yet.
+    if (busy && age < HANDOFF_MAX_MS) {
+      keep.push(h);
+      continue;
+    }
+    // A turn of its own has shown it the message: what it wrote since, or didn't, is its answer.
+    if (db.cursor(h.to, h.conversationId) >= h.seq) {
+      const later = db.messagesAfter(h.conversationId, h.seq, 200).filter((r) => !r.message.event);
+      const answers = later.filter((r) => r.message.author === h.to);
+      const last = answers.at(-1)?.seq ?? 0;
+      // Already the asker's: it has written since, or a turn of its own has shown it.
+      const heard = !answers.length || later.some((r) => r.seq > last && r.message.author === h.from) || db.cursor(h.from, h.conversationId) >= last;
+      if (!heard) hooks.wake(h.from, { kind: "messages", conversationId: h.conversationId, replies: answers.map((r) => r.message.id) });
+      continue;
+    }
+    if (age < HANDOFF_WAIT_MS) {
+      keep.push(h);
+      continue;
+    }
+    const status = getStatus(h.to);
+    const why = busy ? ": it's still busy with something else" : status?.state === "error" ? `: its turn failed (${(status.error ?? "").slice(0, 120)})` : "";
+    const quote = db.getMessage(h.id)?.message.text.slice(0, 160) ?? "";
+    hooks.wake(h.from, {
+      kind: "note",
+      conversationId: h.conversationId,
+      text: `${mentionName(asked.name)} hasn't read what you asked in [${h.id.slice(0, 8)}] (“${quote}”) after ${Math.round(age / 60_000)} minutes${why}. Ask again, do it another way, or tell the user if they're waiting on it. If it no longer matters, stay [silent].`,
+    });
+  }
+  if (keep.length !== list.length) db.setValue("handoffs", keep);
+}
+
 export const GROUP_FOLLOW_MS = 20 * 60_000;
 /** How far the clock may have stepped back (an NTP fix after a restart) and a follow still hold. */
 const CLOCK_SKEW_MS = 60_000;
@@ -1261,6 +1363,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
       // It stopped something: the bots that had nothing going needn't think a stop over.
       if (everyone && stopped.length) targets = [];
     }
+    if (message.author !== "me" && !friendHere) noteHandoffs(c, message, seq, targets);
     // Several bots asked at once: one answers, and the others add only what's theirs.
     const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets, talking) : undefined;
     for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
