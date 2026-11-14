@@ -142,7 +142,11 @@ const api =
   (req: R, ...rest: A) => {
     const denied = forbidden(req);
     if (denied) return denied;
-    const respond = async (res: Response | Promise<Response>) => compressJson(req, await res);
+    // A handler that upgraded the request to a WebSocket (the preview relay) has no response.
+    const respond = async (res: Response | Promise<Response>) => {
+      const out = await res;
+      return out ? compressJson(req, out) : out;
+    };
     if (devices.authenticateDevice(req)) {
       if (!devicePathAllowed(new URL(req.url).pathname)) return bad("Forbidden", 403);
       return respond(handler(req, ...rest));
@@ -456,24 +460,25 @@ function serve(port: number, hostname: string) {
       },
 
       "/api/preview": {
-        POST: api(async (req) => {
+        POST: api(async (req, server: Bun.Server<unknown>) => {
           const body = await readJson(req);
           if (typeof body?.url !== "string") return bad("Expected a localhost URL");
           const remote = typeof body.deviceId === "string" ? devices.deviceCredentials(body.deviceId) : undefined;
           if (body.deviceId && !remote) return bad("No such paired device", 404);
           try {
-            return Response.json({ url: createPreview(new URL(body.url), new URL(req.url), remote) });
+            // On the address this request came in on: the one the browser can reach.
+            return Response.json({ url: createPreview(new URL(body.url), new URL(req.url), remote, server.hostname) });
           } catch (err) { return bad((err as Error).message); }
         }),
       },
       "/api/preview/open": {
-        GET: api(req => {
+        GET: api((req, server: Bun.Server<unknown>) => {
           const params = new URL(req.url).searchParams;
           const deviceId = params.get("deviceId");
           const remote = deviceId ? devices.deviceCredentials(deviceId) : undefined;
           if (deviceId && !remote) return bad("No such paired device", 404);
           try {
-            const url = createPreview(new URL(params.get("url") || ""), new URL(req.url), remote);
+            const url = createPreview(new URL(params.get("url") || ""), new URL(req.url), remote, server.hostname);
             return new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
           } catch (err) { return bad((err as Error).message); }
         }),
