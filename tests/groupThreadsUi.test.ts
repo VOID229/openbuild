@@ -495,6 +495,16 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.finish();
     // The bot's name renames it on a click, with no tooltip over it.
     expect(await page.eval<unknown>(`document.querySelector('.bots-details-name').hasAttribute('data-tooltip')`)).toBe(false);
+    // Nor does the pencil on its mascot cover the name with one when a mouse rests on it: it only
+    // keeps "Edit look" as its label, for screen readers.
+    const pencil = ".bots-details button.bots-details-avatar";
+    expect(await page.eval<unknown>(`document.querySelector(${JSON.stringify(pencil)}).getAttribute('aria-label')`)).toBe("Edit look");
+    const [px, py] = await page.eval<[number, number]>(`(() => { const r = document.querySelector(${JSON.stringify(pencil)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: px, y: py });
+    await Bun.sleep(700);
+    await shoot(page, "pencil-hovered");
+    expect(await page.eval<unknown>(`document.querySelector('.tooltip')?.textContent ?? null`)).toBe(null);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 0, y: 0 });
     await page.click(".bots-details .bots-details-name");
     await page.until("document.activeElement?.classList.contains('bots-details-name-input')");
     await page.eval(`document.activeElement.blur()`);
