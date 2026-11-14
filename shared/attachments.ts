@@ -4,6 +4,13 @@
 export const ATTACHMENT_CHUNK = 4 * 1024 * 1024;
 export const MAX_ATTACHMENT_BYTES = 4 * 1024 ** 3;
 
+/**
+ * The longest a picture carried in a bot message may be, as a data URL (about 1.87 MB of image once
+ * base64 is added). The server refuses a longer one (server/bots/service.ts), so the browser shrinks
+ * every picture it attaches to fit (src/lib/files.ts fitImage).
+ */
+export const MAX_IMAGE_DATA_URL = 2_500_000;
+
 /** A file on a machine's disk. */
 export interface StoredFile {
   id: string;

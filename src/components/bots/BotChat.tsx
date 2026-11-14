@@ -27,7 +27,7 @@ import { useFieldDictation } from "../../lib/useFieldDictation";
 import { Avatar, IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
 import { uid } from "../../lib/id";
-import { AttachmentError, formatBytes } from "../../lib/files";
+import { AttachmentError, fitDataUrl, fitImage, fitsMessage, formatBytes } from "../../lib/files";
 import { holdFile, uploadHeld } from "../../lib/localFiles";
 import { MAX_ATTACHMENT_BYTES } from "../../../shared/attachments";
 import { FileChip, SentFileChip } from "../FileChip";
@@ -2085,57 +2085,6 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
   );
 });
 
-/** The longest edge a picked image keeps: a full-HD screenshot stays 1:1, a Retina one is halved. */
-const IMAGE_EDGE = 2048;
-/** A data URL's length to stay under, leaving room below the server's 2.5 MB limit per image. */
-const IMAGE_BUDGET = 2_000_000;
-
-/**
- * Fit a picked image into what the bot receives. Screenshots stay sharp enough to read: one that
- * already fits is kept as it is, a PNG stays a PNG (text compresses well losslessly), and only an
- * image over the budget becomes a JPEG, at the highest quality that fits.
- */
-async function shrink(file: File): Promise<string> {
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(file);
-  } catch {
-    throw new Error("Couldn't read that image");
-  }
-  try {
-    const original = Math.max(bitmap.width, bitmap.height) <= IMAGE_EDGE && /^image\/(png|jpeg|webp|gif)$/.test(file.type) && (await readAsDataUrl(file));
-    if (original && original.length <= IMAGE_BUDGET) return original;
-    let edge = Math.min(IMAGE_EDGE, Math.max(bitmap.width, bitmap.height));
-    for (;;) {
-      const k = edge / Math.max(bitmap.width, bitmap.height);
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(bitmap.width * k));
-      canvas.height = Math.max(1, Math.round(bitmap.height * k));
-      canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-      if (file.type === "image/png") {
-        const png = canvas.toDataURL("image/png");
-        if (png.length <= IMAGE_BUDGET) return png;
-      }
-      for (const quality of [0.92, 0.85, 0.75]) {
-        const jpeg = canvas.toDataURL("image/jpeg", quality);
-        if (jpeg.length <= IMAGE_BUDGET || edge <= 512) return jpeg;
-      }
-      edge = Math.round(edge * 0.75);
-    }
-  } finally {
-    bitmap.close();
-  }
-}
-
-function readAsDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(blob);
-  });
-}
-
 /** The draft drawn behind the (transparent) textarea, so @mentions show as tags while you type. */
 function DraftBackdrop({ text, bots, everyone, scroll }: { text: string; bots: Bot[]; everyone: Bot[]; scroll: React.RefObject<HTMLDivElement | null> }) {
   const parts: React.ReactNode[] = [];
@@ -2275,6 +2224,36 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     }
     mounted.current = true;
   }, [text, images, landed]);
+  // A picture that didn't come in through attach() (a stash pasted from OpenBuild's composer, a draft
+  // saved by another device or an older version) is fitted here, as a picked one is, so the server
+  // takes it. A send that was waiting on it goes then, unless the message has been changed since.
+  const fitting = useRef(new Set<string>());
+  /** The text of a send waiting for its pictures to fit. */
+  const sendWhenFitted = useRef<string>(undefined);
+  useEffect(() => {
+    const big = images.filter((src) => !fitsMessage(src));
+    if (!big.length) {
+      const waiting = sendWhenFitted.current;
+      sendWhenFitted.current = undefined;
+      if (waiting !== undefined && waiting === box.current.text) {
+        setNotice(undefined);
+        send();
+      }
+      return;
+    }
+    for (const src of big) {
+      if (fitting.current.has(src)) continue;
+      fitting.current.add(src);
+      void fitDataUrl(src).then(
+        (small) => setImages((cur) => capAttached(cur.map((s) => (s === src ? small : s)))),
+        (err: Error) => {
+          sendWhenFitted.current = undefined;
+          setImages((cur) => cur.filter((s) => s !== src));
+          setNotice(err instanceof AttachmentError ? `${err.message} It was taken out of the message.` : "Couldn't make an image small enough to send. It was taken out of the message.");
+        },
+      ).finally(() => fitting.current.delete(src));
+    }
+  }, [images]);
 
   // Measuring lays out the whole page, and coming back to OpenBots runs this again: skipped when the text is the same.
   const sized = useRef<{ el: HTMLTextAreaElement; text: string }>(undefined);
@@ -2332,6 +2311,12 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     if (!body && !images.length) return;
     const pictures = images.filter((item) => !parseFileRef(item));
     const files = images.flatMap((item) => parseFileRef(item) ?? []);
+    // An image still being made small enough would be refused: the message goes once it fits.
+    if (pictures.some((src) => !fitsMessage(src))) {
+      sendWhenFitted.current = sent.text;
+      setNotice("Making an image small enough to send…");
+      return;
+    }
     box.current = { text: "", images: [] };
     dictation.cancel();
     const conversationId = conversation.id;
@@ -2394,7 +2379,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const attach = (list: File[]) => {
     const pictures = list.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
     const others = list.filter((f) => !pictures.includes(f)).slice(0, MAX_BOT_FILES);
-    if (pictures.length) void Promise.all(pictures.slice(0, 4).map((f) => shrink(f))).then((urls) => setImages((cur) => capAttached([...cur, ...urls])), (err: Error) => setNotice(err.message));
+    if (pictures.length) void Promise.all(pictures.slice(0, 4).map((f) => fitImage(f))).then((urls) => setImages((cur) => capAttached([...cur, ...urls])), (err: Error) => setNotice(err.message));
     const large = others.find((f) => f.size > MAX_ATTACHMENT_BYTES);
     if (large) setNotice(`${large.name} is larger than ${formatBytes(MAX_ATTACHMENT_BYTES)}.`);
     const kept = others.filter((f) => f.size <= MAX_ATTACHMENT_BYTES).map((f) => {

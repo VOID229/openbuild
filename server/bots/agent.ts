@@ -19,6 +19,7 @@ import * as svc from "./service";
 import * as threads from "./threads";
 import * as plugins from "./plugins";
 import { FRIEND_TOOLS } from "../../shared/friends";
+import { formatBytes, MAX_IMAGE_DATA_URL } from "../../shared/attachments";
 import { JobCancelled, runHelper, startJob } from "./helpers";
 import { DETACHABLE, hasBoard, jobsTool, run as runCall } from "./jobs";
 import { allowsTools, friend as storedFriend } from "../friends/store";
@@ -440,12 +441,12 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
   const images: string[] = [];
   for (const path of asStrings(p.images).slice(0, 4)) {
     const data = await readFileSyncBase64(botId, path, p.machine);
-    images.push(`data:${mime(path)};base64,${data}`);
+    images.push(fittingImage(`data:${mime(path)};base64,${data}`, `${path} is too large to send`));
   }
   if (p.attach_screenshot) {
     const { api, id } = await computerOn(botId, p.machine);
     const shot = (await api.call(id, "browser", { action: "screenshot" })) as { data?: string; mimeType?: string };
-    if (shot.data) images.push(`data:${shot.mimeType || "image/jpeg"};base64,${shot.data}`);
+    if (shot.data) images.push(fittingImage(`data:${shot.mimeType || "image/jpeg"};base64,${shot.data}`, "That screenshot is too large to send"));
   }
   return deliver(botId, conversationId, text, images, p.reply_to, missed);
 }
@@ -1332,6 +1333,14 @@ function mime(path: string): string {
 async function readFileSyncBase64(botId: string, path: string, machine: unknown): Promise<string> {
   const { api, id } = await computerOn(botId, machine);
   const res = (await api.call(id, "fs", { op: "read", path })) as { data: string };
-  if (res.data.length > 2_500_000) throw new svc.BotsError("That image is too large.");
+  // Not read further when it can't fit: fittingImage says why once it's a data URL.
+  if (res.data.length > MAX_IMAGE_DATA_URL) throw new svc.BotsError(`${path} is too large to send (${tooLargeHint}).`);
   return res.data;
+}
+/** What a bot can do about an image the chat won't take. */
+const tooLargeHint = `the chat takes images up to ${formatBytes(Math.floor((MAX_IMAGE_DATA_URL * 3) / 4))}; save a smaller or JPEG copy and send that`;
+/** An image for a bot's message, as the same data URL the chat checks (server/bots/service.ts), or a reason the bot can act on. */
+function fittingImage(dataUrl: string, what: string): string {
+  if (dataUrl.length > MAX_IMAGE_DATA_URL) throw new svc.BotsError(`${what} (${tooLargeHint}).`);
+  return dataUrl;
 }
