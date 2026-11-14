@@ -996,7 +996,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       ? undefined
       : () => {
           lastDoubleTap.current = Date.now();
-          react("❤️");
+          react("👍");
         },
   });
   return (
@@ -1023,7 +1023,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
               // Two taps also make a dblclick, but useBubbleTouch has already answered them.
               if (Date.now() - lastDoubleTap.current < 600 || (e.target as Element).closest("button, a")) return;
               window.getSelection()?.removeAllRanges();
-              react("❤️");
+              react("👍");
             }}
           >
             {!!m.images?.length && (
