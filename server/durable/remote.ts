@@ -23,6 +23,10 @@ export class DurableRun extends Run {
   override stop() {
     void this.cancelRun().catch(console.error);
   }
+  /** The worker's replay, passed through as it is (see the worker's DurableRun). */
+  protected override stamped(e: StreamEvent) {
+    return e;
+  }
 }
 
 const ROOT = dirname(dirname(import.meta.dir));

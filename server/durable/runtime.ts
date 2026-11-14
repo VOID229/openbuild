@@ -69,6 +69,8 @@ function save(file: string, value: unknown) {
 export class DurableRun extends Run {
   constructor(readonly id: string, readonly threadId: string, private cancelRun: () => Promise<unknown>) { super(); }
   override stop() { void this.cancelRun().catch(console.error); }
+  /** A replay of the manifest's events, which must be identical after a reopen: never stamp them. */
+  protected override stamped(e: StreamEvent) { return e; }
 }
 
 /** Injectable Models are used by offline recovery tests; production uses Pi's configured ModelRuntime. */

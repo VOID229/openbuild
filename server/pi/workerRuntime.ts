@@ -41,6 +41,8 @@ export class WorkerRun extends Run {
   constructor(readonly record: PiRunRecord, private persist: (event: Event) => void) { super(); }
   override push(event: StreamEvent) {
     if (this.ended) return;
+    // Stamp before persisting: the log is what a reconnecting viewer replays.
+    event = this.stamped(event);
     this.persist(event);
     // Shells may be dev servers that print forever. Their complete journal is on disk;
     // connected viewers use disk cursors, not an unbounded resident array.

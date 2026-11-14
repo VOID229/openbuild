@@ -185,6 +185,8 @@ export interface ToolPart {
   output?: string;
   patch?: string;
   ms?: number;
+  /** When the call started (epoch ms), so its running timer counts from then, not from when it was shown. */
+  startedAt?: number;
 }
 
 /** A question a Pi extension asked during the reply, and the answer if there is one. */
