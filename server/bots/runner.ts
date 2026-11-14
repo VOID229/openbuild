@@ -1562,10 +1562,12 @@ export function steerNote(conversationId: string, botId: string, ids: string[], 
 function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]", leads?: Map<string, string>, replies?: Set<string>) {
   const cursor = db.cursor(botId, c.id);
   const me = bots.filter((b) => b.id === botId);
-  // Another bot's line that names this one, quotes it, or answers what it asked is never just context.
-  const asked = c.kind === "group" ? svc.openHandoffs().filter((h) => h.conversationId === c.id && h.from === botId) : [];
+  // Another of the user's bots' lines that names this one, quotes it, or answers what it asked is never
+  // just context. Not in a chat shared with a friend: a line of theirs is untrusted, and never reads as a request.
+  const own = c.kind === "group" && !c.friend;
+  const asked = own ? svc.openHandoffs().filter((h) => h.conversationId === c.id && h.from === botId) : [];
   const toMe = (m: BotMessage, seq: number) => {
-    if (m.author === "me" || m.author === botId || m.event || c.kind !== "group") return "";
+    if (!own || m.author === botId || m.event || !bots.some((b) => b.id === m.author)) return "";
     if (replies?.has(m.id) || asked.some((h) => h.to === m.author && seq > h.seq)) return " [answers what you asked]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo)?.message.author === botId : false;
     return quoted || findTags(m.text, me).length ? " [for you]" : "";
