@@ -4,13 +4,13 @@
 // asked for ahead of time, so the tab shows what it last knew at once and catches up after.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { create } from "zustand";
-import type { PullDetail, PullList, PullListState, PullMergeMethod, PullPatch } from "../../shared/types";
+import type { PullDetail, PullList, PullListState, PullMergeMethod, PullMergeResult, PullMergedThread, PullPatch } from "../../shared/types";
 import { apiUrl } from "./devices";
 import { json } from "./git";
 import { folderKey } from "./panel";
 import type { TerminalFolder } from "./terminal";
 
-type Folder = Pick<TerminalFolder, "deviceId" | "cwd">;
+type Folder = Pick<TerminalFolder, "deviceId" | "cwd" | "thread">;
 
 // A paired device can run an older server than this one.
 const answer = <T>(res: Response) => (res.status === 404 ? Promise.reject<T>(new Error("This server is too old for pull requests. Restart it to update.")) : json<T>(res));
@@ -21,8 +21,8 @@ const read = <T>(folder: Folder, path: string, query: Record<string, string | nu
   return fetch(apiUrl(folder.deviceId, `/api/workspaces/pulls${path}?${params}`)).then((r) => answer<T>(r));
 };
 
-const act = (folder: Folder, path: string, body: Record<string, unknown>) =>
-  fetch(apiUrl(folder.deviceId, `/api/workspaces/pulls/${path}`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: folder.cwd, ...body }) }).then((r) => answer<{ ok: boolean }>(r));
+const act = <T = { ok: boolean }>(folder: Folder, path: string, body: Record<string, unknown>) =>
+  fetch(apiUrl(folder.deviceId, `/api/workspaces/pulls/${path}`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: folder.cwd, ...body }) }).then((r) => answer<T>(r));
 
 /** `fresh`: past the server's few seconds of sharing a read, as the Refresh button wants. */
 export const listPulls = (folder: Folder, state: PullListState, fresh = false) => read<PullList>(folder, "", { state, fresh: fresh || undefined });
@@ -54,12 +54,24 @@ export const pullPatch = (folder: Folder, number: number, sha?: string) => read<
 /** Asks the app to load its threads again now, rather than at its next poll. */
 export const RELOAD_THREADS = "openbuild:reload-threads";
 
-/** Merge, then pick up the thread the merge closed (the server closes it before answering). */
-export const mergePull = (folder: Folder, number: number, method: PullMergeMethod, headSha: string, deleteBranch: boolean) =>
-  act(folder, "merge", { number, method, headSha, deleteBranch }).then((r) => {
+/** A merge from this thread's tab is under way, so it may close soon (detail: the thread's id). */
+export const THREAD_MAY_CLOSE = "openbuild:thread-may-close";
+/** What a merge changed in the threads following it (detail: PullMergedThread[]), to show at once. */
+export const THREADS_MERGED = "openbuild:threads-merged";
+
+/**
+ * Merge. The server closes the thread it merged before answering, and says so: that shows at once,
+ * rather than at the next load of the threads (which is asked for too, for anything else).
+ */
+export const mergePull = (folder: Folder, number: number, method: PullMergeMethod, headSha: string, deleteBranch: boolean) => {
+  if (folder.thread) window.dispatchEvent(new CustomEvent(THREAD_MAY_CLOSE, { detail: folder.thread }));
+  return act<PullMergeResult>(folder, "merge", { number, method, headSha, deleteBranch }).then((r) => {
+    // A paired device's server answers about its own threads, not this one's.
+    if (!folder.deviceId && r.threads?.length) window.dispatchEvent(new CustomEvent<PullMergedThread[]>(THREADS_MERGED, { detail: r.threads }));
     window.dispatchEvent(new Event(RELOAD_THREADS));
     return r;
   });
+};
 export const editPull = (folder: Folder, number: number, title: string, body: string) => act(folder, "edit", { number, title, body });
 export const commentOnPull = (folder: Folder, number: number, body: string) => act(folder, "comment", { number, body });
 export const setPullState = (folder: Folder, number: number, action: "close" | "reopen" | "ready") => act(folder, "state", { number, action });
@@ -182,21 +194,43 @@ export const usePullActivity = create<Record<string, { running?: string; failure
 // The reads showing right now, told when an action leaves a newer answer in the cache.
 const showing = new Set<(key: string) => void>();
 
-/** Do something to a pull request, one thing at a time, then read it again. Throws if it fails. */
+const tell = (key: string, value: unknown) => {
+  remember(key, value);
+  for (const heard of showing) heard(key);
+};
+
+/** A merge GitHub says is done: the pull request as it now stands, without waiting to read it again. */
+function mergedNow(result: unknown, before: PullDetail | undefined): PullDetail | undefined {
+  const merged = result as Partial<PullMergeResult> | undefined;
+  if (!before || merged?.state !== "merged") return undefined;
+  return { ...before, state: "merged", mergedAt: merged.mergedAt ?? Date.now() };
+}
+
+/**
+ * Do something to a pull request, one thing at a time, then read it again. Throws if it fails. A
+ * merge that GitHub has done shows as merged at once, and the read after it fills in the rest.
+ */
 export async function actOnPull(folder: Folder, number: number, what: string, action: () => Promise<unknown>) {
   const key = pullKey(folder, number);
   if (usePullActivity.getState()[key]?.running) throw new Error(`#${number} is still busy`);
   usePullActivity.setState({ [key]: { running: what } });
   try {
-    await action();
+    const result = await action();
+    const merged = what === "merge" ? mergedNow(result, held<PullDetail>(key)) : undefined;
+    if (merged) {
+      tell(key, merged);
+      usePullActivity.setState({ [key]: {} });
+    }
     // The action worked either way, and a merge can take the worktree this would read from with it.
-    await viewPull(folder, number, true).then(
+    const reread = viewPull(folder, number, true).then(
       (value) => {
-        remember(key, value);
-        for (const heard of showing) heard(key);
+        // Just after a merge GitHub can still answer from before it: what the merge said stands.
+        if (!merged || value.state !== "open") tell(key, value);
       },
       () => {},
     );
+    if (merged) return;
+    await reread;
     usePullActivity.setState({ [key]: {} });
   } catch (err) {
     usePullActivity.setState({ [key]: { failure: (err as Error).message } });

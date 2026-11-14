@@ -1,6 +1,6 @@
 import { EXTERNAL_VIA, newStreamKey, type ReplyStream } from "../../shared/replies";
 import { remoteControlPerThread } from "../../shared/remoteControl";
-import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type PiChatRequest, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type Usage, type WireMessage, type Workspace } from "../../shared/types";
+import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type PiChatRequest, type SearchCredentials, type SearchDigestModel, type PullMergedThread, type SearchProviderId, type Usage, type WireMessage, type Workspace } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { saveChatBeforeRun } from "./db";
 import { abortable } from "./abort";
@@ -262,6 +262,23 @@ export function adoptDiscoveredChats(incoming: Chat[], before: Map<string, Chat>
   // Install its running owner before exposing functional Stop/steer/interrupt controls.
   resumeReplies();
   for (const id of completedExternal) drainQueue(id);
+}
+
+/**
+ * What a merge from the pull requests tab changed in the threads following it, as the server saved
+ * it: shown at once, so a thread the merge closed leaves now, not at the next load of the threads. A
+ * thread this tab is sending in stays open (the server hasn't heard of that message yet).
+ */
+export function adoptMergedThreads(threads: PullMergedThread[]) {
+  const byId = new Map(threads.map((t) => [t.id, t]));
+  useStore.setState((s) => ({
+    chats: s.chats.map((c) => {
+      const t = byId.get(c.id);
+      if (!t || (c.pullRequest?.checkedAt ?? 0) > t.pullRequest.checkedAt) return c;
+      const close = t.autoClosedAt !== undefined && !c.archived && !running.has(c.id) && !c.messages.some((m) => m.status === "streaming");
+      return { ...c, pullRequest: t.pullRequest, ...(close ? { archived: true, done: false, woke: false, autoClosedAt: t.autoClosedAt } : {}) };
+    }),
+  }));
 }
 
 /** Resolve the chat's composer selection to a concrete model for this prompt. */

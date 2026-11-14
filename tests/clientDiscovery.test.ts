@@ -46,3 +46,18 @@ test("external liveness expiry does not dispatch queued actions into a possibly 
   chat.adoptDiscoveredChats([{ ...observed, messages: [{ ...observed.messages[0], status: 'stopped', stream: undefined }] }], new Map([['c', observed]]));
   assert.deepEqual(queue.queueOf('c').map(q => q.id), ['q']);
 `));
+
+test("a merge's closed threads close here at once, but not one this tab is sending in", () => scenario(`
+  const pullRequest = { number: 7, url: 'https://github.com/o/r/pull/7', state: 'merged', mergedAt: 5, checkedAt: 10 };
+  useStore.setState({ chats: [{ ...base, id: 'a' }, { ...base, id: 'b', messages: [{ id: 'm', role: 'assistant', content: '', createdAt: 1, status: 'streaming' }] }, { ...base, id: 'c' }], activeChatId: 'a' });
+  chat.adoptMergedThreads([{ id: 'a', pullRequest, autoClosedAt: 20 }, { id: 'b', pullRequest, autoClosedAt: 20 }]);
+  const find = id => useStore.getState().chats.find(c => c.id === id);
+  assert.deepEqual([find('a').archived, find('a').autoClosedAt, find('a').done, find('a').pullRequest.state], [true, 20, false, 'merged']);
+  assert.deepEqual([find('b').archived, find('b').autoClosedAt, find('b').pullRequest.state], [undefined, undefined, 'merged']);
+  assert.equal(find('c').pullRequest, undefined);
+  // Older news than the thread has is left alone.
+  chat.adoptMergedThreads([{ id: 'c', pullRequest: { ...pullRequest, checkedAt: 1 } }]);
+  useStore.setState({ chats: useStore.getState().chats.map(c => c.id === 'c' ? { ...c, pullRequest: { ...pullRequest, state: 'open', checkedAt: 50 } } : c) });
+  chat.adoptMergedThreads([{ id: 'c', pullRequest, autoClosedAt: 20 }]);
+  assert.deepEqual([find('c').archived, find('c').pullRequest.state], [undefined, 'open']);
+`));

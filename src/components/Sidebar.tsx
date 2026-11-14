@@ -15,6 +15,7 @@ import { OPEN_SEARCH } from "../lib/ui";
 import { useScrollRestore } from "../lib/scrollRestore";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { usePanel } from "../lib/panel";
+import { THREAD_MAY_CLOSE } from "../lib/pulls";
 import { refreshTerminal } from "../lib/terminal";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
@@ -666,16 +667,38 @@ let threadOrder: string[][] = [];
 function leaveThread(id: string) {
   const s = useStore.getState();
   if (s.activeChatId !== id) return;
-  const sections = threadOrder.map((section) => section.filter((t) => t === id || !moving.has(t)));
-  const order = sections.find((section) => section.includes(id));
-  const at = order?.indexOf(id) ?? -1;
-  const next = order ? (order[at + 1] ?? order[at - 1]) : sections.flat()[0];
+  const next = nextThread(id);
+  // Its history, if it's here already (fetched while a merge was closing this one, say): it opens
+  // with its messages, not "Loading thread…".
+  const chat = next ? s.chats.find((c) => c.id === next) : undefined;
+  const full = chat && historyAtHand(chat);
+  if (chat && full) adoptHistory(chat, full);
   // Over OpenBots or Usage, change the thread underneath without bringing OpenBuild forward.
   // A thread opened inside OpenBots goes back to the bot chat rather than on to the next thread.
   if (s.botsOpen || s.usageOpen) useStore.setState({ activeChatId: next, searchFocus: undefined, botsThread: false });
   else if (next) s.selectChat(next);
   else s.newChat();
 }
+
+/** The thread leaving `id` moves to (see leaveThread), if any. */
+function nextThread(id: string): string | undefined {
+  const sections = threadOrder.map((section) => section.filter((t) => t === id || !moving.has(t)));
+  const order = sections.find((section) => section.includes(id));
+  const at = order?.indexOf(id) ?? -1;
+  return order ? (order[at + 1] ?? order[at - 1]) : sections.flat()[0];
+}
+
+// A merge from the open thread's pull requests tab may close it: have the thread it would move to
+// ready by then.
+if (typeof window !== "undefined")
+  window.addEventListener(THREAD_MAY_CLOSE, (e) => {
+    const id = (e as CustomEvent<string>).detail;
+    const s = useStore.getState();
+    if (s.activeChatId !== id) return;
+    const next = nextThread(id);
+    const chat = next ? s.chats.find((c) => c.id === next) : undefined;
+    if (chat) prefetchHistory(chat);
+  });
 
 // Closed elsewhere (its pull request merged, or another tab or device closed it) while it's open
 // here: move on as closing it here would. Closing it here leaves it first, so it isn't open by then.

@@ -25,7 +25,7 @@ JSON
 JSON
   ;;
   "pr view")
-    if [ -n "$GH_MERGED" ]; then echo '{"number":7,"title":"Mine","url":"u","state":"MERGED","headRefName":"feat","baseRefName":"main","headRefOid":"abc1234def","updatedAt":"2026-11-02T00:00:00Z"}'; exit 0; fi
+    if [ -n "$GH_MERGED" ]; then echo '{"number":7,"title":"Mine","url":"u","state":"MERGED","headRefName":"feat","baseRefName":"main","headRefOid":"abc1234def","updatedAt":"2026-11-02T00:00:00Z","mergedAt":"2030-01-01T00:00:00Z"}'; exit 0; fi
     # #9 settles on the second ask for only its mergeability, #10 never does.
     case "$3 $5" in
       "9 mergeable,mergeStateStatus")
@@ -140,13 +140,27 @@ const script = `
   assert.deepEqual(calls(), ["api --hostname github.com -H Accept: application/vnd.github.diff repos/o/r/commits/abc1234"]);
   await assert.rejects(view.patch(cwd, 7, "../../evil"), /Expected a commit/);
 
-  // Actions name the repository, and a merge pins the commit that was on screen.
-  await view.merge(cwd, 7, "squash", "abc1234def", false);
-  assert.deepEqual(calls(), ["pr merge 7 --repo github.com/o/r --squash --match-head-commit abc1234def"]);
+  // Actions name the repository, and a merge pins the commit that was on screen. Then one small read
+  // says whether it merged; nothing else is asked before it answers. Still open: a merge queue took it.
+  assert.deepEqual(await view.merge(cwd, 7, "squash", "abc1234def", false), { ok: true, state: "open", threads: [] });
+  assert.deepEqual(calls(), ["pr merge 7 --repo github.com/o/r --squash --match-head-commit abc1234def", "pr view 7 --repo github.com/o/r --json state,mergedAt"]);
   await view.view(cwd, 7);
   assert.ok(calls()[0].startsWith("pr view 7"), "acting on it forgets what was read");
   await view.merge(cwd, 7, "rebase", "abc1234def", true);
-  assert.deepEqual(calls(), ["pr merge 7 --repo github.com/o/r --rebase --match-head-commit abc1234def --delete-branch"]);
+  assert.deepEqual(calls(), ["pr merge 7 --repo github.com/o/r --rebase --match-head-commit abc1234def --delete-branch", "pr view 7 --repo github.com/o/r --json state,mergedAt"]);
+  // Merged: the thread following it closes before the answer, which says so.
+  const now = Date.now();
+  storage.putChat({ id: "t", title: "t", createdAt: now - 60_000, updatedAt: now - 60_000, workspace: { cwd: cwd + "/elsewhere", worktree: true, projectId: "p" },
+    messages: [{ id: "u", role: "user", content: "go", createdAt: now - 60_000 }, { id: "a", role: "assistant", content: "done", createdAt: now - 59_000, status: "done" }],
+    pullRequest: { number: 7, url: "https://github.com/o/r/pull/7", state: "open", checkedAt: now - 1000 } });
+  process.env.GH_MERGED = "1";
+  const merged = await view.merge(cwd, 7, "squash", "abc1234def", false);
+  delete process.env.GH_MERGED;
+  assert.equal(merged.state, "merged");
+  assert.equal(merged.mergedAt, Date.parse("2030-01-01T00:00:00Z"));
+  assert.deepEqual(merged.threads.map((t) => [t.id, t.pullRequest.state, t.autoClosedAt === storage.getChat("t").autoClosedAt]), [["t", "merged", true]]);
+  assert.equal(storage.getChat("t").archived, true);
+  assert.deepEqual(calls().filter((l) => !l.startsWith("pr view") && !l.startsWith("pr merge")), [], "no sweep before answering");
   await assert.rejects(view.merge(cwd, 7, "--admin", "abc1234def", false), /merge method/);
   await assert.rejects(view.merge(cwd, 7, "squash", "--admin", false), /Expected a commit/);
   await assert.rejects(view.merge(cwd, "7 --admin", "squash", "abc1234def", false), /pull request number/);
@@ -281,6 +295,46 @@ describe("acting on a pull request", () => {
     expect(reads[0]).toContain("fresh=true");
     expect(await prefetchPull(folder, 5)).toMatchObject({ state: "merged" });
     expect(reads).toHaveLength(1);
+  });
+
+  test("a merge GitHub has done shows at once, and a read from before it doesn't undo that", async () => {
+    const folder = { cwd: "/acting/quick" };
+    let answer: unknown = { number: 3, state: "open", base: "main" };
+    let release = () => {};
+    const reads: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      reads.push(url);
+      if (reads.length > 1) await new Promise<void>((resolve) => (release = resolve));
+      return Response.json(answer);
+    }) as unknown as typeof fetch;
+    await prefetchPull(folder, 3);
+    // GitHub, asked just after, still says open: the read after the merge is held back to show that.
+    answer = { number: 3, state: "open", base: "main" };
+    await actOnPull(folder, 3, "merge", async () => ({ ok: true, state: "merged", mergedAt: 1234, threads: [] }));
+    expect(activity(folder, 3)).toEqual({});
+    expect(await prefetchPull(folder, 3)).toMatchObject({ state: "merged", mergedAt: 1234, base: "main" });
+    release();
+    await Bun.sleep(5);
+    expect(await prefetchPull(folder, 3)).toMatchObject({ state: "merged" });
+    expect(reads.at(-1)).toContain("fresh=true");
+  });
+
+  test("a merge GitHub only queued waits for the read after it", async () => {
+    const folder = { cwd: "/acting/queued" };
+    globalThis.fetch = (async () => Response.json({ number: 4, state: "open" })) as unknown as typeof fetch;
+    await prefetchPull(folder, 4);
+    let release = () => {};
+    globalThis.fetch = (async () => {
+      await new Promise<void>((resolve) => (release = resolve));
+      return Response.json({ number: 4, state: "open", mergeState: "QUEUED" });
+    }) as unknown as typeof fetch;
+    const merge = actOnPull(folder, 4, "merge", async () => ({ ok: true, state: "open", threads: [] }));
+    await Bun.sleep(5);
+    expect(activity(folder, 4)).toEqual({ running: "merge" });
+    release();
+    await merge;
+    expect(activity(folder, 4)).toEqual({});
+    expect(await prefetchPull(folder, 4)).toMatchObject({ state: "open", mergeState: "QUEUED" });
   });
 
   test("a failure waits to be seen, until it's dismissed", async () => {
