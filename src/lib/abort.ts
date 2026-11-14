@@ -14,8 +14,11 @@ export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
+/** How long a request waits for the server's answer (its headers) before giving up. */
+export const REQUEST_TIMEOUT_MS = 30_000;
+
 /** A bound on receiving response headers, not the lifetime of a streaming response body. */
-export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, ms = 30_000): Promise<Response> {
+export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit = {}, ms = REQUEST_TIMEOUT_MS): Promise<Response> {
   const ctrl = new AbortController();
   const signal = init.signal ? AbortSignal.any([init.signal, ctrl.signal]) : ctrl.signal;
   const timer = setTimeout(() => ctrl.abort(new DOMException("The server didn't respond in time", "TimeoutError")), ms);

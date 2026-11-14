@@ -820,7 +820,7 @@ export function piRoutes(api: Api) {
         if (body?.mode === "scratch") return Response.json({ workspace: projects.scratchWorkspace() });
         if (!str(body?.projectId, 64) || (body.mode !== "local" && body.mode !== "worktree")) return bad("Expected { projectId, mode, branch?, remote? }");
         try {
-          return Response.json({ workspace: await projects.prepareWorkspace(body.projectId, body.mode, typeof body.branch === "string" ? body.branch : undefined, { remote: body.remote === true }) });
+          return Response.json({ workspace: await projects.prepareWorkspace(body.projectId, body.mode, typeof body.branch === "string" ? body.branch : undefined, { remote: body.remote === true, signal: req.signal }) });
         } catch (err) {
           return fail(err);
         }
