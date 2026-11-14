@@ -136,15 +136,18 @@ function patchOf(part: ToolPart) {
   return part.patch ?? (written !== undefined ? written.replace(/\n$/, "").split("\n").map((l) => `+${l}`).join("\n") : undefined);
 }
 
-/** How long a call has been running, once it's been a few seconds (a long build or test run). */
-function RunningFor() {
-  const [start] = useState(Date.now);
-  const [now, setNow] = useState(start);
+/** How long a call has been running, once it's been a few seconds (a long build or test run).
+ * Counts from the call's own start, so leaving the thread and coming back doesn't reset it. */
+function RunningFor({ since }: { since?: number }) {
+  const [mounted] = useState(Date.now);
+  const start = since ?? mounted;
+  const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  return now - start >= 3000 ? <span className="tool-time">{duration(now - start)}</span> : null;
+  const ms = Math.max(0, now - start);
+  return ms >= 3000 ? <span className="tool-time">{duration(ms)}</span> : null;
 }
 
 export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
@@ -187,7 +190,7 @@ export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
         <span className="tool-status">
           {part.status === "running" ? (
             <>
-              <RunningFor />
+              <RunningFor since={part.startedAt} />
               <Spinner size={12} />
             </>
           ) : part.status === "error" ? (

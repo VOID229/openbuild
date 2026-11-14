@@ -16,6 +16,7 @@ export class Run {
   ended = false;
   private ctrl = new AbortController();
   private waiters = new Set<() => void>();
+  private toolsSeen = new Set<string>();
 
   get signal() {
     return this.ctrl.signal;
@@ -23,8 +24,15 @@ export class Run {
 
   push(e: StreamEvent) {
     if (this.ended) return;
-    this.events.push(e);
+    this.events.push(this.stamped(e));
     this.wake();
+  }
+
+  /** A tool call's first event carries when it started, so a viewer who comes back later times it from then. */
+  protected stamped(e: StreamEvent): StreamEvent {
+    if (e.t !== "tool" || this.toolsSeen.has(e.id)) return e;
+    this.toolsSeen.add(e.id);
+    return e.startedAt === undefined ? { ...e, startedAt: Date.now() } : e;
   }
 
   end() {
