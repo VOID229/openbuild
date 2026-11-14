@@ -8410,6 +8410,37 @@ a.btn-primary {
   white-space: nowrap;
 }
 
+/* In a thread it's above the box, out of the way of the workspace row, on the stash tab's line. */
+.composer-head {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+}
+
+.composer-head:not(:has(> *)) {
+  display: none;
+}
+
+.composer-head .remote-control-row {
+  padding: 0 10px 6px;
+}
+
+.composer-head .stash {
+  position: static;
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-head .remote-control-row + .stash {
+  margin-left: 0;
+}
+
+/* The open list keeps its width over the whole box, not just the stash's share of the line. */
+.composer-head .stash-panel {
+  left: 36px;
+  right: 36px;
+}
+
 /* In a thread, under the composer: where it works, and how full the context is */
 
 .ws-bottom {

@@ -1,6 +1,7 @@
 // The real new-thread composer, for tests/remoteControlToggle.test.ts to look at in Chrome.
 //   ?runtime=claude | codex   the harness the new thread starts on
 //   &thread=on                a Claude Code thread that started with Remote Control on, docked
+//   &stash=2                  with that many stashed messages, so the stash tab sits above the box too
 //   ?settings=general         Settings → General instead, with its Remote control group
 // The server is faked: /api/config answers, everything else is empty.
 import "./fakeServer";
@@ -11,6 +12,7 @@ import { createRoot } from "react-dom/client";
 import { Composer } from "../../../src/components/Composer";
 import { SettingsPage } from "../../../src/components/Settings";
 import { useStore } from "../../../src/lib/store";
+import { addStash } from "../../../src/lib/stash";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { ModelInfo } from "../../../shared/types";
 
@@ -26,6 +28,8 @@ useStore.setState({
   codexModels: listing as any,
   chats: thread ? [{ id: "t", title: "Remote", runtime: "claude", remoteControl: true, createdAt: 0, updatedAt: 0, messages: [] }] : [],
 });
+const stashes = Number(params.get("stash") ?? 0);
+for (let i = 0; i < stashes; i++) addStash(`Stashed ${i + 1}`, []);
 Object.assign(window, { store: useStore });
 document.documentElement.dataset.theme = "dark";
 if (settings) useStore.getState().openSettings(settings as "general");

@@ -1,5 +1,5 @@
 // Remote Control in a real Chrome, desktop and phone: a plain "Remote control" switch on a row of its
-// own under the composer, never in its option row. Claude Code's switches the new thread's opt-in;
+// own beside the composer (under it for a new thread, above it in a thread), never in its option row. Claude Code's switches the new thread's opt-in;
 // Codex has none (it's set for the machine in Settings → General).
 // Set OPENBUILD_SCREENSHOTS to a folder to keep a picture of each state.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -58,6 +58,13 @@ const read = (page: Page) =>
       insideComposer: !!sw.closest('.composer'),
       inBar: !!document.querySelector('.composer-bar').textContent.match(/Remote/),
       below: r.top >= composer.bottom,
+      above: r.bottom <= composer.top,
+      stashLine: (() => {
+        const tab = document.querySelector('.stash-tab');
+        if (!tab) return undefined;
+        const t = tab.getBoundingClientRect();
+        return { sameLine: r.bottom > t.top && r.top < t.bottom, apart: r.right <= t.left, onBox: Math.abs(t.bottom - composer.top) <= 2 };
+      })(),
       left: Math.round(r.left - composer.left),
       overflow: document.documentElement.scrollWidth - innerWidth,
       openPanels: document.querySelectorAll('.popover, [role="dialog"], [role="listbox"]').length,
@@ -132,9 +139,27 @@ describe.skipIf(!browser)("Remote Control under the composer", () => {
     }, 60_000);
   }
 
-  test("a Claude Code thread that started with it on shows it on, below the composer, and fixed", async () => {
+  test("a Claude Code thread that started with it on shows it on, above the composer, and fixed", async () => {
     const page = await open("thread=on", "desktop");
-    expect(await read(page)).toMatchObject({ checked: "true", disabled: true, note: "On since this thread started", insideComposer: false, inBar: false, below: true });
+    expect(await read(page)).toMatchObject({ checked: "true", disabled: true, note: "On since this thread started", insideComposer: false, inBar: false, above: true, below: false });
     await shoot(page, "remote-claude-thread");
   }, 60_000);
+
+  for (const size of ["desktop", "phone"] as const) {
+    test(`a thread with stashed messages (${size}): the switch and the stash tab share the line above the box`, async () => {
+      const page = await open("thread=on&stash=2", size);
+      expect(await read(page)).toMatchObject({ above: true, overflow: 0, stashLine: { sameLine: true, apart: true, onBox: true } });
+      await shoot(page, `remote-claude-thread-stash-${size}`);
+      // Opened, the list spans the box as before, not just the stash's share of the line.
+      await page.eval(`document.querySelector('.stash-tab-btn').click()`);
+      await page.settle();
+      const inset = await page.eval<number[]>(`(() => {
+        const c = document.querySelector('.composer').getBoundingClientRect();
+        const p = document.querySelector('.stash-panel').getBoundingClientRect();
+        return [Math.round(p.left - c.left), Math.round(c.right - p.right)];
+      })()`);
+      expect(inset[0]).toBe(inset[1]);
+      await shoot(page, `remote-claude-thread-stash-open-${size}`);
+    }, 60_000);
+  }
 });
