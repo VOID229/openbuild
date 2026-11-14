@@ -10,7 +10,7 @@ import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, con
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
-import { listModels, onModelsForgotten, settledModels } from "../pi/sessions";
+import { listModels, onModelsForgotten } from "../pi/sessions";
 import { friendFlags, piFlags } from "./extensions";
 import { allowsTools } from "../friends/store";
 import { botsDir } from "./db";
@@ -24,8 +24,8 @@ import { OWNER, parseFriendAuthor } from "../../shared/friends";
 
 import { cancelJobs, JobCancelled, nearestEffort, runHelper, startJob } from "./helpers";
 import { board as jobBoard, cancelAll as cancelCalls, DETACHABLE, forget as forgetJobs, hurry, recover as recoverJobs, setJobHooks, waitingLine } from "./jobs";
-import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
-import { BOT_TOOLS, noteToolUse, preloadTools } from "./toolPreload";
+import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, COMPACT_AT, readDeliveries, saveDeliveries } from "./sessionPolicy";
+import { BOT_TOOLS, noteToolUse, preloadWithStarter } from "./toolPreload";
 import { TurnMeter, unloadedResult, type TurnOutcome } from "./turnMetrics";
 import { follow, liveActivity, newLive, ownStatus, reads, startLine, type Live, type Step } from "./steps";
 
@@ -44,6 +44,14 @@ interface Mind {
   token: string;
   /** The extensions it started with. */
   loaded: string;
+  /** The compaction settings it started with (.pi/settings.json), per model: Pi reads them once. */
+  overrides?: Record<string, unknown>;
+  /** The model its last turn ran on. */
+  model?: string;
+  /** When it was last asked which models it has (learnWindows). */
+  windowsAt?: number;
+  /** How big its session was at its last model request, in prompt tokens. */
+  contextTokens?: number;
   busy: boolean;
   /** A previous deadline expired; no new work until abort confirms idle. */
   needsRecovery?: boolean;
@@ -421,26 +429,61 @@ function workDir(botId: string, lane = "main") {
   return dir;
 }
 
-/** Each model's context window, for compaction settings. Cached per extension set, so a fresh mind
- * (one per conversation switch) doesn't cost a second Pi start; dropped when Pi forgets its models. */
-const windows = new Map<string, { at: number; models: Promise<{ provider: string; id: string; contextWindow?: number }[]> }>();
-function windowsFor(flags: string[], cwd: string) {
-  const key = JSON.stringify(flags);
-  const cached = windows.get(key);
-  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.models;
-  const probe = new PiProcess(["--no-session", ...flags], cwd);
-  // A model it couldn't list keeps the bot-wide defaults, and a failed listing is asked again next time.
-  const models: Promise<{ provider: string; id: string; contextWindow?: number }[]> = settledModels(probe)
-    .catch(() => { if (windows.get(key)?.models === models) windows.delete(key); return []; })
-    .finally(() => probe.close());
-  windows.set(key, { at: Date.now(), models });
-  return models;
+interface ModelWindow { provider: string; id: string; contextWindow: number }
+const WINDOWS = "model-windows";
+/** How often a bot's Pi is asked for its models again. */
+const WINDOWS_EVERY = 10 * 60_000;
+
+/**
+ * Each model's context window, for the compaction settings a Pi starts with. They used to be asked
+ * of a second Pi, started for nothing else and waited for before the bot's own could start: 2.5 to
+ * 3 seconds in front of every turn that started a Pi, which is more than a third of turns. They're
+ * now kept in the bots database, and each bot's own Pi is asked after a turn (learnWindows).
+ */
+export function knownWindows(): ModelWindow[] {
+  const stored = db.getValue<ModelWindow[]>(WINDOWS);
+  return Array.isArray(stored) ? stored.filter((m) => m && typeof m.provider === "string" && typeof m.id === "string" && m.contextWindow > 0) : [];
 }
 
-/** The catalog tools a lane's Pi starts with: the bot's usual ones (toolPreload.ts), or none where it can only chat. */
+/** The models with `listed` added. A model that's no longer listed keeps its window: one a sign-in check hid for a moment isn't forgotten. */
+export function mergeWindows(known: ModelWindow[], listed: { provider?: unknown; id?: unknown; contextWindow?: unknown }[]): ModelWindow[] {
+  const merged = new Map(known.map((m) => [`${m.provider}/${m.id}`, m]));
+  for (const m of listed) {
+    if (typeof m?.provider !== "string" || typeof m.id !== "string" || typeof m.contextWindow !== "number" || !(m.contextWindow > 0)) continue;
+    merged.set(`${m.provider}/${m.id}`, { provider: m.provider, id: m.id, contextWindow: m.contextWindow });
+  }
+  return [...merged.values()].sort((a, b) => `${a.provider}/${a.id}`.localeCompare(`${b.provider}/${b.id}`));
+}
+
+/** Ask a bot's own Pi which models it has, once it has had a turn to list them, and keep their windows. */
+async function learnWindows(mind: Mind) {
+  if (mind.proc.exited || Date.now() - (mind.windowsAt ?? 0) < WINDOWS_EVERY) return;
+  mind.windowsAt = Date.now();
+  try {
+    const { models } = await mind.proc.send<{ models?: { provider?: unknown; id?: unknown; contextWindow?: unknown }[] }>({ type: "get_available_models" }, 20_000);
+    if (!Array.isArray(models)) return;
+    const known = knownWindows();
+    const merged = mergeWindows(known, models);
+    if (JSON.stringify(merged) !== JSON.stringify(known)) db.setValue(WINDOWS, merged);
+  } catch {
+    // Asked again after a later turn.
+    mind.windowsAt = 0;
+  }
+}
+
+/**
+ * A Pi reads its compaction settings once, as it starts. One that started before its model's window
+ * was known (the first on an installation) compacts by Pi's own default, close to the full window.
+ * That's left alone while the session is small: its next start has the right settings. Past this
+ * many tokens it starts over between turns instead, so a long first session isn't carried, and
+ * billed, at hundreds of thousands of tokens a request.
+ */
+const RESTART_FOR_POLICY_AT = COMPACT_AT / 2;
+
+/** The catalog tools a lane's Pi starts with: the starter tools and the bot's usual ones (toolPreload.ts), or none where it can only chat. */
 export function preloadFor(botId: string, lane = "main"): string[] {
   const friend = friendOf(lane);
-  return friend && !allowsTools(friend) ? [] : preloadTools(db.toolUsage(botId));
+  return friend && !allowsTools(friend) ? [] : preloadWithStarter(db.toolUsage(botId));
 }
 
 async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
@@ -453,8 +496,14 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
   }
   const path = sessionGeneration(laneDirectory(sessionDir(), botId, getFocus(botId) ?? svc.directId(botId) ?? "default", lane));
   const flags = flagsFor(lane);
+  const compaction = compactionPolicy(knownWindows());
+  const overrides: Record<string, unknown> = compaction.modelOverrides;
+  // Its model's compaction settings are out of date and its session has grown: see RESTART_FOR_POLICY_AT.
+  // Another model's window being learnt is no reason to start over.
+  const on = existing?.model;
+  const outgrown = !!existing && !!on && (existing.contextTokens ?? 0) > RESTART_FOR_POLICY_AT && JSON.stringify(overrides[on]) !== JSON.stringify(existing.overrides?.[on]);
   // The user changed which extensions bots load, or what a friend's chats allow. Only ever reached between turns, and the session carries on.
-  if (existing && !existing.proc.exited && (existing.loaded !== JSON.stringify(flags) || existing.sessionPath !== path)) {
+  if (existing && !existing.proc.exited && (existing.loaded !== JSON.stringify(flags) || existing.sessionPath !== path || outgrown)) {
     revokeToken(existing.token);
     existing.proc.close();
     minds.delete(key);
@@ -462,13 +511,12 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     return existing;
   }
   if (!piBin()) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
-  const models = await windowsFor(flags, workDir(botId, lane));
 
   // Bot-only project settings; shared auth and extension discovery remain unchanged.
   mkdirSync(join(workDir(botId, lane), ".pi"), { recursive: true, mode: 0o700 });
   // Pi's default hands a turn one queued message per model call. Every message that arrived while a
   // tool ran goes in together instead, right after the tools return.
-  writeFileSync(join(workDir(botId, lane), ".pi", "settings.json"), JSON.stringify({ compaction: compactionPolicy(models), steeringMode: "all" }), { mode: 0o600 });
+  writeFileSync(join(workDir(botId, lane), ".pi", "settings.json"), JSON.stringify({ compaction, steeringMode: "all" }), { mode: 0o600 });
   const token = mintToken(botId, lane);
   // The tools this bot keeps reaching for are declared from the start, so a usual turn loads nothing
   // (extension.ts adds them to what the session had loaded). A chat that only chats has none.
@@ -478,7 +526,7 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     workDir(botId, lane),
     { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId, OPENBOTS_PRELOAD: preload.join(",") },
   );
-  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: workingPhrase(), fresh: true, preloaded: preload.length };
+  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), overrides, busy: true, sent: false, draft: "", typing: false, quiet: false, activity: workingPhrase(), fresh: true, preloaded: preload.length };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(key, mind);
   return mind;
@@ -659,6 +707,17 @@ function noteRan(botId: string, conversationId: string | undefined, chain: (stri
   svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "model", text: `Switched to ${on.name || id}`, ...(twin ? { detail: on.model.slice(0, slash) } : {}), model: on.model } });
 }
 
+/**
+ * A message the bot just wrote is in its session already, as the call that sent it: the next prompt's
+ * transcript leaves it out instead of showing it its own words again as a line it has "already seen".
+ * It comes back when it changes (a reaction, an answer), as any line does. Only in the session that
+ * wrote it: another chat's session, or a helper that wrote for the bot, never saw the call.
+ */
+function ownWords(mind: Mind, messageId: string) {
+  const row = db.getMessage(messageId);
+  if (row) mind.contextKeys?.add(deliveryIdentity(row.conversationId, row.message));
+}
+
 /** Our extension returns a posted message id only after the service actually accepted it. */
 export function successfulMessageTool(record: PiRecord): boolean {
   return record.type === "tool_execution_end"
@@ -776,11 +835,16 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   }
   const wrote = successfulMessageTool(record);
   if (wrote) mind.meter?.reply();
+  if (wrote) ownWords(mind, String(record.result.details.id));
   mind.sent ||= wrote;
   if (record.type === "tool_execution_start") mind.acted = true;
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
   if (ended?.role === "assistant") mind.meter?.request(ended.usage, ended.stopReason === "error");
+  if (ended?.role === "assistant" && ended.usage) {
+    const size = (["input", "cacheRead", "cacheWrite"] as const).reduce((n, key) => n + (typeof ended.usage[key] === "number" ? ended.usage[key] : 0), 0);
+    if (size > 0) mind.contextTokens = size;
+  }
   if (unloadedResult(ended, BOT_TOOLS.catalog)) mind.meter?.unloaded();
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
@@ -1062,6 +1126,7 @@ async function runTurn(botId: string, all: Wake[]) {
       const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent || err instanceof PiTimeoutError ? err : modelStartFailure(err));
       try {
         const on = await applyModel(m.proc, botId, index ? model : undefined, key);
+        m.model = on.model;
         // The switch is told once the model has taken the turn on, so a model that fails first isn't.
         m.onCommit = () => ran(on);
       } catch (err) {
@@ -1102,7 +1167,8 @@ async function runTurn(botId: string, all: Wake[]) {
         if (!m.error) commit(m);
         if (conversationId) {
           for (const part of plainReply(m, m.draft)) {
-            svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: part.slice(0, 8000) });
+            const posted = svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: part.slice(0, 8000) });
+            ownWords(m, posted.id);
             meter.reply();
           }
         }
@@ -1111,6 +1177,8 @@ async function runTurn(botId: string, all: Wake[]) {
       }
     });
     await release(botId, m, key);
+    // Its models are listed by now: their windows are kept for the next Pi's compaction settings.
+    void learnWindows(m);
     if (handled) return;
     // Stopped before the model saw any of it: the chat is as unread as it was.
     if (unsent) return setStatus(botId, { state: "idle" });
@@ -1361,7 +1429,7 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
   parts.push(`The time is ${new Date().toString()}.`);
   // A reaction steered in says what to do with it itself (service.REACT_BACK).
   if (steered) parts.push(jobs.some((j) => j.kind === "messages") ? `This arrived while you were working. ${STEER_ACK}` : "");
-  else parts.push("Use send_message to reply (one call per bubble, in this conversation unless you name another). If there's nothing to say, send nothing and end with the plain reply [silent].");
+  else parts.push("Use send_message to reply (one call per bubble, in this conversation unless you name another; done true on the last one ends the turn). If there's nothing to say, send nothing and end with the plain reply [silent].");
   return parts.filter(Boolean).join("\n\n");
 }
 
@@ -1614,7 +1682,6 @@ export function startBots() {
   // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
   hot.openbotsModelsWatch?.();
   hot.openbotsModelsWatch = onModelsForgotten(() => {
-    windows.clear();
     if (svc.piSetup()) void svc.greetOnFirstOpen();
   });
   resumeWatches();

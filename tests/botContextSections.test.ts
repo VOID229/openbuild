@@ -48,7 +48,7 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
     a.equal(first.appendSystemPrompt, '', 'nothing left in the addendum to re-send whole');
     a.match(first.sections.openbots, /You are Boss, one of the user's bots/);
     a.match(first.sections.openbots_memory, /Likes tea/);
-    a.match(first.sections.openbots_machines, /You have a computer on each machine[\\s\\S]*Machines you can reach/);
+    a.match(first.sections.openbots_machines, /You have a computer on each machine[\\s\\S]*Your computer is on this server/);
     a.doesNotMatch(JSON.stringify(first), /The time is/);
 
     // A later turn, with the clock moved on: nothing to re-send.
@@ -67,7 +67,7 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
     // A Pi without sections gets it all as one addendum, still with no clock, and only once.
     const legacy = { appendSystemPrompt: 'Be brief.' };
     await hook(legacy);
-    a.match(legacy.appendSystemPrompt, /^Be brief\\.\\n\\nYou are Boss[\\s\\S]*Machines you can reach[\\s\\S]*Miso/);
+    a.match(legacy.appendSystemPrompt, /^Be brief\\.\\n\\nYou are Boss[\\s\\S]*Your computer is on this server[\\s\\S]*Miso/);
     a.doesNotMatch(legacy.appendSystemPrompt, /The time is/);
     const once = legacy.appendSystemPrompt;
     await hook(legacy);

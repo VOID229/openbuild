@@ -38,9 +38,9 @@ export function setIsolation(device: string, kind: unknown): Isolation {
   return kind;
 }
 
-/** Every machine, what it allows this server's bots right now, and how they're kept apart there. */
-export async function machines(): Promise<ComputerTarget[]> {
-  return (await computerTargets()).map((t) => ({ ...t, isolation: isolationOf(t.device, t.grants) }));
+/** Every machine, what it allows this server's bots right now, and how they're kept apart there. `engines: false` leaves this server's container engines unasked. */
+export async function machines(opts: { engines?: boolean } = {}): Promise<ComputerTarget[]> {
+  return (await computerTargets(opts)).map((t) => ({ ...t, isolation: isolationOf(t.device, t.grants) }));
 }
 
 const LOCAL_NAMES = ["local", "this server", "here", "server"];
@@ -110,10 +110,14 @@ const NOTE_WAIT = 2500;
 /** The machines a bot can reach, for its context. A device slow to answer doesn't hold up the turn: it's listed as not checked. */
 export async function machinesNote(): Promise<string> {
   const here = devices.deviceName();
-  const listed = await Promise.race([machines().catch(() => undefined), Bun.sleep(NOTE_WAIT).then(() => undefined)]);
+  // The note says how bots are kept apart on each machine, which is the user's setting: no engine is asked,
+  // which took `podman info` two seconds in front of a turn's first model request, whenever a minute had passed since the last.
+  const listed = await Promise.race([machines({ engines: false }).catch(() => undefined), Bun.sleep(NOTE_WAIT).then(() => undefined)]);
   const lines = listed
     ? listed.map((t) => machineLine(t, here))
     : [machineLine({ device: "local", name: here, status: "ready", isolation: isolationOf("local") }, here), ...devices.readDevices().map((d) => `- ${d.name} (machine id ${d.id}): not checked yet; a call there finds out.`)];
+  // Nothing is paired: there's one computer, and nothing to say about choosing between several.
+  if (!devices.readDevices().length) return ["Your computer is on this server: bash, read, write, edit, browser and process run there. A link to a file in a message is file:///path.", ...lines].join("\n");
   return [
     "Machines you can reach. bash, read, write, edit, browser and process run on this server unless you pass machine (a name or id from this list), and send_message takes machine for its images and attach_screenshot. You have a computer of your own on each: its own home folder, files, processes and browser, not shared with the others. A call a machine refuses or can't take fails; it never runs somewhere else instead. Whether a paired device allows this server's bots is its owner's choice, made on that device. A link to a file in a message is file:///path on this server, or file://<machine id>/path on another machine.",
     ...lines,

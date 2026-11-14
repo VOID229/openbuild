@@ -116,10 +116,17 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
   switch (method) {
     case "context": {
       const sections = contextSections(botId);
-      sections.openbots_machines = [sections.openbots_machines, await machinesNote(), await webSearchNote(), apps.contextNote()].join("\n\n");
+      // How to search the web and how to use apps ride with their tools: a bot that hasn't loaded
+      // them gets a line saying what's there, and the rest when it loads one (tool_notes). A Pi that
+      // doesn't say what it has loaded gets it all, as before.
+      const active = Array.isArray(p.tools) ? new Set(p.tools.map(String)) : undefined;
+      const has = (...names: string[]) => !active || names.some((name) => active.has(name));
+      sections.openbots_machines = [sections.openbots_machines, await machinesNote(), await webSearchNote(has("bot_web_search")), apps.contextNote(has("apps", "use_app"))].join("\n\n");
       // A bot with a job board has the tool for it declared, whatever its session had loaded.
       return { sections, ...(hasBoard(botId) ? { load: ["jobs"] } : {}) };
     }
+    case "tool_notes":
+      return toolNotes(Array.isArray(p.names) ? p.names.map(String) : []);
     case "send_message":
       return sendMessage(botId, p);
     case "react":
@@ -286,7 +293,10 @@ export function contextSections(botId: string): Record<string, string> {
     "Messages show their short id in brackets, (replying to …) when they quote one, and the reactions on them numbered #1, #2… (→ #n answers another). To answer an older message, quote it with send_message reply_to; leave reply_to out for the newest. React with react; to react to a reaction, pass its number as to_reaction.",
     `When seeing beats reading (a chart, diagram, demo, mockup, small interactive tool or visual summary), put a self-contained HTML page in the chat with html_render, drawn in a sandboxed frame about ${BOT_HTML_WIDTH}px wide. Not for quick answers; don't restate the page in a message, only add what it doesn't say.`,
     "Direct and group chats each have a to-do list the user watches (in the chat's details, its progress in the header); it shows in your context. For work with several real steps, not quick things, lay them out with todo add, mark each doing as you start it and done as soon as it's finished, and remove ones that stop applying; updates need no message. In a group it's shared: take an item by marking it doing, and leave ones someone else is on. It's temporary: once the work is finished and you've said so, todo clear in that turn; in a long list still going, todo clear which done. Clear it too when the work changes or the user asks.",
-    "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll says you haven't voted, vote with vote_poll by what you honestly think; it shows on the poll, so don't announce it, and add a message only if you've more to say. A poll closes once everyone has answered; you can still change your vote after if you truly change your mind, and whoever asked will hear.",
+    // Polls are for group chats: a bot that's in none has nobody to ask and nothing to vote on.
+    convos.some((c) => c.kind === "group")
+      ? "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll says you haven't voted, vote with vote_poll by what you honestly think; it shows on the poll, so don't announce it, and add a message only if you've more to say. A poll closes once everyone has answered; you can still change your vote after if you truly change your mind, and whoever asked will hear."
+      : "",
   ];
   const instructions = [
     bot.role ? `Your role, as your teammates see it: ${bot.role}` : "",
@@ -466,11 +476,22 @@ export function typingTime(text: string): number {
   return Math.min(2400, 450 + text.length * 18);
 }
 
+/**
+ * How long a bubble waits before it lands. A few messages written at once arrive one after another,
+ * not all in the same instant: each lands no sooner after the bot's last one in that chat than it
+ * could have been typed. The first of them waits for nothing: the model's own time is already more
+ * than typing it would have taken, and holding it only kept the user from an answer that was ready.
+ */
+export function bubbleHold(text: string, lastAt: number | undefined, now = Date.now()): number {
+  return lastAt === undefined ? 0 : Math.max(0, lastAt + typingTime(text) - now);
+}
+
 async function deliver(botId: string, conversationId: string, text: string, images: string[], replyTo: unknown) {
-  // While the chat shows it typing, a bubble lands no sooner than someone could have typed it, so a
-  // few messages written at once still arrive one after another instead of all in the same instant.
-  const typed = svc.typingFor(conversationId, botId);
-  if (typed !== undefined && typed < typingTime(text)) await Bun.sleep(typingTime(text) - typed);
+  if (svc.typingFor(conversationId, botId) !== undefined) {
+    const last = db.messages(conversationId, 6).findLast((r) => r.message.author === botId && !r.message.event);
+    const hold = bubbleHold(text, last?.message.at);
+    if (hold) await Bun.sleep(hold);
+  }
   let reply: string | undefined;
   if (typeof replyTo === "string" && replyTo) {
     const found = db.findMessages(replyTo, [conversationId]);
@@ -699,9 +720,24 @@ async function searchProviders() {
   return list.filter((c) => c.keys.length);
 }
 
-export async function webSearchNote(): Promise<string> {
+/** What a bot is told about tools it just loaded: the guides its context leaves out until then (see the context call). */
+export async function toolNotes(names: string[]): Promise<string> {
+  const notes: string[] = [];
+  if (names.includes("bot_web_search")) notes.push(await webSearchNote());
+  if (names.includes("apps") || names.includes("use_app")) notes.push(apps.contextNote());
+  return notes.join("\n\n");
+}
+
+/**
+ * Web search, for a bot's context. In full: when to search, each provider and what it's good at, and
+ * how to cite. That's two thousand characters with two providers, in every request of every bot,
+ * for a tool most turns never load: without `full` it's one line saying search is there and with
+ * which providers, and the guide comes with the tool.
+ */
+export async function webSearchNote(full = true): Promise<string> {
   const ids = await searchProviders().then((list) => list.map((c) => c.provider)).catch(() => [] as SearchProviderId[]);
   if (!ids.length) return "Web search isn't set up, so bot_web_search won't work until the user adds a provider in Settings → Bots → Web search. Your browser can still look things up.";
+  if (!full) return `You can search the web with bot_web_search (${ids.join(", ")}), on the user's own accounts: load it when an answer depends on recent events, live facts or specifics you aren't sure of. How to use each provider comes with it.`;
   return [
     "You can search the web with bot_web_search. It runs on the user's own accounts, so a search can cost them money: search when the answer depends on recent events, live facts or specifics you aren't sure of, not for what you already know. Use the cheapest provider that fits, and try another if one fails or gives poor results.",
     `Your providers:\n${providerGuide(ids)}`,

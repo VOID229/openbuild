@@ -295,9 +295,9 @@ test("the runner logs each turn's metrics and learns the bot's usual tools", asy
       const line = readFileSync(log, 'utf8');
       for (const text of ['private', 'please', 'Looking', 'All done', conversationId]) a.ok(!line.includes(text), text);
       a.equal(statSync(log).mode & 0o777, 0o600);
-      // One turn with bash isn't a habit yet.
+      // One turn with bash isn't a habit yet: it's there as the tool every bot starts with.
       a.deepEqual(Object.keys(db.toolUsage(bot.id)), ['bash']);
-      a.deepEqual(runner.preloadFor(bot.id), []);
+      a.deepEqual(runner.preloadFor(bot.id), ['bash']);
 
       // Again, with bash and use_app: bash is one of its usual tools now, and its next Pi starts with it.
       prompt = await ask('and again');

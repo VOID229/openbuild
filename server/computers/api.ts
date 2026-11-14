@@ -401,10 +401,14 @@ function remote(deviceId: string): ComputerApi {
 
 export const computerApi = (device: string): ComputerApi => (device === "local" ? local : remote(device));
 
-/** Every machine bots can reach, and what each allows them right now. Asks each paired device. */
-export async function computerTargets(): Promise<ComputerTarget[]> {
-  const here = await capabilities();
-  const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, engines: here.engines };
+/**
+ * Every machine bots can reach, and what each allows them right now. Asks each paired device.
+ * Without `engines` this server's container engines aren't probed: `podman info` and `docker info`
+ * take seconds, and only Settings and the bots' computers list show what they find.
+ */
+export async function computerTargets(opts: { engines?: boolean } = {}): Promise<ComputerTarget[]> {
+  const here = opts.engines === false ? undefined : await capabilities();
+  const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, ...(here ? { engines: here.engines } : {}) };
   const remote = await Promise.all(
     devices.readDevices().map(async (d): Promise<ComputerTarget> => {
       try {
