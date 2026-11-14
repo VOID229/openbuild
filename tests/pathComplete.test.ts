@@ -1,7 +1,7 @@
 // The folder field's completion rules (src/components/PathField.tsx): typing "~/Doc" completes to
 // "~/Documents/" on Tab, and the same on a paired device, since only the listing is per device.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { commonPrefix, completePath, matchFolders, pathParts } from "../src/lib/pathComplete";
+import { commonPrefix, completePath, matchFolders, matchRange, pathParts } from "../src/lib/pathComplete";
 
 describe("pathParts", () => {
   test("splits at the last slash, keeping what was typed", () => {
@@ -35,6 +35,21 @@ describe("matchFolders", () => {
   test("everything matches an empty fragment", () => {
     expect(matchFolders(names, "")).toHaveLength(4);
   });
+  test("searches inside names too, after the folders that start with it", () => {
+    expect(matchFolders(["my-tools", "doc-tools", "tools", "Atlas"], "tool")).toEqual(["tools", "my-tools", "doc-tools"]);
+    expect(matchFolders(names, "load")).toEqual(["Downloads"]);
+  });
+});
+
+describe("matchRange", () => {
+  test("where the fragment sits in the name, whatever its case", () => {
+    expect(matchRange("doc-Tools", "tool")).toEqual([4, 8]);
+    expect(matchRange("Documents", "doc")).toEqual([0, 3]);
+  });
+  test("nothing for an empty fragment or a name without it", () => {
+    expect(matchRange("Documents", "")).toBeUndefined();
+    expect(matchRange("Documents", "x")).toBeUndefined();
+  });
 });
 
 describe("completePath", () => {
@@ -54,6 +69,16 @@ describe("completePath", () => {
 
   test("a common prefix no longer than what's typed changes nothing", () => {
     expect(completePath("~/Documents", ["Documents", "DocumentsOld"])).toBe("~/Documents");
+  });
+
+  test("a folder found inside its name is completed only when it's the one match", () => {
+    expect(completePath("~/build", ["openbuild"])).toBe("~/openbuild/");
+    expect(completePath("~/tool", ["my-tools", "doc-tools"])).toBe("~/tool");
+  });
+
+  test("the one folder that starts with the fragment completes, whatever else search found", () => {
+    expect(completePath("~/tool", ["tools", "my-tools", "doc-tools"])).toBe("~/tools/");
+    expect(completePath("~/op", ["openbuild", "openchat", "devops"])).toBe("~/open");
   });
 
   test("no matches changes nothing", () => {
