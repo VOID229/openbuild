@@ -171,6 +171,11 @@ const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-dispos
 const PROXY_HEADER_TIMEOUT_MS = 6000;
 /** A piece of a file has to arrive in full before the device answers, over whatever link there is. */
 const PROXY_UPLOAD_TIMEOUT_MS = 120_000;
+/**
+ * A new thread's workspace may fetch its base branch first (up to REMOTE_FETCH_TIMEOUT_MS) and then
+ * make a worktree: longer than an ordinary answer, still inside the app's own wait (REQUEST_TIMEOUT_MS).
+ */
+const PROXY_WORKSPACE_TIMEOUT_MS = 25_000;
 
 /**
  * Forward a request to a paired device's server. The browser never sees the device token: it is
@@ -191,7 +196,7 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
   }
   headers.set("authorization", `Bearer ${device.token}`);
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-  const timeout = req.method === "PUT" && path.startsWith("/api/attachments/") ? PROXY_UPLOAD_TIMEOUT_MS : PROXY_HEADER_TIMEOUT_MS;
+  const timeout = req.method === "PUT" && path.startsWith("/api/attachments/") ? PROXY_UPLOAD_TIMEOUT_MS : req.method === "POST" && path === "/api/workspaces" ? PROXY_WORKSPACE_TIMEOUT_MS : PROXY_HEADER_TIMEOUT_MS;
   let lastError = "the device didn't answer";
   for (const base of device.urls) {
     const target = `${base.replace(/\/$/, "")}${path}${url.search}`;

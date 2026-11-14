@@ -185,6 +185,34 @@ test("a thread starts with the harness, model, effort, speed and branch asked fo
   expect(admitted).toEqual([]);
 });
 
+test("a worktree thread starts from the branch's remote branch unless told not to, and the local branch never moves", async () => {
+  const git = (cwd: string, args: string) => execSync(`git -c user.name=t -c user.email=t@t ${args}`, { cwd, stdio: "pipe" }).toString().trim();
+  const origin = realpathSync(mkdtempSync(join(tmpdir(), "openbuild-bot-origin-")));
+  const local = git(repo, "rev-parse main");
+  try {
+    git(origin, "init -q --bare -b main");
+    git(repo, `remote add origin ${origin}`);
+    git(repo, "push -q origin main");
+    // Someone else pushes to main: origin is a commit ahead of the project's main.
+    const other = join(origin, "clone");
+    git(origin, `clone -q ${origin} ${other}`);
+    git(other, "commit -q --allow-empty -m ahead");
+    git(other, "push -q origin HEAD:main");
+    const ahead = git(other, "rev-parse HEAD");
+
+    const fromRemote = await call("start", { project: project.name, prompt: "Go", branch: "main" });
+    expect(fromRemote.from).toBe("origin/main");
+    expect(git((storage.getChat(admitted[0].threadId) as any).workspace.cwd, "rev-parse HEAD")).toBe(ahead);
+    const fromLocal = await call("start", { project: project.name, prompt: "Go", branch: "main", remote: false });
+    expect(fromLocal.from).toBe("main");
+    expect(git((storage.getChat(admitted[1].threadId) as any).workspace.cwd, "rev-parse HEAD")).toBe(local);
+    expect(git(repo, "rev-parse main")).toBe(local);
+  } finally {
+    execSync("git remote remove origin", { cwd: repo, stdio: "ignore" });
+    rmSync(origin, { recursive: true, force: true });
+  }
+});
+
 test("without the choice, a thread gets the user's default for that harness", async () => {
   svc.updateSettings({ harnesses: { permissions: { claude: "safe" } } });
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "yolo" });

@@ -352,6 +352,8 @@ export interface Workspace {
   worktree?: boolean;
   /** The branch the worktree was started from. */
   base?: string;
+  /** The remote branch it started from instead, fetched just before ("origin/main"), when it started from the remote. */
+  remoteBase?: string;
 }
 
 /** The pull request opened from a thread's worktree branch, as GitHub last reported it (server/pullRequests.ts). */
@@ -525,6 +527,12 @@ export interface GitInfo {
   /** The short commit hash when HEAD is detached (no `branch`). */
   head?: string;
   branches: string[];
+  /** The repository's default branch (origin's HEAD, else main or master) when it's one of `branches`. */
+  defaultBranch?: string;
+  /** Branches checked out in another worktree (`git worktree list`), not counting this checkout. */
+  worktrees?: string[];
+  /** Whether the repository has a remote, for a worktree to start from. */
+  remote?: boolean;
   /** Uncommitted changes (number of changed paths). */
   dirty: number;
   ahead?: number;

@@ -4,7 +4,7 @@ import { ThreadAccountSelect } from "./RuntimeAccounts";
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
 import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitCommitHorizontal, GitFork, Laptop, Plus, Search, SquareTerminal, X } from "lucide-react";
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
@@ -15,7 +15,8 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { IconButton, Popover, RuntimeIcon, Spinner } from "./primitives";
+import { branchRows, defaultRef, pickedRef } from "../lib/branches";
+import { IconButton, Popover, RuntimeIcon, Spinner, Toggle } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 export { RuntimeIcon };
@@ -307,59 +308,121 @@ function ModeMenu() {
   );
 }
 
+const REMOTE_TIP = "Uses the latest commit of the base branch's tracked remote branch, even if its name differs. Otherwise uses the same-named branch on origin. Uses your local branch if that remote branch is missing.";
+
 function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const pref = useStore((s) => s.settings.workspace);
-  const updateSettings = useStore((s) => s.updateSettings);
-  // A detached checkout has no branch: it's on a commit, which stands in for the current branch.
-  const current = info?.branch ?? info?.head;
-  const shown = pref.branch && info?.branches.includes(pref.branch) ? pref.branch : current;
-  const ShownIcon = info?.head && shown === info.head ? GitCommitHorizontal : GitBranch;
-  // Switching the checkout's branch would carry uncommitted changes along (or fail).
-  const locked = pref.mode === "local" && !!info?.dirty;
+  const worktree = pref.mode === "worktree";
+  const shown = pickedRef(info, pref.mode, pref.branch);
+  const commit = !!info?.head && shown === info.head;
+  const ShownIcon = commit ? GitCommitHorizontal : GitBranch;
+  // Only a branch has a remote branch to start from.
+  const remote = worktree && pref.fromRemote !== false && info?.remote !== false && !commit;
   return (
     <>
       <button
         ref={anchor}
         type="button"
         className={cx("ws-pill", open && "ws-pill-open")}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-expanded={open}
-        data-tooltip={pref.mode === "worktree" ? "Branch the worktree starts from" : "Branch to work on"}
+        data-tooltip={worktree ? "Branch the worktree starts from" : "Branch to work on"}
         data-tooltip-side="top"
         onClick={() => setOpen((o) => !o)}
       >
         <ShownIcon size={14} />
-        <span className="ws-pill-text">{pref.mode === "worktree" ? `from ${shown ?? "…"}` : (shown ?? "…")}</span>
+        <span className="ws-pill-text">{worktree ? `From ${shown ?? "…"}${remote && shown ? " (remote)" : ""}` : (shown ?? "…")}</span>
         {loading ? <Spinner size={11} /> : <ChevronDown size={13} className="pill-chevron" />}
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Branch" fixed="auto">
-        <div className="menu-label menu-label-top">{pref.mode === "worktree" ? "Start the worktree from" : "Work on branch"}</div>
-        {locked && <p className="ws-note">{info!.dirty} uncommitted change{info!.dirty === 1 ? "" : "s"} in the checkout, so it stays on {current}. Use a new worktree to work on another branch.</p>}
-        <div className="select-list ws-branches" onKeyDown={(e) => arrowNav(e)}>
-          {(info?.head ? [info.head, ...info.branches] : (info?.branches ?? [])).map((b) => (
-            <button
-              key={b}
-              type="button"
-              role="option"
-              aria-selected={b === shown}
-              className="menu-item"
-              disabled={locked && b !== current}
-              onClick={() => {
-                updateSettings({ workspace: { ...pref, branch: b === current ? undefined : b } });
-                setOpen(false);
-              }}
-            >
-              {b === info?.head ? <GitCommitHorizontal size={14} /> : <GitBranch size={14} />}
-              <span className="menu-item-label">{b}</span>
-              {b === current && <span className="badge">current</span>}
-              {b === shown && <Check size={15} className="menu-check" />}
-            </button>
-          ))}
-          {!loading && !info?.branches.length && <p className="menu-empty">No branches yet.</p>}
-        </div>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" label="Branch" fixed="auto">
+        <BranchList info={info} loading={loading} shown={shown} onDone={() => setOpen(false)} />
       </Popover>
+    </>
+  );
+}
+
+/** The branch menu's search, its refs (the default and current ones first) and, for a worktree, where it starts. */
+function BranchList({ info, loading, shown, onDone }: { info?: GitInfo; loading: boolean; shown?: string; onDone: () => void }) {
+  const pref = useStore((s) => s.settings.workspace);
+  const updateSettings = useStore((s) => s.updateSettings);
+  const [query, setQuery] = useState("");
+  const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  useFocusOnShow(search);
+  const worktree = pref.mode === "worktree";
+  const current = info?.branch ?? info?.head;
+  // Switching the checkout's branch would carry uncommitted changes along (or fail).
+  const locked = pref.mode === "local" && !!info?.dirty;
+  const rows = useMemo(() => branchRows(info, query), [info, query]);
+  const fallback = defaultRef(info, pref.mode);
+  const pick = (ref: string) => {
+    updateSettings({ workspace: { ...pref, branch: ref === fallback ? undefined : ref } });
+    onDone();
+  };
+  const usable = rows.filter((r) => !locked || r.name === current);
+  return (
+    <>
+      <label className="pp-search ws-search">
+        <Search size={15} />
+        <input
+          ref={search}
+          value={query}
+          placeholder="Search branches…"
+          aria-label="Search branches"
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && usable[0]) {
+              e.preventDefault();
+              pick(usable[0].name);
+            } else if (e.key === "ArrowDown") {
+              e.preventDefault();
+              list.current?.querySelector<HTMLElement>("button:not(:disabled)")?.focus();
+            }
+          }}
+        />
+      </label>
+      <div className="menu-label menu-label-top">{worktree ? "Start the worktree from" : "Work on branch"}</div>
+      {locked && <p className="ws-note">{info!.dirty} uncommitted change{info!.dirty === 1 ? "" : "s"} in the checkout, so it stays on {current}. Use a new worktree to work on another branch.</p>}
+      <div
+        ref={list}
+        className="select-list ws-branches"
+        role="listbox"
+        aria-label={worktree ? "Start the worktree from" : "Work on branch"}
+        onKeyDown={(e) => {
+          // Up from the first ref goes back to the search; typing searches.
+          const first = list.current?.querySelector("button:not(:disabled)");
+          if (e.key === "ArrowUp" && document.activeElement === first) {
+            e.preventDefault();
+            search.current?.focus();
+          } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) search.current?.focus();
+          else arrowNav(e);
+        }}
+      >
+        {rows.map((r, i) => (
+          <Fragment key={r.name}>
+            {/* The pinned refs, then a line, then the rest. */}
+            {i > 0 && rows[i - 1]!.pinned && !r.pinned && <div className="menu-sep" role="separator" />}
+            <button type="button" role="option" aria-selected={r.name === shown} className="menu-item" disabled={locked && r.name !== current} onClick={() => pick(r.name)}>
+              {r.commit ? <GitCommitHorizontal size={14} /> : <GitBranch size={14} />}
+              <span className="menu-item-label">{r.name}</span>
+              {r.default && <span className="badge">default</span>}
+              {r.current && <span className="badge">current</span>}
+              {r.worktree && <span className="badge" data-tooltip="Checked out in a worktree" data-tooltip-side="left">worktree</span>}
+              {r.name === shown && <Check size={15} className="menu-check" />}
+            </button>
+          </Fragment>
+        ))}
+        {!loading && !info?.branches.length && !info?.head && <p className="menu-empty">No branches yet.</p>}
+        {!rows.length && query.trim() && <p className="menu-empty">No branch matches “{query.trim()}”.</p>}
+      </div>
+      {worktree && (
+        <div className="ws-remote">
+          <label htmlFor="ws-remote-switch" data-tooltip={REMOTE_TIP} data-tooltip-side="top">Start from remote</label>
+          <Toggle id="ws-remote-switch" className="toggle-sm" label="Start from remote" checked={pref.fromRemote !== false} onChange={(on) => updateSettings({ workspace: { ...pref, fromRemote: on } })} />
+        </div>
+      )}
     </>
   );
 }

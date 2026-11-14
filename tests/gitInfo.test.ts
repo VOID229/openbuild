@@ -35,6 +35,23 @@ describe("gitInfo", () => {
     git("switch", "main");
   });
 
+  test("the default branch, and the branches other worktrees have checked out", async () => {
+    git("branch", "side");
+    git("branch", "elsewhere");
+    const wt = join(dir, "..", `${dir.split("/").pop()}-wt`);
+    git("worktree", "add", "-q", wt, "side");
+    try {
+      const info = await gitInfo(dir);
+      expect(info.defaultBranch).toBe("main");
+      // This checkout's own branch is "current", not another worktree's.
+      expect(info.worktrees).toEqual(["side"]);
+      expect(info.remote).toBe(false);
+    } finally {
+      git("worktree", "remove", "--force", wt);
+      git("branch", "-D", "side", "elsewhere");
+    }
+  });
+
   test("a folder that isn't a repository has neither", async () => {
     const plain = mkdtempSync(join(tmpdir(), "git-info-plain-"));
     const info = await gitInfo(plain);

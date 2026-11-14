@@ -136,8 +136,10 @@ export interface NewWorkspace {
   defaultMode?: "local" | "worktree" | "last-used";
   /** Close a worktree thread (and remove its clean worktree) once its pull request merges. Absent = on. */
   closeMerged?: boolean;
-  /** Local: the branch to switch to. Worktree: the branch to start from. None = the current one. */
+  /** Local: the branch to switch to. Worktree: the branch to start from. None = the current one (a detached checkout's worktree: the default branch). */
   branch?: string;
+  /** A worktree starts from its base branch's remote branch, fetched first, instead of the local branch. Absent = on. */
+  fromRemote?: boolean;
 }
 
 export type DetectStatus = "checking" | "valid" | "invalid" | "error";
