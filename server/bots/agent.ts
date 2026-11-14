@@ -1177,7 +1177,9 @@ async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSig
     size += d.length;
   }, signal);
   const output = Buffer.concat(chunks).toString("utf8").slice(0, 100_000);
-  return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 100_000, ...(on && { ranOn: on }) };
+  // It left something running: said, so the bot doesn't take the output for all there will be.
+  const background = result.background ? { note: "The command returned, and something it started is still running in the background. Its later output isn't captured here. For a program that keeps running, use process: it can be read and stopped." } : {};
+  return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 100_000, ...background, ...(on && { ranOn: on }) };
 }
 
 async function read(botId: string, p: Record<string, unknown>) {

@@ -23,6 +23,8 @@ import { Browser, PIPE_SCRIPT } from "./browser";
 export const IMAGE = "localhost/openbots-computer:1";
 const CONTAINER_HOME = "/home/bot";
 const OUTPUT_KEEP = 256 * 1024;
+/** How long after a command's shell exits its output is still read, when something it started keeps that open. */
+export const EXIT_GRACE_MS = 250;
 
 const DOCKERFILE = `FROM docker.io/library/debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
@@ -338,8 +340,17 @@ export class Computer {
 
   // -------------------------------------------------------------- commands
 
-  /** Run a command to the end, streaming its output. Timeout and timeout:<ms> are milliseconds. */
-  async exec(command: string, opts: { cwd?: string; timeout?: number; env?: Record<string, string>; onData?: (chunk: Buffer) => void; signal?: AbortSignal } = {}): Promise<{ exitCode: number | null }> {
+  /**
+   * Run a command to the end, streaming its output. Timeout and timeout:<ms> are milliseconds.
+   *
+   * The end is the shell exiting, not its output closing. A command that leaves something running
+   * with the shell's output still open (`server &`, a daemon it started) used to hold the call for
+   * as long as that ran: until the timeout, which then killed it and failed a command that had
+   * worked. Now the call returns once the shell is gone and what it printed has been read, with
+   * `background` set; what's left keeps running, as it would from a terminal, and its later output
+   * is read and dropped so it never blocks on a full pipe.
+   */
+  async exec(command: string, opts: { cwd?: string; timeout?: number; env?: Record<string, string>; onData?: (chunk: Buffer) => void; signal?: AbortSignal } = {}): Promise<{ exitCode: number | null; background?: boolean }> {
     if (opts.signal?.aborted) throw new Error("aborted");
     await this.ensure();
     if (opts.signal?.aborted) throw new Error("aborted");
@@ -347,23 +358,34 @@ export class Computer {
     const { child, kill } = this.spawnShell(command, cwd, opts.env ?? {}, false);
     return new Promise((resolvePromise, reject) => {
       let timedOut = false;
+      let settled = false;
+      let grace: ReturnType<typeof setTimeout> | undefined;
       const timer = opts.timeout && opts.timeout > 0 ? setTimeout(() => ((timedOut = true), kill()), opts.timeout) : undefined;
       const onAbort = () => kill();
       opts.signal?.addEventListener("abort", onAbort, { once: true });
-      child.stdout?.on("data", (d: Buffer) => opts.onData?.(d));
-      child.stderr?.on("data", (d: Buffer) => opts.onData?.(d));
-      child.on("error", (e) => {
+      const settle = (act: () => void) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
+        clearTimeout(grace);
         opts.signal?.removeEventListener("abort", onAbort);
-        reject(e);
-      });
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", onAbort);
-        if (opts.signal?.aborted) reject(new Error("aborted"));
-        else if (timedOut) reject(new Error(`timeout:${opts.timeout}`));
-        else resolvePromise({ exitCode: code });
-      });
+        act();
+      };
+      const finish = (code: number | null, background: boolean) =>
+        settle(() => {
+          if (opts.signal?.aborted) reject(new Error("aborted"));
+          else if (timedOut) reject(new Error(`timeout:${opts.timeout}`));
+          else resolvePromise({ exitCode: code, ...(background ? { background: true } : {}) });
+        });
+      const read = (d: Buffer) => {
+        if (!settled) opts.onData?.(d);
+      };
+      child.stdout?.on("data", read);
+      child.stderr?.on("data", read);
+      child.on("error", (e) => settle(() => reject(e)));
+      // Its output closes right behind it unless something it started still holds that open.
+      child.on("exit", (code) => (grace = setTimeout(() => finish(code, true), EXIT_GRACE_MS)));
+      child.on("close", (code) => finish(code, false));
     });
   }
 
