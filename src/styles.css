@@ -856,32 +856,42 @@ select.input {
 }
 
 /* A folder path field's completion list (src/components/PathField.tsx): as wide as the field, with
-   the folder names in the same mono face as the path being typed. */
+   the folder names in the same mono face as the path being typed. Compact rows, so a folder shows
+   most of what's in it without a list that dwarfs the dialog. */
 .path-menu {
   display: flex;
   flex-direction: column;
   min-width: 220px;
-  max-height: min(300px, 50vh);
   padding: 0;
   overflow: hidden;
+  border-radius: var(--radius);
 }
 
-/* The folders scroll on their own; the hint below stays put as the list's footer. */
+/* The folders scroll on their own, eight rows at most; the hint below stays put as the list's
+   footer. (The popover's own height is the room it's given, so the list holds the limit.) */
 .path-list {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 4px;
+  max-height: 214px;
+  padding: 3px;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .path-item {
+  gap: 7px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: calc(var(--radius-sm) - 1px);
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 .path-item-active {
   background: var(--hover);
+  color: var(--text);
 }
 
 .path-icon {
@@ -889,18 +899,51 @@ select.input {
   color: var(--text-3);
 }
 
-.path-item-active .path-icon {
+.menu-item:not(.menu-item-danger) > svg.path-icon:first-child {
+  color: var(--text-3);
+}
+
+.path-item-active > svg.path-icon:first-child {
   color: var(--text-2);
 }
 
+/* What the search found in a name: the name's own colour at full strength, no marker fill. */
+.path-match {
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+}
+
 .path-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex: none;
   margin: 0;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-3);
   white-space: nowrap;
+  overflow: hidden;
+}
+
+.path-hint kbd {
+  display: inline-block;
+  min-width: 16px;
+  margin-right: 2px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.path-count {
+  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
 }

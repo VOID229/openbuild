@@ -2,11 +2,13 @@
 // that holds them (`/api/fs` through the device proxy), so a path on a paired machine completes
 // from that machine's disk, not this one's. Tab completes what's typed (to the folders' common
 // start, or to the one picked with the arrow keys), the arrows pick a folder, and clicking one
-// descends into it. Enter still submits the form unless a folder was picked from the list.
+// descends into it. Typing searches the folder: the list opens with the folders whose names start
+// with what's typed, then those that have it anywhere. Enter still submits the form unless a folder
+// was picked from the list, and Escape closes the list before it closes the dialog.
 import { Folder, FolderGit2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { browseFolders } from "../lib/pi";
-import { completePath, matchFolders, pathParts } from "../lib/pathComplete";
+import { completePath, matchFolders, matchRange, pathParts } from "../lib/pathComplete";
 import { cx } from "../lib/ui";
 import { Popover } from "./primitives";
 
@@ -95,6 +97,11 @@ export function PathField({ value, onChange, deviceId, className, label, placeho
   };
   const type = (next: string) => {
     onChange(next);
+    // Typing is a search, so it shows what it finds.
+    if (!open) {
+      setOpen(true);
+      setWidth(input.current?.getBoundingClientRect().width);
+    }
     setPicked(false);
     setActive(0);
   };
@@ -183,16 +190,35 @@ export function PathField({ value, onChange, deviceId, className, label, placeho
                   if (picked) setActive(i);
                 }}
               >
-                {entry?.git ? <FolderGit2 size={15} className="path-icon" /> : <Folder size={15} className="path-icon" />}
-                <span className="menu-item-label">{name}</span>
+                {entry?.git ? <FolderGit2 size={13} className="path-icon" /> : <Folder size={13} className="path-icon" />}
+                <span className="menu-item-label">
+                  <Highlight name={name} range={matchRange(name, parts.fragment)} />
+                </span>
               </button>
             );
           })}
         </div>
         <p className="path-hint" aria-hidden>
-          Tab completes · {chosen === undefined ? "↑↓ picks" : "↵ opens"}
+          <span>
+            <kbd>Tab</kbd> complete
+          </span>
+          <span>{chosen === undefined ? <kbd>↑↓</kbd> : <kbd>↵</kbd>} {chosen === undefined ? "pick" : "open"}</span>
+          <span className="path-count">{matches.length === 1 ? "1 folder" : `${matches.length} folders`}</span>
         </p>
       </Popover>
+    </>
+  );
+}
+
+/** A folder's name with the part the search found in it standing out. */
+function Highlight({ name, range }: { name: string; range?: [number, number] }) {
+  if (!range) return <>{name}</>;
+  const [start, end] = range;
+  return (
+    <>
+      {name.slice(0, start)}
+      <mark className="path-match">{name.slice(start, end)}</mark>
+      {name.slice(end)}
     </>
   );
 }

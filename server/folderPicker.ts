@@ -1,22 +1,51 @@
 // The OS's own folder picker (Finder on macOS, zenity or kdialog on Linux), for the New project
 // dialog's Browse button. A browser can't hand a page a folder's real path, so the server opens the
 // picker instead. That only makes sense when the browser is on this machine: the picker appears on
-// this machine's screen.
+// this machine's screen. "On this machine" goes by where the connection comes from, not by the name
+// the page was opened at, so a browser here that reached the server over Tailscale or the LAN
+// (http://100.x.y.z:4000, a MagicDNS name, `tailscale serve`) still gets the picker.
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, networkInterfaces, type NetworkInterfaceInfo } from "node:os";
 import { resolve } from "node:path";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-const LOOPBACK_IPS = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+/** An address as it can be compared: no IPv4-in-IPv6 wrapping, no zone, lower case. */
+const plain = (ip: string) =>
+  ip
+    .trim()
+    .toLowerCase()
+    .replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, "")
+    .replace(/%.*$/, "");
+
+const loopback = (ip: string) => ip === "::1" || ip.startsWith("127.");
+
+/** This machine's own addresses: loopback, the LAN, Tailscale's 100.x and fd7a:… ones, any other. */
+export function ownAddresses(interfaces: NodeJS.Dict<NetworkInterfaceInfo[]> = networkInterfaces()): Set<string> {
+  const out = new Set<string>();
+  for (const list of Object.values(interfaces)) for (const a of list ?? []) out.add(plain(a.address));
+  return out;
+}
 
 /**
- * Whether the browser making `req` runs on this machine: it connected over loopback and asked for a
- * loopback host. A proxy on this machine (`tailscale serve`) also connects over loopback, but keeps
- * the public host name, so its visitors don't count.
+ * Whether the browser making `req` runs on this machine.
+ *
+ * A connection from one of this machine's own addresses started here: a browser on this machine
+ * that opens the server at its Tailscale or LAN address connects from that same address (another
+ * device can't, as replies to it would never leave this machine). Over loopback, a browser that
+ * asked for a loopback host is here too. Anything else over loopback came through a proxy on this
+ * machine; `tailscale serve` sets X-Forwarded-For to the address the visitor connected from
+ * (replacing whatever the visitor sent), so that address decides, the same way. A proxy that adds
+ * to the header puts what it saw last, so only the last entry counts.
  */
-export function sameMachine(req: Request, ip: string | undefined): boolean {
+export function sameMachine(req: Request, ip: string | undefined, own: Set<string> = ownAddresses()): boolean {
+  if (!ip) return false;
+  const from = plain(ip);
+  if (!loopback(from)) return own.has(from);
   const host = (req.headers.get("host") ?? "").toLowerCase().replace(/:\d+$/, "");
-  return !!ip && LOOPBACK_IPS.has(ip) && LOOPBACK_HOSTS.has(host);
+  if (LOOPBACK_HOSTS.has(host)) return true;
+  const forwarded = plain(req.headers.get("x-forwarded-for")?.split(",").at(-1) ?? "");
+  return !!forwarded && own.has(forwarded);
 }
 
 const which = (bin: string) => Bun.which(bin) ?? undefined;
