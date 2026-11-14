@@ -18,6 +18,7 @@ import { useScrollRestore } from "../../lib/scrollRestore";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ModeSwitch, ReleaseLabel, ScrollThumb } from "../Sidebar";
 import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
+import { OpenBuildMark } from "../OpenBuildMark";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
@@ -656,7 +657,7 @@ export function BotsSidebar() {
                   <PanelIcon />
                 </IconButton>
               )}
-              {mobile ? <span className="wordmark bots-wordmark">OpenBots</span> : <ModeSwitch />}
+              {mobile ? <span className="wordmark bots-wordmark"><OpenBuildMark size={28} />OpenBots</span> : <ModeSwitch />}
               {!mobile && (
                 <IconButton
                   label="Search"

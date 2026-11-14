@@ -536,6 +536,8 @@
   .bots-wordmark {
     position: static;
     flex: 1;
+    justify-content: flex-start;
+    gap: 9px;
     font-size: 30px;
     font-weight: 700;
     text-align: left;

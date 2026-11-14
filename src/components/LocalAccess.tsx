@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
-import { ArrowRight, LockKeyhole } from "lucide-react";
+import { ArrowRight } from "lucide-react";
+import { OpenBuildMark } from "./OpenBuildMark";
 import { SERVER_BACK, setOutageProbe, useServerOutage } from "../lib/serverOutage";
 
 /**
@@ -117,9 +118,7 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
   return (
     <main className="local-access-screen local-access-locked">
       <form className="local-access-prompt" onSubmit={unlock} aria-labelledby="local-access-title">
-        <span className="local-access-icon" aria-hidden="true">
-          <LockKeyhole size={18} strokeWidth={1.75} />
-        </span>
+        <OpenBuildMark size={48} className="local-access-mark" />
         <h1 id="local-access-title">OpenBuild</h1>
         <p className="local-access-sub">Enter this server’s password to continue.</p>
         <div className={error ? "local-access-field local-access-invalid" : "local-access-field"}>

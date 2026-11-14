@@ -14,6 +14,7 @@ import { currentRelease } from "./version";
 // the app in. The older Opencode proxy (/api/chat) is still served for API-key-only setups.
 import index from "../src/index.html";
 import { productionClient } from "./client";
+import { iconRoutes } from "./icons";
 import { compressJson } from "./compress";
 import { CLOUD_URL } from "../shared/cloud";
 import { isStreamId, isStreamRef } from "../shared/replies";
@@ -270,6 +271,7 @@ function serve(port: number, hostname: string) {
         if (server.upgrade(req, { data })) return;
         return bad("WebSocket upgrade failed", 400);
       },
+      ...iconRoutes,
       "/*": client ? client.serve : index,
       // The bundle's own files are exact routes and win over this. A script or stylesheet that
       // isn't one of them is from an older build (a tab left open across an update): answer 404

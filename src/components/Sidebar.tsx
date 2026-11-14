@@ -26,6 +26,7 @@ import { arrowNav, canHover, copyText, crossfade, cx, useDismiss, useMediaQuery,
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { FilterIcon, PanelIcon, SearchIcon } from "./HeaderIcons";
+import { OpenBuildMark } from "./OpenBuildMark";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 import { BotsGlyph } from "./bots/BotAvatar";
 import { clock } from "../lib/clock";
@@ -1696,7 +1697,7 @@ export function Sidebar() {
             <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
               <PanelIcon />
             </IconButton>
-            {mobile ? <span className="wordmark">OpenBuild</span> : <ModeSwitch />}
+            {mobile ? <span className="wordmark"><OpenBuildMark size={22} />OpenBuild</span> : <ModeSwitch />}
             {!mobile && (
               <IconButton
                 label="Search"
