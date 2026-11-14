@@ -1,5 +1,5 @@
 /* Local device access: just a password prompt, with nothing of the app mounted behind it. */
-.local-access-screen, .local-access-loading { min-height: 100%; background: var(--bg); }
+.local-access-screen, .local-access-loading { min-height: 100%; background: var(--bg-fill); }
 .local-access-loading { display: grid; place-items: center; color: var(--text-2); font-size: 13px; }
 .local-access-locked { display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); }
 .local-access-prompt { width: min(340px, 100%); display: flex; flex-direction: column; align-items: center; text-align: center; animation: local-access-in var(--med) var(--ease-out) both; }
@@ -50,6 +50,10 @@
 
   /* Light: white canvas, a barely-grey chrome, neutral greys with no warm cast. */
   --bg: #fafafa;
+  /* The page's ground: --bg as an opaque fill (see the dark theme for why it can be two layers). */
+  --canvas: var(--bg);
+  --bg-wash: transparent;
+  --bg-fill: var(--bg);
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-2: #f5f5f5;
@@ -136,6 +140,15 @@
 /* Dark: true black canvas, near-black chrome, and hairline borders instead of shadows. */
 :root[data-theme="dark"] {
   --bg: #0a0a0a;
+  /* The ground is drawn as a 4% white wash over black rather than as #0a0a0a. It's the same pixels, 10,
+     but it holds when the browser converts colours for the screen. Chromium on KDE Plasma's Wayland
+     (KWin 6, Chromium 141 and later) re-encodes each opaque colour from sRGB to gamma 2.2, which lifts
+     near-black (#0a0a0a shows as 18, a grey sidebar beside the black main pane), and then blends
+     translucent colours on top. Black doesn't move and a wash over it blends to 10 everywhere. So
+     surfaces that must match the ground paint --bg-fill, and tints on it are translucent. */
+  --canvas: #000000;
+  --bg-wash: rgb(255 255 255 / 0.04);
+  --bg-fill: linear-gradient(var(--bg-wash), var(--bg-wash)) var(--canvas);
   --surface: #000000;
   --surface-raised: #0f0f0f;
   --surface-2: #121212;
@@ -204,7 +217,7 @@ body {
   line-height: 1.5;
   letter-spacing: var(--tracking);
   color: var(--text);
-  background: var(--bg);
+  background: var(--bg-fill);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -1421,13 +1434,14 @@ select.input {
 }
 
 .history-row {
-  /* Solid row colours so the hover actions can fade the title out underneath them. */
-  --row-bg: var(--bg);
+  /* A translucent tint over the ground (see --bg-wash): the hover actions repaint it on an opaque
+     --bg-fill so they can fade the title out underneath them. */
+  --row-wash: transparent;
   position: relative;
   display: flex;
   align-items: flex-start;
   border-radius: 9px;
-  background: var(--row-bg);
+  background: var(--row-wash);
   transition: background-color var(--fast) var(--ease);
   /* Hundreds of threads make the list most of the page: rows out of view skip style, layout and
      paint, so coming back from OpenBots (which shows the list again) costs what's on screen. The
@@ -1438,22 +1452,22 @@ select.input {
 }
 
 :where([data-keyboard-nav]) .history-row:has(:focus-visible) {
-  --row-bg: color-mix(in srgb, var(--text) 4%, var(--bg));
+  --row-wash: color-mix(in srgb, var(--text) 4%, transparent);
 }
 
 @media (hover: hover) {
   .history-row:hover {
-    --row-bg: color-mix(in srgb, var(--text) 5%, var(--bg));
+    --row-wash: color-mix(in srgb, var(--text) 5%, transparent);
   }
 }
 
 .history-row-active {
-  --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+  --row-wash: color-mix(in srgb, var(--text) 9%, transparent);
 }
 
 @media (hover: hover) {
   .history-row-active:hover {
-    --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+    --row-wash: color-mix(in srgb, var(--text) 9%, transparent);
   }
 }
 
@@ -1794,7 +1808,7 @@ select.input {
   right: 4px;
   display: flex;
   gap: 1px;
-  background: var(--row-bg);
+  background: linear-gradient(var(--row-wash), var(--row-wash)), var(--bg-fill);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--fast) var(--ease);
@@ -1808,7 +1822,9 @@ select.input {
   bottom: 0;
   right: 100%;
   width: 18px;
-  background: linear-gradient(to right, transparent, var(--row-bg) 16px);
+  background: linear-gradient(var(--row-wash), var(--row-wash)), var(--bg-fill);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 16px);
+  mask-image: linear-gradient(to right, transparent, #000 16px);
   pointer-events: none;
 }
 
@@ -5402,7 +5418,7 @@ p.key-status svg {
     left: 0;
     z-index: 50;
     width: min(300px, 84vw);
-    background: var(--bg);
+    background: var(--bg-fill);
     box-shadow: var(--shadow-lg);
     transform: none;
     visibility: visible;
@@ -5894,7 +5910,7 @@ p.key-status svg {
   }
 
   .history-row:has(.history-title:active) {
-    --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+    --row-wash: color-mix(in srgb, var(--text) 9%, transparent);
   }
 
   .link-btn:active {
@@ -6178,7 +6194,7 @@ p.key-status svg {
   display: grid;
   place-items: center;
   padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
-  background: var(--bg);
+  background: var(--bg-fill);
   overflow-y: auto;
 }
 
