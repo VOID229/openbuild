@@ -84,3 +84,15 @@ test("client routes get the page, and an older build's script fails plainly", as
   expect((await get("/chunk-from-an-older-build.js")).status).toBe(404);
   expect((await get("/chunk-from-an-older-build.css")).status).toBe(404);
 });
+
+test("the icons the page links are built in, as what they are", async () => {
+  const html = await (await get("/")).text();
+  const types: Record<string, string> = { "image/svg+xml": "svg", "image/x-icon": "ico", "image/png": "png", "application/manifest+json": "webmanifest" };
+  for (const [type, ext] of Object.entries(types)) {
+    const href = new RegExp(`<link rel="(?:icon|apple-touch-icon|manifest)" href="(/[^"]+\\.${ext})"`).exec(html)?.[1];
+    expect(href).toBeDefined();
+    const res = await get(href!);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe(type);
+  }
+});
