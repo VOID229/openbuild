@@ -718,8 +718,8 @@ export const useStore = create<State>()(
             setStatus(k, { status: "checking" });
             try {
               const r = await verifySearch(provider, k, ctrl.signal);
-              // The entry may have been removed while it was being checked.
-              if ((get().settings.search[provider] ?? []).includes(k)) setStatus(k, { status: r.status, error: r.error });
+              // Only the latest check's answer shows, and none for an entry removed while it was checked.
+              if (searchControllers.get(slot) === ctrl && (get().settings.search[provider] ?? []).includes(k)) setStatus(k, { status: r.status, error: r.error });
             } catch {
               // Aborted by a newer check.
             } finally {
