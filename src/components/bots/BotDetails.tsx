@@ -533,8 +533,8 @@ function ThreadGrip({ width, max, set }: ReturnType<typeof useThreadWidth>) {
 
 /**
  * A coding thread inside the details panel, in place of its tabs, which stay mounted underneath. Opened
- * by a link in the chat with the panel closed, it `closes` the panel instead of going back to the list:
- * an X beside the chat, and on a phone the way back to the chat.
+ * by a link in the chat with the panel closed, it `closes` the panel instead of going back to the list,
+ * with an X: on a phone that's straight back to the chat.
  */
 function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: boolean; back: () => void; closes?: () => void; size: ReturnType<typeof useThreadWidth> }) {
   return (
@@ -542,8 +542,8 @@ function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: bo
       {!phone && <ThreadGrip {...size} />}
       <div className="bots-details-top bots-details-thread-top">
         {closes ? (
-          <IconButton label={phone ? "Back to chat" : "Close thread"} tooltipSide="right" onClick={closes}>
-            {phone ? <ChevronLeft size={26} /> : <X size={18} />}
+          <IconButton label="Close thread" tooltipSide="right" onClick={closes}>
+            <X size={phone ? 24 : 18} />
           </IconButton>
         ) : (
           <IconButton label="Back to threads" tooltipSide="right" onClick={back}>

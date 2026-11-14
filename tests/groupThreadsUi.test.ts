@@ -177,6 +177,8 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     expect(fit.every((d) => d >= -1)).toBe(true);
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
     await shoot(page, "phone-thread-in-panel");
+    // The details were open already: ‹, not an X.
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details-threadpane [aria-label="Close thread"]')`)).toBe(false);
     await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
     await page.until("!document.querySelector('.bots-details-threadpane')");
     expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
@@ -545,6 +547,8 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
 
   test("on a phone, a running thread opens on the details screen", async () => {
     const page = await chat("dev", 390, 800);
+    // Opened from the list, as the app's openBotsChat does: the chat is a step in the history over it.
+    await page.eval(`history.pushState({ ...history.state, botsLayer: "chat", botsDepth: 1 }, "", location.href)`);
     await follow(page, "Fix the flaky sidebar test");
     await page.until(`!!document.querySelector('.bots-details-open .bots-details-threadpane .chat')`);
     await page.finish();
@@ -552,12 +556,17 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await page.eval<unknown>("history.state?.botsLayer")).toBe("details");
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
     await shoot(page, "phone-link-running-in-details");
-    // Opened from the chat, its way back goes to the chat, not to the details' list.
+    // Opened from the chat with the details closed: an X, not ‹, and it goes straight back to the chat.
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details-threadpane [aria-label="Close thread"] svg.lucide-x')`)).toBe(true);
     expect(await page.eval<unknown>(`!!document.querySelector('.bots-details-threadpane [aria-label="Back to threads"]')`)).toBe(false);
-    await page.click('.bots-details-threadpane [aria-label="Back to chat"]');
+    await page.click('.bots-details-threadpane [aria-label="Close thread"]');
     await page.until("!document.querySelector('.bots-details')");
     expect(await page.eval<unknown>("history.state?.botsLayer")).not.toBe("details");
+    expect(await page.eval<unknown>("store.getState().botsSidebarOpen")).toBe(false);
     expect(await page.eval<unknown>("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()")).toBe(true);
+    await shoot(page, "phone-link-closed-back-to-chat");
+    // (With the details screen already open, a thread opened from it keeps ‹: "on a phone, the thread
+    // fills the details screen only, and Back returns to the list".)
   }, 60_000);
 });
 
