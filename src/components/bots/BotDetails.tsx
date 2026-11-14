@@ -707,7 +707,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
         <div className="bots-details-scroll">
           <div className="bots-details-hero">
             {bot ? (
-              <button type="button" className="bots-details-avatar" aria-label="Edit look" data-tooltip={editingLook ? undefined : "Edit look"} onClick={() => setEditingLook(!editingLook)}>
+              <button type="button" className="bots-details-avatar" aria-label="Edit look" onClick={() => setEditingLook(!editingLook)}>
                 <BotAvatar look={bot.look} size={104} lively track mood={typing ? "thinking" : undefined} pulse={pulses[bot.id]} />
                 <span className="bots-details-pencil">
                   <Pencil size={14} />
