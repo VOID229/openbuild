@@ -1,6 +1,6 @@
 // Reactions in a real Chrome: the mascots of the bots that reacted sit inside the emoji's pill, side
 // by side after its count, never piled on each other; and a bot's reaction can be answered with the
-// user's own from a tiny button beside it.
+// user's own from a small button beside it.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -140,17 +140,60 @@ describe.skipIf(!browser)("reactions from bots", () => {
   }, 60_000);
 });
 
+describe.skipIf(!browser)("hovering a reaction with a mouse", () => {
+  test("a lone bot reaction is neither faded nor covered: its reply button sits after the pill, in the strip", async () => {
+    for (const theme of ["dark", "light"] as const) {
+      const page = await open(theme);
+      // A short message of the user's with one bot's 👍 alone: the chip ends the strip, where a button
+      // reaching past it once made the strip scroll and fade the chip's end.
+      await page.eval(`(() => {
+        const s = bots.getState();
+        bots.setState({ conversations: s.conversations.map((c) => c.id !== "b" ? c : { ...c, messages: c.messages.map((m) => m.id === "b-58" ? { ...m, text: "worked too", reactions: [{ id: "e", emoji: "👍", by: "helper", at: 1 }] } : m) }) });
+      })()`);
+      await page.until(`!!document.querySelector('[data-id="b-58"] .bm-reaction-reply')`);
+      await page.finish(".bots-messages");
+      await page.emulateHover();
+      const strip = `document.querySelector('[data-id="b-58"] .bm-reactions')`;
+      const thumbs = chip("b-58", "👍");
+      const check = async (hovered: boolean) => {
+        // Everything fits, so the strip has nothing to scroll and no faded edge.
+        expect(await page.eval<unknown>(`${strip}.scrollWidth <= ${strip}.clientWidth`)).toBe(true);
+        expect(await page.eval<unknown>(`getComputedStyle(${strip}).getPropertyValue("--bm-fade-end")`)).toBe("0px");
+        const pill = await page.eval<Box>(box(`${thumbs}.querySelector('.bm-reaction-pill')`));
+        const reply = await page.eval<Box>(box(`${thumbs}.querySelector('.bm-reaction-reply')`));
+        const room = await page.eval<Box>(box(strip));
+        // After the pill, never on it, centred on it, and inside the strip.
+        expect(overlap(reply, pill)).toBe(false);
+        expect(reply.left).toBeGreaterThanOrEqual(pill.right);
+        expect(Math.abs((reply.top + reply.bottom) / 2 - (pill.top + pill.bottom) / 2)).toBeLessThanOrEqual(1);
+        expect(reply.left).toBeGreaterThanOrEqual(room.left);
+        expect(reply.right).toBeLessThanOrEqual(room.right);
+        // The pill itself never fades; the button is there to find, and full strength on its chip's hover.
+        expect(await page.eval<unknown>(`getComputedStyle(${thumbs}.querySelector('.bm-reaction-pill')).opacity`)).toBe("1");
+        const opacity = Number(await page.eval<string>(`getComputedStyle(${thumbs}.querySelector('.bm-reaction-reply')).opacity`));
+        if (hovered) expect(opacity).toBe(1);
+        else expect(opacity).toBeGreaterThan(0.4);
+      };
+      await check(false);
+      const [x, y] = await page.eval<[number, number]>(`(() => { const r = ${thumbs}.querySelector('.bm-reaction').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await page.until(`${thumbs}.matches(":hover") && getComputedStyle(${thumbs}.querySelector('.bm-reaction-reply')).opacity === "1"`);
+      await check(true);
+    }
+  }, 60_000);
+});
+
 describe.skipIf(!browser)("answering a bot's reaction", () => {
-  test("a tiny button on a bot's reaction opens the picker, and the answer hangs off it with an arrow", async () => {
+  test("a small button on a bot's reaction opens the picker, and the answer hangs off it with an arrow", async () => {
     const page = await open();
     // Bots' reactions have one, the user's own don't.
     expect(await page.eval<unknown>(`document.querySelectorAll('[data-id="b-59"] .bm-reaction-reply').length`)).toBe(2);
     expect(await page.eval<unknown>(`!!document.querySelector('[data-id="b-58"] .bm-reaction-reply')`)).toBe(false);
     const reply = `${chip("b-59", "🔥")}.querySelector('.bm-reaction-reply')`;
     expect(await page.eval<unknown>(`${reply}.getAttribute('aria-label')`)).toBe("React to helper's 🔥");
-    // Tiny, and beside the pill rather than on it or its mascots.
+    // Small, and beside the pill rather than on it or its mascots.
     const r = await page.eval<Box>(box(reply));
-    expect(r.right - r.left).toBeLessThanOrEqual(16);
+    expect(r.right - r.left).toBeLessThanOrEqual(24);
     expect(r.left).toBeGreaterThanOrEqual(await page.eval<number>(`${chip("b-59", "🔥")}.querySelector('.bm-reaction-pill').getBoundingClientRect().right`));
     // Touch screens have no hover: it's always there to tap.
     expect(await page.eval<unknown>(`matchMedia("(hover: none)").matches && getComputedStyle(${reply}).opacity`)).toBe("1");

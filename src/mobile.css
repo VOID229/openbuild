@@ -362,6 +362,7 @@
   .bm-option:active:not(:disabled),
   .bots-pick:active,
   .bm-reaction:active .bm-reaction-pill,
+  .bm-reaction-reply:active,
   .bots-toggle:active,
   .bots-composer-btn:active:not(:disabled),
   .bm-jump:active,
@@ -849,6 +850,11 @@
 
   .bm-reaction-emoji {
     font-size: 15px;
+  }
+
+  .bm-reaction-reply {
+    width: 24px;
+    height: 24px;
   }
 
   .bm-divider {

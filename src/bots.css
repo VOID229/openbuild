@@ -2206,16 +2206,14 @@
   margin: 2px 6px 0;
 }
 
-/* The scrolling strip reaches a little above the line, so a reply button over a pill's corner isn't
-   cut off; that margin lets clicks through to the bubble. */
+/* The scrolling strip: only its chips and their buttons take clicks. */
 .bm-reactions {
   display: flex;
-  align-self: flex-end;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  height: calc(var(--bm-chip-h) + 8px);
-  padding: 8px 6px 0 0;
+  height: var(--bm-chip-h);
+  padding: 0 6px 0 0;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -2317,10 +2315,11 @@
   transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
 
+/* Hovered, a chip takes the tint every other control in the chat takes, and a firmer edge. */
 @media (hover: hover) {
   .bm-reaction:hover .bm-reaction-pill {
     border-color: var(--border-strong);
-    background: var(--surface-2);
+    background: linear-gradient(var(--hover), var(--hover)), var(--surface);
   }
 }
 
@@ -2340,59 +2339,40 @@
   flex: none;
 }
 
-/* Answering a bot's reaction with one of the user's own: a tiny button just past the pill. It shows on
-   hover or focus, and always on touch screens. */
+/* Answering a bot's reaction with one of the user's own: a small icon button right after its pill, in
+   room of its own, the same on every screen. It never sits on the pill or reaches past the strip,
+   which would make the strip scroll and fade its last chip. With a mouse it waits a little quieter
+   until its chip is hovered, and takes the chat's hover tint when pointed at. */
 .bm-reaction-reply {
-  position: relative;
   display: grid;
   place-items: center;
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   margin-left: 2px;
   border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
   color: var(--text-3);
-  opacity: 0;
-  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
 
-/* A bigger target than it looks. */
-.bm-reaction-reply::after {
-  content: "";
-  position: absolute;
-  inset: -6px -4px;
-}
-
-.bm-reaction-link:hover .bm-reaction-reply,
-.bm-reaction-link:focus-within .bm-reaction-reply {
-  opacity: 1;
-}
-
-.bm-reaction-reply:hover,
-.bm-reaction-reply:focus-visible {
-  color: var(--text);
-}
-
-/* With a pointer, it waits over the pill's corner rather than keeping a gap for itself between chips. */
 @media (hover: hover) {
   .bm-reaction-reply {
-    position: absolute;
-    top: -8px;
-    right: -6px;
-    margin: 0;
+    opacity: 0.6;
   }
 
-  .bm-reaction-link {
-    position: relative;
+  .bm-reaction-link:hover .bm-reaction-reply,
+  .bm-reaction-reply:focus-visible {
+    opacity: 1;
+  }
+
+  .bm-reaction-reply:hover {
+    background: var(--hover);
+    color: var(--text);
   }
 }
 
-@media (hover: none) {
-  .bm-reaction-reply {
-    opacity: 1;
-  }
+.bm-reaction-reply:focus-visible {
+  color: var(--text);
 }
 
 .bm-reaction-emoji {

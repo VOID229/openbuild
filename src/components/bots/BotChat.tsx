@@ -908,7 +908,7 @@ function Reactions({ message, conversation, bots, mine, onPicker }: { message: B
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => onPicker({ messageId: message.id, mine, what: "react", to: group.ids[bot], answering: by[bot] }, e.currentTarget)}
                   >
-                    <SmilePlus size={10} strokeWidth={2.4} />
+                    <SmilePlus size={14} strokeWidth={2} />
                   </button>
                 )}
               </span>
