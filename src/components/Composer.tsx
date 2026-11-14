@@ -881,7 +881,12 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop stash={stashTray} permission={<PermissionPicker dropUp={false} deviceId={mentionDevice} cwd={mentionCwd} />} />}
-      {chatId && stashTray}
+      {chatId && (
+        <div className="composer-head">
+          <RemoteControlToggle chatId={chatId} />
+          {stashTray}
+        </div>
+      )}
       {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
@@ -1004,7 +1009,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           </div>
         </div>
       </div>
-      <RemoteControlToggle chatId={chatId} />
+      {!chatId && <RemoteControlToggle />}
       <PluginSlot name="composer:below" context={{ variant, chatId }} />
       {chatId && <WorkspaceBelow chatId={chatId} streaming={streaming} permission={<PermissionPicker dropUp chatId={chatId} deviceId={mentionDevice} cwd={mentionCwd} />} />}
     </div>
