@@ -2792,7 +2792,7 @@
 
 /* The live step, here and under the name in a phone's header: the words sit a step dimmer and a soft
    band of full-strength text sweeps them left to right, then rests a beat. The sidebar's working
-   titles do the same (styles.css, .history-title-glow); this one loops twice as fast. The gradient
+   titles do the same (styles.css, .history-title-glow); this one rests half as long between sweeps. The gradient
    paints the words, so they set no colour of their own: one would sit on top and hide the band. */
 .bm-working-text,
 .bots-head-sub.bots-head-sub-live {
@@ -2802,7 +2802,7 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: bots-glow 0.75s infinite;
+  animation: bots-glow 1.33s infinite;
 }
 
 /* Each new status swaps in at once, with no slide or fade from nothing: the step it names may only
@@ -2810,7 +2810,7 @@
 .bm-working-text {
   --bots-glow-rest: var(--text-3);
   font-size: 14px;
-  animation: bots-glow 0.75s infinite, bm-working-swap 110ms ease-out both;
+  animation: bots-glow 1.33s infinite, bm-working-swap 110ms ease-out both;
 }
 
 .bots-head-sub-live {
@@ -2822,7 +2822,8 @@
     background-position: 100% 0;
     animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
   }
-  77%,
+  /* The sweep keeps its pace (about 1.16s); the rest before the next one is about 0.17s. */
+  87%,
   to {
     background-position: 0% 0;
   }
@@ -2833,11 +2834,11 @@
 .bm-working-text[data-gone] {
   opacity: 0;
   translate: -8px 0;
-  animation: bots-glow 0.75s infinite, bm-working-gone 150ms cubic-bezier(0.5, 0, 0.75, 0) both;
+  animation: bots-glow 1.33s infinite, bm-working-gone 150ms cubic-bezier(0.5, 0, 0.75, 0) both;
 }
 
 .bm-working-text[data-back] {
-  animation: bots-glow 0.75s infinite, bm-working-back 300ms cubic-bezier(0.2, 0.8, 0.3, 1) 320ms both;
+  animation: bots-glow 1.33s infinite, bm-working-back 300ms cubic-bezier(0.2, 0.8, 0.3, 1) 320ms both;
 }
 
 @keyframes bm-working-gone {
