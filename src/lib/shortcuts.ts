@@ -17,7 +17,8 @@ export type ShortcutId =
   | "openUsage"
   | "focusSearch"
   | "toggleDictation"
-  | "stashDraft";
+  | "stashDraft"
+  | "useLastStash";
 
 export interface ShortcutDef {
   id: ShortcutId;
@@ -73,6 +74,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Stash draft",
     description: "Set the draft aside for later",
     default: "mod+KeyS",
+  },
+  {
+    id: "useLastStash",
+    label: "Use last stash",
+    description: "Paste the most recently stashed draft, without opening the stash",
+    default: "mod+shift+KeyS",
   },
   {
     id: "openSettings",
@@ -378,9 +385,9 @@ export function bindingNote(binding: KeyBinding, mac = isMacPlatform()): string 
     value === "mod+KeyN" ||
     value === "mod+KeyT" ||
     value === "mod+KeyW" ||
-    value === "mod+Shift+KeyN" ||
-    value === "mod+Shift+KeyT" ||
-    value === "mod+Shift+KeyW"
+    value === "mod+shift+KeyN" ||
+    value === "mod+shift+KeyT" ||
+    value === "mod+shift+KeyW"
   ) {
     return `Your browser may keep ${key} for a new window or tab.`;
   }

@@ -40,7 +40,8 @@ import { startPaneGestures } from "./lib/gestures";
 import { cx, OPEN_SEARCH, useMediaQuery, useRoomTaken } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
-import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
+import { isShortcutRecording, type ShortcutId } from "./lib/shortcuts";
+import { dispatchShortcut, isTyping, takeShortcut } from "./lib/shortcutKeys";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -317,13 +318,11 @@ function Main() {
   }, [chatsLoaded]);
 
   // Global shortcuts (Settings → Shortcuts): new thread, left and right sidebars, terminal, dictation,
-  // stash, settings, usage and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
+  // stash (⌘S stashes, ⌘⇧S uses the last stash), settings, usage and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
   // search key leave focused fields and buttons alone. Nothing runs while Settings is open or while
   // a shortcut is being recorded there.
   useEffect(() => {
     const focusComposer = () => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
-    // Threads and OpenBots both stay in the page, so the first match can be in the hidden one.
-    const shown = <T extends HTMLElement>(selector: string) => [...document.querySelectorAll<T>(selector)].find((el) => el.checkVisibility());
     const run = (id: ShortcutId) => {
       const st = useStore.getState();
       switch (id) {
@@ -363,10 +362,11 @@ function Main() {
           else focusComposer();
           break;
         case "stashDraft":
+        case "useLastStash":
         case "toggleDictation":
           // Dictation lives in each field (useFieldDictation), the focused one, else the composer, taking it.
-          // The draft lives in the composer.
-          window.dispatchEvent(new CustomEvent<ShortcutEventDetail>(SHORTCUT_EVENT, { detail: { action: id } }));
+          // The draft and the stash live in the composer.
+          dispatchShortcut(id);
           break;
       }
     };
@@ -374,20 +374,8 @@ function Main() {
       const st = useStore.getState();
       if (e.isComposing || e.repeat || isShortcutRecording()) return;
       const el = document.activeElement as HTMLElement | null;
-      const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-      for (const def of SHORTCUTS) {
-        const binding = shortcutBinding(st.settings, def.id);
-        if (!binding || !eventMatchesBinding(e, binding)) continue;
-        if (def.typingSensitive && typing) continue;
-        // Without a field that takes dictation there's nothing to dictate into.
-        if (def.id === "toggleDictation" && !shown("[data-dictation]")) continue;
-        // A file editor keeps its own save, and a terminal its own Ctrl+S.
-        if (def.id === "stashDraft" && el?.closest(".cm-editor, .xterm")) continue;
-        e.preventDefault();
-        e.stopPropagation();
-        run(def.id);
-        return;
-      }
+      const typing = isTyping(el);
+      if (takeShortcut(e, st.settings, run, el)) return;
       if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey || typing) return;
       // Leave Enter alone on buttons/links/menu items so they still activate.
       const onControl = !!el && el !== document.body && !!el.closest("button, a[href], [role='menuitem'], [role='option'], [role='tab'], [role='switch']");

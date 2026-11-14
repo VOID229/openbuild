@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageItem } from "../src/components/MessageItem";
 import { fileRef } from "../shared/bots";
-import { botStash, botStashOf, imageFiles, pasteBotStash, pasteStash, stashAction, threadStash, type Stashed } from "../src/lib/stash";
+import { botStash, botStashOf, imageFiles, latestStash, pasteBotStash, pasteStash, stashAction, threadStash, type Stashed } from "../src/lib/stash";
 import type { Attachment } from "../shared/types";
 import { spawnScript } from "./spawnScript";
 
@@ -23,6 +23,20 @@ describe("the stash shortcut", () => {
   });
   test("does nothing with no draft and no stash", () => {
     expect(stashAction(false, 0)).toBeUndefined();
+  });
+});
+
+describe("the use-last-stash shortcut", () => {
+  const at = (id: string, createdAt: number): Stashed => ({ id, text: id, files: [], createdAt });
+  test("takes the most recently stashed, wherever it sits in the list", () => {
+    expect(latestStash([at("b", 2), at("a", 1)])?.id).toBe("b");
+    expect(latestStash([at("a", 1), at("c", 3), at("b", 2)])?.id).toBe("c");
+  });
+  test("takes the first of two stashed at once, the one stashed last", () => {
+    expect(latestStash([at("second", 5), at("first", 5)])?.id).toBe("second");
+  });
+  test("finds nothing in an empty stash", () => {
+    expect(latestStash([])).toBeUndefined();
   });
 });
 

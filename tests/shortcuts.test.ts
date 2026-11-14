@@ -14,6 +14,7 @@ import {
   serializeBinding,
   shortcutBinding,
   shortcutValue,
+  SHORTCUTS,
   type ShortcutEvent,
 } from "../src/lib/shortcuts";
 
@@ -133,5 +134,33 @@ describe("shortcut bindings", () => {
     expect(bindingNote(parseBinding("mod+KeyS")!, true)).toContain("saves");
     expect(bindingNote(parseBinding("mod+KeyB")!, true)).toBeUndefined();
     expect(bindingNote(parseBinding("alt+KeyM")!, true)).toBeUndefined();
+    // Shifted browser keys are recognised too (reopen a closed tab, a private window).
+    expect(bindingNote(parseBinding("mod+shift+KeyT")!, true)).toContain("⌘⇧T");
+    expect(bindingNote(parseBinding("mod+shift+KeyN")!, false)).toContain("Ctrl+Shift+N");
+  });
+
+  test("using the last stash is ⌘⇧S (Ctrl+Shift+S), apart from stashing's ⌘S", () => {
+    const defaults = { shortcuts: {} };
+    const use = shortcutBinding(defaults, "useLastStash")!;
+    const stash = shortcutBinding(defaults, "stashDraft")!;
+    expect(formatBinding(use, true)).toBe("⌘⇧S");
+    expect(formatBinding(use, false)).toBe("Ctrl+Shift+S");
+    expect(formatBinding(stash, true)).toBe("⌘S");
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      const shifted = event({ code: "KeyS", key: "S", shiftKey: true, ...mod });
+      const plain = event({ code: "KeyS", key: "s", ...mod });
+      expect(eventMatchesBinding(shifted, use)).toBe(true);
+      expect(eventMatchesBinding(shifted, stash)).toBe(false);
+      expect(eventMatchesBinding(plain, stash)).toBe(true);
+      expect(eventMatchesBinding(plain, use)).toBe(false);
+    }
+    // Listed in Settings → Shortcuts, right after stashing.
+    const ids = SHORTCUTS.map((s) => s.id);
+    expect(ids.indexOf("useLastStash")).toBe(ids.indexOf("stashDraft") + 1);
+  });
+
+  test("no two actions start on the same keys", () => {
+    const defaults = SHORTCUTS.map((s) => s.default);
+    expect(new Set(defaults).size).toBe(defaults.length);
   });
 });
