@@ -198,8 +198,9 @@ function openThreadLink(id: string) {
   const conversation = bots.conversations.find((c) => c.id === bots.activeId);
   const chat = app.chats.find((c) => c.id === id);
   if (conversation && threadOpensIn(conversation, app.chats, id) === "details") {
-    openBotsDetails();
+    // Asked first: it reads whether the panel was open before this opens it.
     bots.showDetailsThread(id);
+    openBotsDetails();
     if (chat?.unread) app.updateChat(id, { unread: false });
   } else app.openThreadInBots(id);
   // A thread a bot has only just started may not have reached this tab yet; it opens once it does.
