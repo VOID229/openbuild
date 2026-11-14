@@ -42,6 +42,8 @@ import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { isShortcutRecording, type ShortcutId } from "./lib/shortcuts";
 import { dispatchShortcut, isTyping, takeShortcut } from "./lib/shortcutKeys";
+import { closeCheatsheet, toggleCheatsheet, useCheatsheet } from "./lib/cheatsheet";
+import { Cheatsheet } from "./components/Cheatsheet";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -198,6 +200,7 @@ function Main() {
   const lightboxOpen = useLightbox((s) => s.open);
   // The startup popup for a server without Pi (HarnessSetup) sits over the app the way Settings does.
   const harnessSetupOpen = useHarnessSetupOpen((s) => s.open);
+  const cheatsheetOpen = useCheatsheet((s) => s.open);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const titling = useStore((s) => !!s.activeChatId && s.titling.has(s.activeChatId)) && !chat?.titleSource;
@@ -318,13 +321,15 @@ function Main() {
   }, [chatsLoaded]);
 
   // Global shortcuts (Settings → Shortcuts): new thread, left and right sidebars, terminal, dictation,
-  // stash (⌘S stashes, ⌘⇧S uses the last stash), settings, usage and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
+  // stash (⌘S stashes, ⌘⇧S uses the last stash), settings, usage, the ⌘K cheatsheet and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
   // search key leave focused fields and buttons alone. Nothing runs while Settings is open or while
   // a shortcut is being recorded there.
   useEffect(() => {
     const focusComposer = () => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
     const run = (id: ShortcutId) => {
       const st = useStore.getState();
+      // Any other shortcut is what the cheatsheet was opened to find: it gets out of the way.
+      if (id !== "showShortcuts") closeCheatsheet();
       switch (id) {
         case "newThread":
           st.newChat();
@@ -351,6 +356,9 @@ function Main() {
           break;
         case "openSettings":
           st.openSettings();
+          break;
+        case "showShortcuts":
+          toggleCheatsheet();
           break;
         case "openUsage":
           // On a phone Usage is the pane, so it slides in over whichever list is showing (the store sees to that).
@@ -404,7 +412,7 @@ function Main() {
   return (
     <>
       <PluginSlot name="app:before" />
-      <div className={cx("app", harnessSetupOpen && "app-behind-modal")} inert={lightboxOpen || harnessSetupOpen}>
+      <div className={cx("app", harnessSetupOpen && "app-behind-modal")} inert={lightboxOpen || harnessSetupOpen || cheatsheetOpen}>
         {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. Settings
             takes the whole window: neither shows, and each keeps whether it was open for when Settings closes. */}
         <Activity mode={botsOpen || settingsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
@@ -471,6 +479,7 @@ function Main() {
       <HarnessSetup />
       <Notices />
       <Lightbox />
+      <Cheatsheet />
       <TooltipLayer />
       <PluginSlot name="app:overlay" />
       {cloudConfigured() && <CloudSync />}

@@ -1,6 +1,6 @@
 // Which app-wide shortcut a keydown runs, if any. App takes the key (so the browser never sees it,
 // e.g. Safari's Save As on ⌘⇧S) and runs the action; the composers act on the stash and dictation ones.
-import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./shortcuts";
+import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isMacPlatform, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./shortcuts";
 import type { Settings } from "./types";
 
 /** Whether a field that takes typing has focus. */
@@ -22,6 +22,8 @@ export function matchShortcut(e: KeyboardEvent, settings: Pick<Settings, "shortc
     if (def.id === "stashDraft" && el?.closest(".cm-editor, .xterm")) continue;
     // A terminal keeps its Ctrl+Shift+S too.
     if (def.id === "useLastStash" && el?.closest(".xterm")) continue;
+    // Ctrl+K deletes to the end of the line in a terminal, and in a Mac's text fields.
+    if (def.id === "showShortcuts" && e.ctrlKey && !e.metaKey && (el?.closest(".xterm") || (typing && isMacPlatform()))) continue;
     return def.id;
   }
 }
