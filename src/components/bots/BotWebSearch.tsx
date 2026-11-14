@@ -257,14 +257,32 @@ function ProviderKeys({ provider }: { provider: SearchProviderId }) {
 function SearxngKeys() {
   const urls = useBots((s) => s.searxng);
   const [statuses, setStatuses] = useState<Record<string, KeyStatus>>({});
+  // The check running for each address. A newer check replaces it, like the store does for keys:
+  // only the latest one's answer is shown, never one from an older check that finishes later.
+  const checks = useRef(new Map<string, AbortController>());
+  const stop = (url: string) => {
+    checks.current.get(url)?.abort();
+    checks.current.delete(url);
+  };
+  useEffect(() => () => [...checks.current.keys()].forEach(stop), []);
   const check = async (url: string) => {
+    stop(url);
+    const ctrl = new AbortController();
+    checks.current.set(url, ctrl);
     setStatuses((s) => ({ ...s, [url]: { status: "checking" } }));
-    const r = await verifySearch("searxng", url);
-    setStatuses((s) => ({ ...s, [url]: { status: r.status, error: r.error } }));
+    try {
+      const r = await verifySearch("searxng", url, ctrl.signal);
+      if (checks.current.get(url) === ctrl) setStatuses((s) => ({ ...s, [url]: { status: r.status, error: r.error } }));
+    } catch {
+      // Replaced by a newer check, or the address was removed.
+    } finally {
+      if (checks.current.get(url) === ctrl) checks.current.delete(url);
+    }
   };
   const setKeys = (edits: KeyEdit[]) => {
     const next = [...new Set(edits.map((e) => ("id" in e ? e.id : e.secret).trim()).filter(Boolean))];
     useBots.getState().setSearxng(next);
+    for (const url of urls) if (!next.includes(url)) stop(url);
     for (const url of next) if (!urls.includes(url)) void check(url);
   };
   return <KeyList provider="searxng" keys={urls} setKeys={setKeys} statusOf={(url) => statuses[url]} onRetry={(url) => void check(url)} />;
