@@ -531,15 +531,25 @@ function ThreadGrip({ width, max, set }: ReturnType<typeof useThreadWidth>) {
   );
 }
 
-/** A coding thread inside the details panel, in place of its tabs, which stay mounted underneath. */
-function ThreadPane({ chat, phone, back, size }: { chat: Chat; phone: boolean; back: () => void; size: ReturnType<typeof useThreadWidth> }) {
+/**
+ * A coding thread inside the details panel, in place of its tabs, which stay mounted underneath. Opened
+ * by a link in the chat with the panel closed, it `closes` the panel instead of going back to the list:
+ * an X beside the chat, and on a phone the way back to the chat.
+ */
+function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: boolean; back: () => void; closes?: () => void; size: ReturnType<typeof useThreadWidth> }) {
   return (
     <div className="bots-details-threadpane">
       {!phone && <ThreadGrip {...size} />}
       <div className="bots-details-top bots-details-thread-top">
-        <IconButton label="Back to threads" tooltipSide="right" onClick={back}>
-          <ChevronLeft size={phone ? 26 : 18} />
-        </IconButton>
+        {closes ? (
+          <IconButton label={phone ? "Back to chat" : "Close thread"} tooltipSide="right" onClick={closes}>
+            {phone ? <ChevronLeft size={26} /> : <X size={18} />}
+          </IconButton>
+        ) : (
+          <IconButton label="Back to threads" tooltipSide="right" onClick={back}>
+            <ChevronLeft size={phone ? 26 : 18} />
+          </IconButton>
+        )}
         <span className="bots-details-thread-title">{chat.title}</span>
         <IconButton label="Open in OpenBuild" tooltipSide="left" onClick={() => {
           useStore.setState({ activeChatId: chat.id, searchFocus: undefined, botsThread: false });
@@ -556,6 +566,8 @@ function ThreadPane({ chat, phone, back, size }: { chat: Chat; phone: boolean; b
     </div>
   );
 }
+
+type DetailsTab = "instructions" | "routines" | "tasks" | "advanced" | "members" | "goal" | "threads";
 
 function LookEditor({ bot, onDone }: { bot: Bot; onDone: () => void }) {
   const before = useRef<BotLook>(bot.look);
@@ -603,7 +615,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const working = useBusyBots(conversation);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const [tab, setTab] = useState<"instructions" | "routines" | "tasks" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
+  const [tab, setTab] = useState<DetailsTab>(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
   const threads = useConversationThreads(conversation);
   const st = useBots.getState();
@@ -617,10 +629,14 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   useEffect(() => setEditingLook(false), [conversation.id]);
   // The thread open inside the panel. Kept while the panel is closed and opened again, dropped for another chat.
   const [threadId, setThreadId] = useState<string>();
+  // A thread a link in the chat opened with the panel closed: what the panel showed before, to leave it
+  // that way once it's closed again, by the thread's X or any other way.
+  const [before, setBefore] = useState<{ tab: DetailsTab; thread?: string }>();
   const [threadFor, setThreadFor] = useState(conversation.id);
   if (threadFor !== conversation.id) {
     setThreadFor(conversation.id);
     setThreadId(undefined);
+    setBefore(undefined);
   }
   // Asked for a tab: the header's task progress opens a bot's own Tasks, or the group's Goal, where its
   // list is; a routine line in the chat opens the Routines, the bot's or the group's (EventLine); a link
@@ -629,6 +645,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const [askedKey, setAskedKey] = useState(asked?.key);
   if (asked && asked.key !== askedKey) {
     setAskedKey(asked.key);
+    setBefore(asked.tab === "threads" && asked.closes ? { tab, thread: threadId } : undefined);
     if (asked.tab === "threads") {
       setTab("threads");
       setThreadId(asked.thread);
@@ -640,11 +657,28 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const panel = useRef<HTMLElement>(null);
   const size = useThreadWidth(panel, mounted);
   const showing = !!threadChat && tab === "threads";
+  const back = () => {
+    setBefore(undefined);
+    setThreadId(undefined);
+  };
+  const close = () => (phone ? closeBotsLayer("details") : st.setDetailsOpen(false));
+  const closes = before ? close : undefined;
+  // Closed, and done sliding away (reopened before then, it's still the thread), the panel goes back to
+  // how it was before the link opened the thread.
+  useEffect(() => {
+    if (open || mounted || !before) return;
+    setTab(before.tab);
+    setThreadId(before.thread);
+    setBefore(undefined);
+  }, [open, mounted, before]);
   const openThread = (id: string) => {
     setThreadId(id);
     if (useStore.getState().chats.find((c) => c.id === id)?.unread) useStore.getState().updateChat(id, { unread: false });
   };
-  // Escape steps back to the list first, like Back, before BotsView's takes the panel itself.
+  // Escape steps back to the list first, like Back, before BotsView's takes the panel itself. Or, like
+  // the X, it closes a thread a link opened with the panel closed.
+  const escape = useRef(back);
+  escape.current = closes ?? back;
   useEffect(() => {
     if (!showing) return;
     const onKey = (e: KeyboardEvent) => {
@@ -654,17 +688,16 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
       if (el?.closest("[role='menu'], [role='listbox'], [role='dialog'], dialog")) return;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) && !el.classList.contains("composer-input")) return;
       e.preventDefault();
-      setThreadId(undefined);
+      escape.current();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showing]);
   if (!mounted) return null;
   const name = conversationName(conversation, bots);
-  const close = () => (phone ? closeBotsLayer("details") : st.setDetailsOpen(false));
   return (
     <aside ref={panel} className={cx("bots-details", visible && "bots-details-open", showing && "bots-details-wide")} style={{ "--thread-w": `${size.width}px` } as React.CSSProperties} aria-label="Details">
-      {showing && <ThreadPane chat={threadChat} phone={phone} back={() => setThreadId(undefined)} size={size} />}
+      {showing && <ThreadPane chat={threadChat} phone={phone} back={back} closes={closes} size={size} />}
       <div className="bots-details-inner" hidden={showing}>
         <div className="bots-details-top">
           <IconButton label="Close details" tooltipSide="left" onClick={close}>

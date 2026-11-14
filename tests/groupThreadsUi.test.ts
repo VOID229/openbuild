@@ -1,7 +1,8 @@
 // A group's Threads tab in the details panel, in a real Chrome with the whole app on a fake server
 // (fixtures/groupThreads): it lists the coding threads the group's bots started from it while they
 // work, follows the thread list as threads start and finish, opens one inside the panel itself (not over
-// OpenBots), and Back returns to the list. Set OPENBUILD_SCREENSHOTS to a folder to keep
+// OpenBots), and Back returns to the list; one a chat's link opened with the panel closed has an X that
+// closes it again, leaving the panel as it was. Set OPENBUILD_SCREENSHOTS to a folder to keep
 // a picture of each state.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
@@ -414,16 +415,75 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
     expect(await page.eval<unknown>("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()")).toBe(true);
     await shoot(page, "link-running-in-details");
-    // Back lands on the Threads tab it was opened under.
-    await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
-    await page.until("!document.querySelector('.bots-details-threadpane')");
-    expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
+    // The panel was closed, so the thread's X closes it again (the next test has more).
+    await page.click('.bots-details-threadpane [aria-label="Close thread"]');
+    await page.until("!document.querySelector('.bots-details')");
 
     // Finished, it isn't listed there: the large view over OpenBots, as before.
     await follow(page, "Bump dependencies");
     await page.until("store.getState().botsThread === true");
     expect(await page.eval<unknown>("store.getState().activeChatId")).toBe("t-done");
     expect(await page.eval<unknown>("store.getState().botsOpen")).toBe(true);
+  }, 60_000);
+
+  test("opened with the details closed, an X closes the thread and the panel, leaving the panel as it was", async () => {
+    const page = await chat("dev");
+    const closeX = `document.querySelector('.bots-details-threadpane [aria-label="Close thread"]')`;
+    const backArrow = `document.querySelector('.bots-details-threadpane [aria-label="Back to threads"]')`;
+    const tabSelected = (name: string) => page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith(${JSON.stringify(name)}))?.getAttribute('aria-selected')`);
+    // The panel was last left on Goal, then closed.
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open')");
+    await page.eval(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith('Goal')).click()`);
+    await page.until(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith('Goal')).getAttribute('aria-selected') === 'true'`);
+    await page.click('.bots-details [aria-label="Close details"]');
+    await page.until("!document.querySelector('.bots-details')");
+
+    await follow(page, "Fix the flaky sidebar test");
+    await page.until(`!!document.querySelector('.bots-details-open .bots-details-threadpane .chat')`);
+    await page.finish();
+    // An X where the back arrow was, at the same place.
+    expect(await page.eval<unknown>(`!!${closeX}?.querySelector('svg.lucide-x')`)).toBe(true);
+    expect(await page.eval<unknown>(`!!${backArrow}`)).toBe(false);
+    expect(await page.eval<unknown>(`${closeX} === document.querySelector('.bots-details-thread-top').firstElementChild`)).toBe(true);
+    await shoot(page, "link-closed-panel-x");
+    await page.click('.bots-details-threadpane [aria-label="Close thread"]');
+    // The thread and the panel go together; OpenBots stays on the chat.
+    await page.until("!document.querySelector('.bots-details')");
+    expect(await page.eval<unknown>("bots.getState().detailsOpen")).toBe(false);
+    expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
+    expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()")).toBe(true);
+    await shoot(page, "link-closed-panel-after-x");
+    // Opened again, the panel is as it was before the link: on Goal, no thread.
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open')");
+    await page.finish();
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-details-threadpane')")).toBe(false);
+    expect(await tabSelected("Goal")).toBe("true");
+
+    // With the panel open, the link keeps the back arrow, which returns to the list.
+    await follow(page, "Fix the flaky sidebar test");
+    await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
+    expect(await page.eval<unknown>(`!!${backArrow}`)).toBe(true);
+    expect(await page.eval<unknown>(`!!${closeX}`)).toBe(false);
+    await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
+    await page.until("!document.querySelector('.bots-details-threadpane')");
+    expect(await tabSelected("Threads")).toBe("true");
+    expect(await page.eval<unknown>("bots.getState().detailsOpen")).toBe(true);
+
+    // Escape does what the X does, for a thread opened with the panel closed.
+    await page.click('.bots-details [aria-label="Close details"]');
+    await page.until("!document.querySelector('.bots-details')");
+    await follow(page, "Fix the flaky sidebar test");
+    await page.until(`!!document.querySelector('.bots-details-open .bots-details-threadpane .chat')`);
+    await page.finish();
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await page.until("!document.querySelector('.bots-details')");
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open')");
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-details-threadpane')")).toBe(false);
+    expect(await tabSelected("Threads")).toBe("true");
   }, 60_000);
 
   test("in a bot's own chat: a Threads tab shows while it has one running, and the link opens it there", async () => {
@@ -462,6 +522,8 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
     await shoot(page, "bot-link-running-in-details");
     expect(await page.eval<unknown>(`document.querySelector('.bots-details-thread-title').textContent`)).toBe("Rename the config loader");
+    // The panel was open already: the back arrow, not an X.
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details-threadpane [aria-label="Close thread"]')`)).toBe(false);
     expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
     await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
     await page.until("!document.querySelector('.bots-details-threadpane')");
@@ -490,6 +552,12 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await page.eval<unknown>("history.state?.botsLayer")).toBe("details");
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
     await shoot(page, "phone-link-running-in-details");
+    // Opened from the chat, its way back goes to the chat, not to the details' list.
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details-threadpane [aria-label="Back to threads"]')`)).toBe(false);
+    await page.click('.bots-details-threadpane [aria-label="Back to chat"]');
+    await page.until("!document.querySelector('.bots-details')");
+    expect(await page.eval<unknown>("history.state?.botsLayer")).not.toBe("details");
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()")).toBe(true);
   }, 60_000);
 });
 
