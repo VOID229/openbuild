@@ -1,4 +1,4 @@
-import { ATTACHMENT_CHUNK, MAX_ATTACHMENT_BYTES, formatBytes, type StoredFile } from "../../shared/attachments";
+import { ATTACHMENT_CHUNK, MAX_ATTACHMENT_BYTES, MAX_IMAGE_DATA_URL, formatBytes, type StoredFile } from "../../shared/attachments";
 import type { Attachment } from "../../shared/types";
 import { uid } from "./chat";
 import { apiUrl } from "./devices";
@@ -12,6 +12,11 @@ const MAX_IMAGE_EDGE = 2048;
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 const MAX_TEXT_BYTES = 1024 * 1024;
 
+/** JPEG qualities tried at each size, best first, before a picture is drawn smaller. */
+const QUALITIES = [0.92, 0.85, 0.75, 0.6];
+
+export class AttachmentError extends Error {}
+
 const readAsDataUrl = (blob: Blob) =>
   new Promise<string>((resolve, reject) => {
     const r = new FileReader();
@@ -20,23 +25,76 @@ const readAsDataUrl = (blob: Blob) =>
     r.readAsDataURL(blob);
   });
 
-async function downscale(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
-  const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(bitmap.width, bitmap.height));
-  if (scale === 1 && file.size < 3.5 * 1024 * 1024 && file.type !== "image/gif") {
-    bitmap.close();
-    return readAsDataUrl(file);
+/** Whether a picture's data URL is short enough for a message to carry (server/bots/service.ts checks the same). */
+export const fitsMessage = (dataUrl: string) => dataUrl.length <= MAX_IMAGE_DATA_URL;
+
+/**
+ * A picture as a data URL no longer than `limit`, so the server takes the message it goes in. One that
+ * already fits, at 2048 px or less, is kept as it is (no re-encoding blur). Otherwise it's drawn at
+ * 2048 px or less: a PNG stays a PNG if that fits (a screenshot's text compresses well losslessly),
+ * else it becomes a JPEG at the highest quality that fits, and is drawn a quarter smaller until one does.
+ * `still`: a GIF is always drawn (its first frame), for models that take no animation.
+ */
+export async function fitImage(file: Blob, { limit = MAX_IMAGE_DATA_URL, still = false } = {}): Promise<string> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new AttachmentError("Couldn't read that image.");
   }
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(bitmap.width * scale);
-  canvas.height = Math.round(bitmap.height * scale);
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
-  const type = file.type === "image/png" ? "image/png" : "image/jpeg";
-  return canvas.toDataURL(type, 0.9);
+  try {
+    const longest = Math.max(bitmap.width, bitmap.height);
+    const keep = longest <= MAX_IMAGE_EDGE && IMAGE_TYPES.includes(file.type) && !(still && file.type === "image/gif");
+    // Base64 is 4 characters for every 3 bytes: a file that can't fit isn't read to find out.
+    if (keep && Math.ceil(file.size / 3) * 4 < limit) {
+      const original = await readAsDataUrl(file);
+      if (original.length <= limit) return original;
+    }
+    const canvas = document.createElement("canvas");
+    for (let edge = Math.min(MAX_IMAGE_EDGE, longest); ; edge = Math.floor(edge * 0.75)) {
+      const k = edge / longest;
+      // Sizing the canvas clears it and resets how it draws.
+      canvas.width = Math.max(1, Math.round(bitmap.width * k));
+      canvas.height = Math.max(1, Math.round(bitmap.height * k));
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      if (file.type === "image/png") {
+        const png = canvas.toDataURL("image/png");
+        if (png.length <= limit) return png;
+      }
+      // A JPEG has no transparency: what was see-through becomes white, not black.
+      ctx.globalCompositeOperation = "destination-over";
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      for (const quality of QUALITIES) {
+        const jpeg = canvas.toDataURL("image/jpeg", quality);
+        if (jpeg.length <= limit) return jpeg;
+      }
+      if (edge <= 16) throw new AttachmentError("That image can't be made small enough to send.");
+    }
+  } finally {
+    bitmap.close();
+  }
 }
 
-export class AttachmentError extends Error {}
+/**
+ * A picture already held as a data URL (from a stash, a saved draft, another device) fitted the same
+ * way, when it's longer than `limit`. One that fits comes back as it is.
+ */
+export async function fitDataUrl(dataUrl: string, limit = MAX_IMAGE_DATA_URL): Promise<string> {
+  if (dataUrl.length <= limit) return dataUrl;
+  const head = /^data:(image\/[\w.+-]+);base64,/.exec(dataUrl);
+  if (!head) throw new AttachmentError("That image is too large to send.");
+  let bytes: Uint8Array<ArrayBuffer>;
+  try {
+    const raw = atob(dataUrl.slice(head[0].length));
+    bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  } catch {
+    throw new AttachmentError("Couldn't read that image.");
+  }
+  return fitImage(new Blob([bytes], { type: head[1] }), { limit });
+}
 
 /**
  * A file that travels inside the message: a picture the model looks at, a PDF, or text inlined into
@@ -47,7 +105,7 @@ export class AttachmentError extends Error {}
 export async function readAttachment(file: File): Promise<Attachment | undefined> {
   const base = { id: uid(), name: file.name || "pasted-image.png", size: file.size };
   if (IMAGE_TYPES.includes(file.type)) {
-    const dataUrl = await downscale(file);
+    const dataUrl = await fitImage(file, { still: true });
     return { ...base, mime: dataUrl.slice(5, dataUrl.indexOf(";")), dataUrl };
   }
   if (file.type === "application/pdf" && file.size <= MAX_PDF_BYTES) return { ...base, mime: file.type, dataUrl: await readAsDataUrl(file) };

@@ -3,6 +3,7 @@
 // waiting for the workspace; a send the workspace doesn't take comes back to the box, ahead of what
 // was typed since; and sending it again, or twice in a row, never makes a second message.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { MAX_IMAGE_DATA_URL } from "../shared/attachments";
 import { browser, launchChrome, Page } from "./chromePage";
 
 const FIELD = ".bots-composer-textarea";
@@ -90,6 +91,50 @@ for (const kind of ["direct", "group"] as const) {
       expect(await page.value()).toBe("typed meanwhile");
       await page.until(`workspace.draft() === "typed meanwhile"`);
       expect((await page.posts()).map((p) => p.text)).toEqual(["hello there"]);
+    }, 60_000);
+
+    test("a picture too large to send that reaches the box another way (here a draft from another device) is made small enough before it goes", async () => {
+      const page = await open();
+      await page.set("ok", false);
+      // A 1920×1080 screenshot no encoder can squeeze, kept as it was: an older client's draft, or a
+      // stash pasted from OpenBuild's composer and saved with the draft. The server refuses it as it is.
+      const length = await page.eval<number>(`(async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 1920;
+        canvas.height = 1080;
+        const ctx = canvas.getContext("2d");
+        const block = ctx.createImageData(1920, 1080);
+        for (let i = 0; i < block.data.length; i++) block.data[i] = i % 4 === 3 ? 255 : (Math.random() * 256) | 0;
+        ctx.putImageData(block, 0, 0);
+        const dataUrl = canvas.toDataURL("image/png");
+        // Fitting it is held until the test lets it go, so Enter comes first.
+        const decode = window.createImageBitmap.bind(window);
+        const gate = new Promise((go) => (window.fit = go));
+        window.createImageBitmap = (...args) => gate.then(() => decode(...args));
+        await applyDraftRecord("draftfile:far", { id: "far", name: "Image", mime: "image/png", dataUrl, size: Math.round((dataUrl.length * 3) / 4) });
+        await applyDraftRecord("draft:bot:srv:chat", { text: "two screenshots", fileIds: ["far"], updatedAt: Date.now() + 60_000 });
+        return dataUrl.length;
+      })()`);
+      expect(length).toBeGreaterThan(MAX_IMAGE_DATA_URL);
+      await page.until(`document.querySelector('${FIELD}').value === "two screenshots" && !!document.querySelector('.bots-composer-image-open')`);
+      // Enter before it fits: nothing goes to be refused, the box keeps it, and says why it's waiting.
+      await page.eval(`document.querySelector('${FIELD}').focus()`);
+      const first = await page.enter();
+      expect(first.value).toBe("two screenshots");
+      expect(await page.notice()).toBe("Making an image small enough to send…");
+      await page.settle();
+      expect(await page.posts()).toEqual([]);
+      // Fitted: it goes by itself, as small as the server takes.
+      await page.eval("(window.fit(), true)");
+      await page.until("workspace.posts.length === 1", 15_000);
+      const [post] = await page.posts();
+      expect(post!.text).toBe("two screenshots");
+      expect(post!.images).toHaveLength(1);
+      expect(post!.images![0]!.length).toBeLessThanOrEqual(MAX_IMAGE_DATA_URL);
+      expect(post!.images![0]!.startsWith("data:image/jpeg;base64,")).toBe(true);
+      await page.until("!rows().at(-1).sending");
+      expect(await page.value()).toBe("");
+      await page.until(`workspace.draft() === ""`);
     }, 60_000);
 
     test("a dropped video only waits in the box; sending shows the message at once, uploads it in pieces, then posts it", async () => {

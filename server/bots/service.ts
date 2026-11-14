@@ -16,6 +16,7 @@ import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
 import { untrustedData } from "./transcriptData";
 import { checkedFiles, filesNote } from "./files";
+import { MAX_IMAGE_DATA_URL } from "../../shared/attachments";
 import { findMemory, JOURNAL_LINE_MAX, memoryContext, memoryKey, profileBytes, similarMemories } from "./sessionPolicy";
 
 const MESSAGE_LIMIT = 200;
@@ -1080,7 +1081,7 @@ function checkMessage(m: BotMessage) {
   if (!isBotId(m.id)) throw new BotsError("Bad message id.");
   if (m.text.length > 20_000) throw new BotsError("That message is too long.");
   if ((m.images?.length ?? 0) > 4) throw new BotsError("Up to 4 images.");
-  for (const img of m.images ?? []) if (img.length > 2_500_000) throw new BotsError("An image is too large.");
+  for (const img of m.images ?? []) if (typeof img !== "string" || img.length > MAX_IMAGE_DATA_URL) throw new BotsError("An image is too large.");
   if (m.files !== undefined) {
     if (m.author !== "me") throw new BotsError("Bots share a file by linking to it.");
     try {

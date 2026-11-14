@@ -8,7 +8,7 @@ import { createRoot } from "react-dom/client";
 import { BotChat } from "../../../src/components/bots/BotChat";
 import { enterWorkspace, preloadBots, useBots } from "../../../src/lib/bots/store";
 import { useWorkspace } from "../../../src/lib/bots/workspace";
-import { getBotDraft } from "../../../src/lib/drafts";
+import { applyDraftRecord, getBotDraft } from "../../../src/lib/drafts";
 import type { Bot, BotMessage, Conversation } from "../../../src/lib/bots/types";
 
 const kind = new URLSearchParams(location.search).get("kind") === "group" ? "group" : "direct";
@@ -46,7 +46,8 @@ const workspace = {
   /** The chat's saved draft, as a reload would find it. */
   draft: () => getBotDraft("srv", "chat", true)?.text ?? "",
 };
-Object.assign(window, { workspace, bots: useBots });
+// A draft record arriving from another device, as cloud sync applies it.
+Object.assign(window, { workspace, bots: useBots, applyDraftRecord });
 
 const headers = { "x-openbuild-server": "srv" };
 const real = window.fetch.bind(window);
