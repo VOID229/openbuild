@@ -8,7 +8,8 @@
 //   openbuild unpair              unpair a paired device (asks which)
 //   openbuild remote server stop|start   control a paired device's server remotely
 //   openbuild friend invite|add|list|remove|chat|…   another person's OpenBuild, for shared bot chats (bin/friend.ts)
-//   openbuild set pass <password>   set/change the local access password
+//   openbuild password              set/change the local access password, at a hidden prompt
+//   openbuild set pass <password>   the same, from the command line
 //
 // The server's pid, mode and address are kept in <data dir>/server.json, its output in
 // <data dir>/server.log. PORT changes the port (default 3100).
@@ -24,7 +25,7 @@ import { describeUninstall, uninstallPlan, removeInstallation } from "./uninstal
 import { remoteRequest } from "./remoteRequest";
 import { FRIEND_HELP, friendCommand } from "./friend";
 import { dataDir } from "../server/paths";
-import { localAuth } from "../server/localAuth";
+import { localAuth, SET_PASSWORD_COMMAND } from "../server/localAuth";
 import * as devices from "../server/devices";
 import * as pairing from "../server/pairClient";
 import { systemdService, systemdNetworkOverride, systemdNetworkOverridePath, UNIT } from "./systemd";
@@ -268,7 +269,8 @@ function disableServe(s?: Pick<State, "servePort" | "serveHttpPort">) {
 
 async function start(mode: Mode, managed?: { active: boolean; restart: boolean }) {
   if (!["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild start [local|lan|tailscale]`);
-  if (mode !== "local" && !localAuth.configured()) console.warn(`No local password set: anyone who can reach this server over ${mode === "lan" ? "the network" : "your tailnet"} can use it. Set one with: openbuild set pass <password>`);
+  // Only the LAN is open to anyone: localhost stays on this computer, and the tailnet is gated by Tailscale accounts.
+  if (mode === "lan" && !localAuth.configured()) console.warn(`No local password set: anyone on your network who can reach this server can use it. Set one with: ${SET_PASSWORD_COMMAND}`);
   const STOPPING = "Stopping the server", PREPARING = "Preparing the network", STARTING = "Starting the server", PUBLISHING = "Publishing on Tailscale";
   const opened = (switching: boolean) => stage.open({
     scene: "lifecycle",
@@ -538,9 +540,10 @@ function help() {
   openbuild remote server start  start that server again
   openbuild remote status       where each paired device's server stands
 ${FRIEND_HELP}
-  openbuild set pass <pw>     set/change the local access password (optional)
+  openbuild password          set/change the local access password, at a hidden prompt
+                              (optional; recommended for \`start lan\`)
+  openbuild set pass <pw>     the same, from the command line (lands in shell history)
   openbuild unset pass        remove it: anyone who can reach the server can use it
-  openbuild password          the same, typed at a hidden prompt instead
   openbuild stop              stop the server; agent work keep running
   openbuild stop --all        also terminate agent and Durable workers
   openbuild restart [--yes]   restart in the same mode; running turns continue
@@ -930,11 +933,11 @@ if (service) {
     break;
   }
   case "set": {
-    if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild set pass <password>`);
+    if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild set pass <password>, or ${SET_PASSWORD_COMMAND} to type it privately`);
     // Everything after `pass`, so a password with spaces works unquoted too.
     // Taken unfiltered: a password may well be "-y".
     const rest = args.slice(2);
-    if (!rest.length) fail("usage: openbuild set pass <password>");
+    if (!rest.length) fail(`usage: openbuild set pass <password>, or ${SET_PASSWORD_COMMAND} to type it privately`);
     await savePassword(rest.join(" "));
     break;
   }

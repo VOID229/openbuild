@@ -27,7 +27,7 @@ import { usageRoutes } from "./usage/routes";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
 import { createChatRefresh } from "./chatRefresh";
-import { localAuth } from "./localAuth";
+import { localAuth, reachableOverLan, SET_PASSWORD_COMMAND } from "./localAuth";
 import { checkWhisper, transcribe } from "./dictation";
 import { findRun, localRun, startRun } from "./runs";
 import { requestRunStop } from "./runStops";
@@ -769,4 +769,5 @@ startPullRequestSweep(() => refreshChats(15_000));
 startClosedWorktreeSweep(removeRemoteWorktree);
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
-if (!localAuth.configured()) console.log("  No local password: anyone who can reach this server can use it. Set one with: openbuild set pass <password>\n");
+// Only listening on the LAN warrants it: loopback stays on this computer, the tailnet is gated by Tailscale accounts.
+if (!localAuth.configured() && reachableOverLan(hosts)) console.log(`  No local password: anyone on your network who can reach this server can use it. Set one with: ${SET_PASSWORD_COMMAND}\n`);

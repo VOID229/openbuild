@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLocalAuth } from "../server/localAuth";
+import { createLocalAuth, reachableOverLan } from "../server/localAuth";
 
 const PASSWORD = "correct horse battery staple";
 const directories: string[] = [];
@@ -404,4 +404,19 @@ describe("local password authentication", () => {
     expect(responses.map((response) => response.status).sort()).toEqual([200, 200, 429]);
     expect(responses.find((response) => response.status === 429)!.headers.get("retry-after")).toBe("1");
   });
+});
+
+test("only a LAN-reachable listener counts as open without a password", () => {
+  // Loopback stays on this computer; the tailnet is gated by Tailscale accounts.
+  expect(reachableOverLan(["127.0.0.1"])).toBe(false);
+  expect(reachableOverLan(["localhost", "::1", "[::1]"])).toBe(false);
+  expect(reachableOverLan(["127.0.0.1", "100.101.102.103"])).toBe(false);
+  expect(reachableOverLan(["fd7a:115c:a1e0::1"])).toBe(false);
+  expect(reachableOverLan([])).toBe(false);
+  // Every interface, or a LAN address, reaches the network.
+  expect(reachableOverLan(["0.0.0.0"])).toBe(true);
+  expect(reachableOverLan(["::"])).toBe(true);
+  expect(reachableOverLan(["127.0.0.1", "192.168.1.20"])).toBe(true);
+  // 100.x outside Tailscale's 100.64.0.0/10 is not the tailnet.
+  expect(reachableOverLan(["100.128.0.1"])).toBe(true);
 });

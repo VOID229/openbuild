@@ -60,6 +60,7 @@ esac
     const lan = cli(["start", "lan"]);
     expect(lan.code).toBe(0);
     expect(lan.output).toContain("No local password set");
+    expect(lan.output).toContain("Set one with: ob password");
     expect(lan.calls).toContain("systemctl --user daemon-reload");
     expect(lan.calls).toContain("systemctl --user restart openbuild.service");
     expect(lan.output).toContain(":3210");
