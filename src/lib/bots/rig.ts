@@ -4,8 +4,9 @@
 // keyframed here: the whole bot rides one critically damped spring toward where it wants to face, so
 // a move starts gently, carries on smoothly and settles without swinging past, and a change of mind
 // mid-move stays smooth. Eyes, head and body move as one, as they do in the reference recording of
-// Grok Bot's mascots. This file is the arithmetic (no DOM), so tests can run it; BotAvatar.tsx writes
-// what it works out to the page.
+// Grok Bot's mascots. Following the pointer is the exception: there the eyes dart ahead, the head
+// turns quickly after them and the body follows on (TRACK), quick and direct. This file is the
+// arithmetic (no DOM), so tests can run it; BotAvatar.tsx writes what it works out to the page.
 //
 // A shape is drawn upright, facing straight out (lib/bots/looks.ts). That's how a bot looks at you,
 // and how it works; left to itself it rests turned up and away to one side and rolled over, which is
@@ -143,8 +144,15 @@ export interface Pose {
 
 type Point = [number, number];
 
-/** A path of M, L, Q, C and Z commands (what looks.ts draws) as polygons, one for each closed part. */
+const outlined = new Map<string, Point[][]>();
+/** A path of M, L, Q, C and Z commands (what looks.ts draws) as polygons, one for each closed part: worked out once for each path. */
 export function outline(path: string): Point[][] {
+  let parts = outlined.get(path);
+  if (!parts) outlined.set(path, (parts = outlineOf(path)));
+  return parts;
+}
+
+function outlineOf(path: string): Point[][] {
   const parts: Point[][] = [];
   // A curve drawn through many points bends little between two of them: one more point each is plenty.
   const steps = (path.match(/C/g)?.length ?? 0) > 30 ? 1 : 3;
@@ -209,9 +217,15 @@ export function covers(shape: Shape, x: number, y: number): boolean {
       for (let row = 0; row < n; row++) {
         const at = (row + 0.5) / FINE;
         const xs: number[] = [];
+        // (Indexed rather than destructured, here and in the other loops run many times over: Bun's
+        // engine walks an array's iterator to destructure it, and that's most of the cost.)
         for (let i = 0, j = part.length - 1; i < part.length; j = i++) {
-          const [xi, yi] = part[i]!;
-          const [xj, yj] = part[j]!;
+          const pi = part[i]!;
+          const pj = part[j]!;
+          const xi = pi[0];
+          const yi = pi[1];
+          const xj = pj[0];
+          const yj = pj[1];
           if (yi > at !== yj > at) xs.push(((xj - xi) * (at - yi)) / (yj - yi) + xi);
         }
         xs.sort((a, b) => a - b);
@@ -220,7 +234,8 @@ export function covers(shape: Shape, x: number, y: number): boolean {
       }
     covered.set(shape.id, grid);
   }
-  const [col, row] = [Math.floor(x * FINE), Math.floor(y * FINE)];
+  const col = Math.floor(x * FINE);
+  const row = Math.floor(y * FINE);
   return col >= 0 && row >= 0 && col < 100 * FINE && row < 100 * FINE && grid[row * 100 * FINE + col] === 1;
 }
 
@@ -294,29 +309,63 @@ function eyeOutline(shape: Shape, look: EyeLook) {
   return out;
 }
 
-/** A shape's edge as points no more than half a unit apart, for how near an eye comes to it. */
-const edges = new Map<string, Point[]>();
+/** A shape's edge as points no more than half a unit apart (x, y, x, y, …), for how near an eye comes to it. */
+const edges = new Map<string, Float64Array>();
 function edgeOf(shape: Shape) {
   let edge = edges.get(shape.id);
   if (edge) return edge;
-  edge = [];
+  const out: number[] = [];
   for (const part of outline(shape.path))
     for (let i = 0; i < part.length; i++) {
       const [[x0, y0], [x1, y1]] = [part[i]!, part[(i + 1) % part.length]!];
       const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.5));
-      for (let k = 0; k < n; k++) edge.push([x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n]);
+      for (let k = 0; k < n; k++) out.push(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n);
     }
-  edges.set(shape.id, edge);
+  edges.set(shape.id, (edge = Float64Array.from(out)));
   return edge;
 }
 
-/** How far a point is from a convex polygon (clockwise, as drawn on screen), 0 inside it. */
-function apart(poly: Point[], [x, y]: Point): number {
+/**
+ * Where an eye lands with the head turned that far, the eyes set `spread` times the shape's gap apart
+ * and drawn `size` times their form's size: its middle on the body, and how the face is stretched
+ * there (a 2×2 matrix, a b c d as in CSS). Some of the narrowing a turn would give it (SOFT), a little
+ * smaller the further it's turned away (FAR), and quizzical (`near`), the eye on the side it looks
+ * toward bigger and the other smaller. Following the pointer the eyes dart ahead of the head by
+ * (lx, ly), a slide within the face.
+ */
+export function eyeAt(shape: Shape, side: number, yaw: number, pitch: number, spread = 1, size = 1, near = 0, lx = 0, ly = 0) {
+  const at = projector(yaw, pitch);
+  const [x, y] = [shape.face.x + (side * eyesOf(shape).gap) / 2, shape.face.y];
+  // (Its home on the face, `x`, is where the page has it; a wider spread is a slide from there.)
+  const sx = shape.face.x + (side * eyesOf(shape).gap * spread) / 2;
+  const [fx, fy] = [shape.face.x + lx, y + ly];
+  // Its middle: as far from the middle of the face as a true turn would put it for SOFT_GAP of it,
+  // and as a flat slide (in the perspective there) for the rest.
+  const [mx, my] = at(fx, fy);
+  const [qx, qy] = at(sx + lx, fy);
+  // (A flat slide is only as much nearer or further as the middle of the face is: 1 straight ahead.)
+  const flat = (sx - shape.face.x) * ((PERSPECTIVE - DEPTH) / (PERSPECTIVE - DEPTH * Math.cos(rad(yaw)) * Math.cos(rad(pitch))));
+  const [px, py] = [mx + (qx - mx) * SOFT_GAP + flat * (1 - SOFT_GAP), my + (qy - my) * SOFT_GAP];
+  const [ax, ay] = at(sx + lx + 1, fy);
+  const [bx, by] = at(sx + lx, fy + 1);
+  const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
+  const k = (1 - FAR * m * m) * (1 + side * Math.max(-1, Math.min(1, (2 * yaw) / YAW)) * near) * size;
+  return { x, y, px, py, a: (1 + (ax - qx - 1) * SOFT) * k, b: (ay - qy) * SOFT * k, c: (bx - qx) * SOFT * k, d: (1 + (by - qy - 1) * SOFT) * k };
+}
+
+/** An eye's outline where it's drawn, for `eyesFit`: one buffer, filled afresh each time, so asking every frame makes nothing to collect. */
+let placed = new Float64Array(64);
+
+/** How far a point is from the convex polygon in `placed` (its first `count` points, clockwise as drawn on screen), 0 inside it. */
+function apartPlaced(count: number, x: number, y: number): number {
   let least = Infinity;
   let outside = false;
-  for (let i = 0; i < poly.length; i++) {
-    const [[x0, y0], [x1, y1]] = [poly[i]!, poly[(i + 1) % poly.length]!];
-    const [ex, ey] = [x1 - x0, y1 - y0];
+  for (let i = 0; i < count; i++) {
+    const j = (i + 1) % count;
+    const x0 = placed[2 * i]!;
+    const y0 = placed[2 * i + 1]!;
+    const ex = placed[2 * j]! - x0;
+    const ey = placed[2 * j + 1]! - y0;
     if (ex * (y - y0) - ey * (x - x0) < 0) outside = true;
     const t = Math.max(0, Math.min(1, ((x - x0) * ex + (y - y0) * ey) / (ex * ex + ey * ey || 1)));
     least = Math.min(least, Math.hypot(x - x0 - ex * t, y - y0 - ey * t));
@@ -325,48 +374,44 @@ function apart(poly: Point[], [x, y]: Point): number {
 }
 
 /**
- * Where an eye lands with the head turned that far, the eyes set `spread` times the shape's gap apart
- * and drawn `size` times their form's size: its middle on the body, and how the face is stretched
- * there (a 2×2 matrix, a b c d as in CSS). Some of the narrowing a turn would give it (SOFT), a little
- * smaller the further it's turned away (FAR), and quizzical (`near`), the eye on the side it looks
- * toward bigger and the other smaller.
+ * Whether both eyes, drawn in that form with the head turned that far (and leading by (lx, ly)), are
+ * on the body with `margin` to spare all round: no point of its edge is nearer either eye than that.
+ * The spread and size are the form's own unless given. It's asked every frame a bot moves, several
+ * times over near the edge, so it works in one buffer rather than making arrays to throw away.
  */
-export function eyeAt(shape: Shape, side: number, yaw: number, pitch: number, spread = 1, size = 1, near = 0) {
-  const at = projector(yaw, pitch);
-  const [x, y] = [shape.face.x + (side * eyesOf(shape).gap) / 2, shape.face.y];
-  // (Its home on the face, `x`, is where the page has it; a wider spread is a slide from there.)
-  const sx = shape.face.x + (side * eyesOf(shape).gap * spread) / 2;
-  // Its middle: as far from the middle of the face as a true turn would put it for SOFT_GAP of it,
-  // and as a flat slide (in the perspective there) for the rest.
-  const [mx, my] = at(shape.face.x, y);
-  const [qx, qy] = at(sx, y);
-  // (A flat slide is only as much nearer or further as the middle of the face is: 1 straight ahead.)
-  const flat = (sx - shape.face.x) * ((PERSPECTIVE - DEPTH) / (PERSPECTIVE - DEPTH * Math.cos(rad(yaw)) * Math.cos(rad(pitch))));
-  const [px, py] = [mx + (qx - mx) * SOFT_GAP + flat * (1 - SOFT_GAP), my + (qy - my) * SOFT_GAP];
-  const [ax, ay] = at(sx + 1, y);
-  const [bx, by] = at(sx, y + 1);
-  const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
-  const k = (1 - FAR * m * m) * (1 + side * Math.max(-1, Math.min(1, (2 * yaw) / YAW)) * near) * size;
-  return { x, y, px, py, a: (1 + (ax - qx - 1) * SOFT) * k, b: (ay - qy) * SOFT * k, c: (bx - qx) * SOFT * k, d: (1 + (by - qy - 1) * SOFT) * k };
-}
-
-/**
- * Whether both eyes, drawn in that form with the head turned that far, are on the body with `margin`
- * to spare all round: no point of its edge is nearer either eye than that. The spread and size are
- * the form's own unless given.
- */
-export function eyesFit(shape: Shape, look: EyeLook, yaw: number, pitch: number, spread = spreadOf(look), size = sizeOf(shape, look), margin = MARGIN, near = 0): boolean {
+export function eyesFit(shape: Shape, look: EyeLook, yaw: number, pitch: number, spread = spreadOf(look), size = sizeOf(shape, look), margin = MARGIN, near = 0, lx = 0, ly = 0): boolean {
   const nap = (DRAWN[look] as Drawn).nap ?? 0;
   const edge = edgeOf(shape);
-  for (const side of [-1, 1]) {
-    const { px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, spread, size, near);
+  const outline = eyeOutline(shape, look);
+  if (placed.length < outline.length * 2) placed = new Float64Array(outline.length * 2);
+  for (let side = -1; side <= 1; side += 2) {
+    const { px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, spread, size, near, lx, ly);
     if (!covers(shape, px, py + nap)) return false;
-    const eye = eyeOutline(shape, look).map(([ex, ey]): Point => [px + a * ex + c * ey, py + nap + b * ex + d * ey]);
+    let x0 = Infinity;
+    let x1 = -Infinity;
+    let y0 = Infinity;
+    let y1 = -Infinity;
+    for (let i = 0; i < outline.length; i++) {
+      const p = outline[i]!;
+      const x = px + a * p[0] + c * p[1];
+      const y = py + nap + b * p[0] + d * p[1];
+      placed[2 * i] = x;
+      placed[2 * i + 1] = y;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
     // Only the edge near it can be too near.
-    const xs = eye.map((p) => p[0]);
-    const ys = eye.map((p) => p[1]);
-    const [x0, x1, y0, y1] = [Math.min(...xs) - margin, Math.max(...xs) + margin, Math.min(...ys) - margin, Math.max(...ys) + margin];
-    for (const p of edge) if (p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1 && apart(eye, p) < margin) return false;
+    x0 -= margin;
+    x1 += margin;
+    y0 -= margin;
+    y1 += margin;
+    for (let i = 0; i < edge.length; i += 2) {
+      const x = edge[i]!;
+      const y = edge[i + 1]!;
+      if (x > x0 && x < x1 && y > y0 && y < y1 && apartPlaced(outline.length, x, y) < margin) return false;
+    }
   }
   return true;
 }
@@ -421,7 +466,7 @@ function reach(shape: Shape, form: EyeForm, angle: number): number {
   const fits = (m: number) => {
     for (const side of [-1, 1]) {
       const { px, py, a, b, c, d } = eyeAt(shape, side, Math.cos(angle) * YAW * m, Math.sin(angle) * PITCH * m, spread, size);
-      for (const [dx, dy] of points) if (!covers(shape, px + a * dx + c * dy, py + b * dx + d * dy)) return false;
+      for (const p of points) if (!covers(shape, px + a * p[0] + c * p[1], py + b * p[0] + d * p[1])) return false;
     }
     return true;
   };
@@ -438,15 +483,35 @@ function reach(shape: Shape, form: EyeForm, angle: number): number {
   return lo;
 }
 
-/**
- * That, for each of 36 directions round the clock. Worked out once for each shape and form of eye
- * (ahead of its first look, when the page has had a moment: see `warm`).
- */
-export function roomOf(shape: Shape, form: EyeForm = "open"): number[] {
+/** A shape's room in a form, one direction at a time: NaN where it isn't worked out yet. */
+function roomsOf(shape: Shape, form: EyeForm): number[] {
   const key = `${shape.id} ${form}`;
   let room = rooms.get(key);
-  if (!room) rooms.set(key, (room = Array.from({ length: DIRECTIONS }, (_, i) => reach(shape, form, (i / DIRECTIONS) * Math.PI * 2))));
+  if (!room) rooms.set(key, (room = new Array<number>(DIRECTIONS).fill(NaN)));
   return room;
+}
+
+/**
+ * The room one way, direction `i` of 36, worked out the first time it's asked for. A turn needs only
+ * the two directions either side of it, so a shape's first look costs those two and not the whole
+ * clock: worked out all at once, the first move of a new shape held up the frames around it.
+ */
+function roomAt(shape: Shape, form: EyeForm, i: number): number {
+  const room = roomsOf(shape, form);
+  const at = ((i % DIRECTIONS) + DIRECTIONS) % DIRECTIONS;
+  if (Number.isNaN(room[at])) room[at] = reach(shape, form, (at / DIRECTIONS) * Math.PI * 2);
+  return room[at]!;
+}
+
+/** How many of a shape's 36 directions are worked out yet in a form (for the tests). */
+export const worked = (shape: Shape, form: EyeForm = "open") => roomsOf(shape, form).filter((r) => !Number.isNaN(r)).length;
+
+/**
+ * That, for each of 36 directions round the clock. Worked out once for each shape and form of eye
+ * (a direction as a look first needs it, and ahead of that when the page has a moment: see `warm`).
+ */
+export function roomOf(shape: Shape, form: EyeForm = "open"): number[] {
+  return Array.from({ length: DIRECTIONS }, (_, i) => roomAt(shape, form, i));
 }
 
 /** Where a bot is headed: the head's turn in degrees, the roll, and the zoom. */
@@ -468,11 +533,10 @@ export const AHEAD: Target = { yaw: 0, pitch: 0, roll: 0, zoom: 0 };
 export function turnTo(shape: Shape, x: number, y: number, form: EyeForm = "open"): [yaw: number, pitch: number] {
   const m = Math.hypot(x, y);
   if (!m) return [0, 0];
-  const room = roomOf(shape, form);
   const at = ((Math.atan2(y, x) / (Math.PI * 2)) * DIRECTIONS + DIRECTIONS) % DIRECTIONS;
   const [i, f] = [Math.floor(at), at - Math.floor(at)];
   // Between two directions, what the tighter of them has: a spiky shape's room changes fast.
-  const k = Math.min(m, 1, room[i % DIRECTIONS]!, f ? room[(i + 1) % DIRECTIONS]! : 1) / m;
+  const k = Math.min(m, 1, roomAt(shape, form, i), f ? roomAt(shape, form, i + 1) : 1) / m;
   return [x * k * YAW, y * k * PITCH];
 }
 
@@ -541,6 +605,18 @@ export type Mode = keyof Springs;
  */
 export const MOTION: Springs = { track: { stiffness: 13, damping: 1 }, pose: { stiffness: 12, damping: 1 }, rest: { stiffness: 9, damping: 1 } };
 
+/**
+ * Following the pointer it's quicker and more direct than that, as it always was: the eyes dart ahead
+ * (quick, all but dead-beat), the head turns right after them with a hint of overshoot onto the
+ * pointer, and the body comes after, swaying a little past and back. The roll and lean ride with the
+ * body. (The eyes' form, and a nod, keep to MOTION.)
+ */
+export const TRACK = { eyes: { stiffness: 46, damping: 0.8 }, head: { stiffness: 30, damping: 0.72 }, body: { stiffness: 15, damping: 0.6 } } satisfies Record<string, Spring>;
+
+/** How far ahead of the head the eyes dart following the pointer, in the 100-unit box for each degree it has left to turn. */
+export const LEAD = 0.13;
+const LEAD_MAX = 4.5;
+
 export interface Axis {
   x: number;
   v: number;
@@ -549,7 +625,10 @@ const axis = (x = 0): Axis => ({ x, v: 0 });
 
 /**
  * Everything about a bot that moves. Angles in degrees. `spread` and `size` are its eyes' spacing and
- * size for the form they're in (SPREAD, sizeOf), eased from one form's to the next.
+ * size for the form they're in (SPREAD, sizeOf), eased from one form's to the next. `lagYaw` and
+ * `lagPitch` are how far the body trails the head (following the pointer; otherwise they come to
+ * nothing), `leadX` and `leadY` how far the eyes dart ahead of it (in the 100-unit box), and `dip` a
+ * nod, on top of the head's pitch.
  */
 export interface Rig {
   yaw: Axis;
@@ -559,6 +638,11 @@ export interface Rig {
   spread: Axis;
   size: Axis;
   near: Axis;
+  lagYaw: Axis;
+  lagPitch: Axis;
+  leadX: Axis;
+  leadY: Axis;
+  dip: Axis;
   /** A turn right round, side to side, 0 to 360 while it lasts: the face goes off to the left and comes back from the right. */
   spin: number;
   /** A flip right over, 0 to 360 while it lasts: the face goes up over the top and comes back from below. */
@@ -566,7 +650,7 @@ export interface Rig {
 }
 /** A rig facing straight ahead, or come to rest on a target. */
 export function newRig(at: Target = AHEAD): Rig {
-  const rig: Rig = { yaw: axis(), pitch: axis(), roll: axis(), zoom: axis(), spread: axis(1), size: axis(1), near: axis(), spin: 0, flip: 0 };
+  const rig: Rig = { yaw: axis(), pitch: axis(), roll: axis(), zoom: axis(), spread: axis(1), size: axis(1), near: axis(), lagYaw: axis(), lagPitch: axis(), leadX: axis(), leadY: axis(), dip: axis(), spin: 0, flip: 0 };
   snap(rig, at);
   return rig;
 }
@@ -580,16 +664,48 @@ function pull(a: Axis, to: number, { stiffness: w, damping: z }: Spring, h: numb
  * Moves a rig `dt` ms toward a target. From rest everything eases in rather than jumps, and it comes
  * to rest exactly on the target: true once it has, so the frames can stop.
  */
+/** The body's own turn while it follows the pointer, worked on here a step at a time. */
+const body = { yaw: axis(), pitch: axis() };
+const clampLead = (n: number) => Math.max(-LEAD_MAX, Math.min(LEAD_MAX, n));
+
+/**
+ * Moves a rig `dt` ms toward a target. From rest everything eases in rather than jumps, and it comes
+ * to rest exactly on the target: true once it has, so the frames can stop. Following the pointer
+ * ("track") it moves as TRACK says; otherwise all of it rides MOTION's one spring, and whatever the
+ * pointer left behind (the body trailing, the eyes ahead) comes back onto the head on the way.
+ */
 export function step(rig: Rig, to: Target, dt: number, mode: Mode): boolean {
   const spring = MOTION[mode];
+  const tracking = mode === "track";
   const [spread, size] = [to.spread ?? 1, to.size ?? 1];
-  // A long frame (a busy main thread, a hidden tab) is taken in short steps, so the spring stays stable.
+  // A long frame (a busy main thread, a hidden tab) is taken in short steps, so the springs stay stable.
   for (let left = Math.min(dt, 100) / 1000; left > 1e-9; left -= 1 / 120) {
     const h = Math.min(left, 1 / 120);
-    pull(rig.yaw, to.yaw, spring, h);
-    pull(rig.pitch, to.pitch, spring, h);
-    pull(rig.roll, to.roll, spring, h);
-    pull(rig.zoom, to.zoom, spring, h);
+    if (tracking) {
+      // The body heads for the pointer in its own right, and the head (quicker) after it; what's
+      // kept is how far the body trails it.
+      [body.yaw.x, body.yaw.v, body.pitch.x, body.pitch.v] = [rig.yaw.x + rig.lagYaw.x, rig.yaw.v + rig.lagYaw.v, rig.pitch.x + rig.lagPitch.x, rig.pitch.v + rig.lagPitch.v];
+      pull(rig.yaw, to.yaw, TRACK.head, h);
+      pull(rig.pitch, to.pitch, TRACK.head, h);
+      pull(body.yaw, to.yaw, TRACK.body, h);
+      pull(body.pitch, to.pitch, TRACK.body, h);
+      [rig.lagYaw.x, rig.lagYaw.v, rig.lagPitch.x, rig.lagPitch.v] = [body.yaw.x - rig.yaw.x, body.yaw.v - rig.yaw.v, body.pitch.x - rig.pitch.x, body.pitch.v - rig.pitch.v];
+      pull(rig.roll, to.roll, TRACK.body, h);
+      pull(rig.zoom, to.zoom, TRACK.body, h);
+      // The eyes go first: as far ahead as the head still has to turn, and back onto it as it arrives.
+      pull(rig.leadX, clampLead((to.yaw - rig.yaw.x) * LEAD), TRACK.eyes, h);
+      pull(rig.leadY, clampLead((to.pitch - rig.pitch.x) * LEAD), TRACK.eyes, h);
+    } else {
+      pull(rig.yaw, to.yaw, spring, h);
+      pull(rig.pitch, to.pitch, spring, h);
+      pull(rig.roll, to.roll, spring, h);
+      pull(rig.zoom, to.zoom, spring, h);
+      pull(rig.lagYaw, 0, spring, h);
+      pull(rig.lagPitch, 0, spring, h);
+      pull(rig.leadX, 0, spring, h);
+      pull(rig.leadY, 0, spring, h);
+    }
+    pull(rig.dip, 0, spring, h);
     pull(rig.spread, spread, spring, h);
     pull(rig.size, size, spring, h);
     pull(rig.near, to.near ?? 0, spring, h);
@@ -597,12 +713,13 @@ export function step(rig: Rig, to: Target, dt: number, mode: Mode): boolean {
   const off = (a: Axis, t: number, near: number) => Math.abs(t - a.x) > near || Math.abs(a.v) > near * 12;
   if (off(rig.yaw, to.yaw, 0.05) || off(rig.pitch, to.pitch, 0.05) || off(rig.roll, to.roll, 0.05)) return false;
   if (off(rig.zoom, to.zoom, 0.0008) || off(rig.spread, spread, 0.002) || off(rig.size, size, 0.002) || off(rig.near, to.near ?? 0, 0.002)) return false;
+  if (off(rig.lagYaw, 0, 0.05) || off(rig.lagPitch, 0, 0.05) || off(rig.dip, 0, 0.05) || off(rig.leadX, 0, 0.02) || off(rig.leadY, 0, 0.02)) return false;
   settle(rig, to);
   return true;
 }
 
 const settle = (rig: Rig, to: Target) => {
-  for (const [a, t] of [[rig.yaw, to.yaw], [rig.pitch, to.pitch], [rig.roll, to.roll], [rig.zoom, to.zoom], [rig.spread, to.spread ?? 1], [rig.size, to.size ?? 1], [rig.near, to.near ?? 0]] as [Axis, number][]) {
+  for (const [a, t] of [[rig.yaw, to.yaw], [rig.pitch, to.pitch], [rig.roll, to.roll], [rig.zoom, to.zoom], [rig.spread, to.spread ?? 1], [rig.size, to.size ?? 1], [rig.near, to.near ?? 0], [rig.lagYaw, 0], [rig.lagPitch, 0], [rig.leadX, 0], [rig.leadY, 0], [rig.dip, 0]] as [Axis, number][]) {
     a.x = t;
     a.v = 0;
   }
@@ -616,11 +733,11 @@ export function snap(rig: Rig, to: Target) {
 }
 
 /**
- * A nod: the head is knocked forward and its spring brings it back, without swinging past. Down and
- * back, on top of whatever it's doing; nothing lifts.
+ * A nod: the head is knocked forward and its spring (MOTION's, even following the pointer) brings it
+ * back, without swinging past. Down and back, on top of whatever it's doing; nothing lifts.
  */
 export function nod(rig: Rig) {
-  rig.pitch.v += 700;
+  rig.dip.v += 700;
 }
 
 /**
@@ -660,19 +777,23 @@ function halfOf(shape: Shape): [number, number] {
  * from the side, while the face slides off over its edge, round the back (`back`: the face is out of
  * sight) and in again from the other side.
  *
- * Otherwise the eyes never go nearer the edge than MARGIN: where the head's turn or a nod would take
- * them nearer, they go only as far along as they still fit, the body turning on under them.
+ * Otherwise the eyes never go nearer the edge than MARGIN: where the head's turn, the eyes darting
+ * ahead or a nod would take them nearer, they go only as far along as they still fit, the body turning
+ * on under them.
  */
 export function frame(rig: Rig, shape: Shape, size: number, look: EyeLook = "open"): { whole: string; body: string; left: string; right: string; back: boolean } {
   const u = size / 100;
   const rest = restOf(shape);
+  // The head's turn (a nod on top), and the body's: the head's but for how far it trails it.
+  const headPitch = rig.pitch.x + rig.dip.x;
+  const [bodyYaw, bodyPitch] = [rig.yaw.x + rig.lagYaw.x, headPitch + rig.lagPitch.x];
   // Carried toward where it looks, from where it rests, and settling a little to look down: never lifting to look up.
-  const tx = ((rig.yaw.x - rest.yaw) / YAW) * TRAVEL * u;
-  const ty = (Math.max(0, rig.pitch.x) / PITCH) * 1.4 * u;
+  const tx = ((bodyYaw - rest.yaw) / YAW) * TRAVEL * u;
+  const ty = (Math.max(0, bodyPitch) / PITCH) * 1.4 * u;
   const move = Number(n(tx)) || Number(n(ty)) ? `translate(${n(tx)}px, ${n(ty)}px) ` : "";
   const whole = move || rig.roll.x || rig.zoom.x ? `${move}rotate(${n(rig.roll.x)}deg) scale(${n(1 + rig.zoom.x, 4)})` : "none";
-  const by = rig.yaw.x * BODY_TURN;
-  const bp = rig.pitch.x * BODY_TURN;
+  const by = bodyYaw * BODY_TURN;
+  const bp = bodyPitch * BODY_TURN;
   // Round in a spin or a flip: how far, and how squeezed the body is seen from there.
   const [cs, ss, cf, sf] = [Math.cos(rad(rig.spin)), Math.sin(rad(rig.spin)), Math.cos(rad(rig.flip)), Math.sin(rad(rig.flip))];
   const [kx, ky] = [Math.hypot(cs, THICK * ss), Math.hypot(cf, THICK * sf)];
@@ -681,23 +802,25 @@ export function frame(rig: Rig, shape: Shape, size: number, look: EyeLook = "ope
   const body = turned || squeeze ? `${turned}${squeeze}`.trim() : "none";
   const back = cs < 0 || cf < 0;
   const round = Math.abs(ss) > 0.001 || Math.abs(sf) > 0.001;
-  let [yaw, pitch] = [rig.yaw.x, rig.pitch.x];
+  let [yaw, pitch, lx, ly] = [rig.yaw.x, headPitch, rig.leadX.x, rig.leadY.x];
   const [spread, scale, near] = [rig.spread.x, rig.size.x, rig.near.x];
-  if (!round && !eyesFit(shape, look, yaw, pitch, spread, scale, MARGIN, near)) {
+  // Kept off the edge in a spin or a flip too, as the turn starts and ends: there the face goes round
+  // from where they were kept, so they never jump out to the edge as one starts or back as it ends.
+  if (!eyesFit(shape, look, yaw, pitch, spread, scale, MARGIN, near, lx, ly)) {
     // As far along toward where it is as they fit (nearer straight ahead, where they always do).
     let [lo, hi] = [0, 1];
     for (let i = 0; i < 7; i++) {
       const mid = (lo + hi) / 2;
-      if (eyesFit(shape, look, yaw * mid, pitch * mid, spread, scale, MARGIN, near)) lo = mid;
+      if (eyesFit(shape, look, yaw * mid, pitch * mid, spread, scale, MARGIN, near, lx * mid, ly * mid)) lo = mid;
       else hi = mid;
     }
-    [yaw, pitch] = [yaw * lo, pitch * lo];
+    [yaw, pitch, lx, ly] = [yaw * lo, pitch * lo, lx * lo, ly * lo];
   }
-  if (!yaw && !pitch && spread === 1 && scale === 1 && !near && !round) return { whole, body, left: "none", right: "none", back };
+  if (!yaw && !pitch && !lx && !ly && spread === 1 && scale === 1 && !near && !round) return { whole, body, left: "none", right: "none", back };
   const [hw, hh] = halfOf(shape);
   const eye = (side: number) => {
     // Where its middle lands, and how the face is stretched there.
-    let { x, y, px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, spread, scale, near);
+    let { x, y, px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, spread, scale, near, lx, ly);
     if (round) {
       // Round the body's thickness: off over the edge at a quarter of the way, and narrowed to nothing there.
       const [X, Y] = [px - 50, py - 50];
@@ -716,14 +839,14 @@ export function frame(rig: Rig, shape: Shape, size: number, look: EyeLook = "ope
  * can turn with its eyes in each form. `later` runs each step when there's time to spare.
  */
 export function warm(shape: Shape, later: (step: () => void) => void) {
-  const forms = (Object.keys(FORMS) as EyeForm[]).filter((form) => !rooms.has(`${shape.id} ${form}`));
+  // A quarter of the clock at a time: a whole form at once was long enough to hold up a frame.
+  const todo: [EyeForm, number][] = [];
+  for (const form of Object.keys(FORMS) as EyeForm[]) roomsOf(shape, form).forEach((r, i) => Number.isNaN(r) && todo.push([form, i]));
   const next = () => {
-    const form = forms.shift();
-    if (!form) return;
-    roomOf(shape, form);
-    if (forms.length) later(next);
+    for (const [form, i] of todo.splice(0, DIRECTIONS / 4)) roomAt(shape, form, i);
+    if (todo.length) later(next);
   };
-  if (forms.length) later(next);
+  if (todo.length) later(next);
 }
 
 const rested = new Map<string, ReturnType<typeof frame>>();

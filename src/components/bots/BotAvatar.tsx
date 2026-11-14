@@ -23,15 +23,21 @@ const calm = () => typeof matchMedia === "function" && matchMedia("(prefers-redu
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 // One frame loop for every bot that's moving: each steps its springs and writes its transforms, and
-// drops out once it has come to rest, so a page of still bots costs nothing.
-const moving = new Set<(now: number) => void>();
+// drops out once it has come to rest, so a page of still bots costs nothing. Whatever a bot needs to
+// read off the page (where it is, to aim at the pointer) is read for all of them first, before any
+// writes: read between one bot's writes and the next's, each read had the browser work out the page's
+// styles again, frame after frame, with a sidebar of bots following the pointer.
+type Tick = ((now: number) => void) & { measure?: () => void };
+const moving = new Set<Tick>();
 let frameId = 0;
 function run(now: number) {
   frameId = 0;
-  for (const tick of [...moving]) tick(now);
+  const ticks = [...moving];
+  for (const tick of ticks) tick.measure?.();
+  for (const tick of ticks) tick(now);
   if (moving.size) frameId = requestAnimationFrame(run);
 }
-function animate(tick: (now: number) => void) {
+function animate(tick: Tick) {
   moving.add(tick);
   frameId ||= requestAnimationFrame(run);
 }
@@ -108,10 +114,17 @@ export interface BotAvatarProps {
   /** Also nod, rock and pull faces now and then (the bigger avatars). */
   lively?: boolean;
   /**
-   * Follow the pointer: the whole body turns and leans toward it. Not while it's busy: at work it
-   * pays the pointer no mind, and takes it up again, from wherever it's looking, once it stops.
+   * Follow the pointer: the whole body turns and leans toward it, quick and direct, the eyes darting
+   * ahead (rig.ts's TRACK). Not while it's busy: at work it pays the pointer no mind, and takes it up
+   * again, from wherever it's looking, once it stops.
    */
   track?: boolean;
+  /**
+   * With `track`, only while the pointer is over the closest ancestor matching this selector: it
+   * eases back to rest when the pointer leaves it, and takes it up again when it comes back. The
+   * details panel's big mascot, which follows the pointer about the panel and does nothing else.
+   */
+  trackWithin?: string;
   /** Nod and smile on hover, turn right round when pressed. */
   playful?: boolean;
   /**
@@ -149,7 +162,7 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, playful: wantPlayful = false, plain = false, busy = false, reading = false, asleep, zzz = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, trackWithin, playful: wantPlayful = false, plain = false, busy = false, reading = false, asleep, zzz = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
   const lively = wantLively && !plain;
   const playful = wantPlayful && !plain;
@@ -213,7 +226,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // It's drawn at rest to begin with (`rest`, below), with nothing run to put it there.
   // `read` is when it began reading (held `still`, with motion reduced): while it's set, where it looks is the line it's on.
   // `sweep` is a look moving steadily from one pose to the next; `spun` and `flipped` when a spin or a flip began.
-  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; flipped: number; pose?: Pose; sweep?: { from: Pose; start: number; ms: number }; read?: { since: number; still: boolean }; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
+  // `rect` is where it is on the page, read this frame before anything was written (see `run`).
+  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; flipped: number; pose?: Pose; sweep?: { from: Pose; start: number; ms: number }; read?: { since: number; still: boolean }; rect?: DOMRect; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
   body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, flipped: 0, pose: held, shape, size, busy, look: drawn };
   Object.assign(body.current, { pose: held, shape, size, busy, look: drawn });
   const write = () => {
@@ -229,7 +243,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     if (b.pose && b.sweep) return poseTarget(b.shape, between(b.sweep.from, b.pose, Math.min(1, Math.max(0, (performance.now() - b.sweep.start) / b.sweep.ms))), b.busy);
     if (b.pose) return poseTarget(b.shape, b.pose, b.busy);
     if (!b.tracking || !el || pointer.x < 0) return restOf(b.shape);
-    const r = el.getBoundingClientRect();
+    const r = b.rect ?? el.getBoundingClientRect();
     return r.width ? aimTarget(b.shape, pointer.x - (r.left + (b.shape.face.x / 100) * r.width), pointer.y - (r.top + (b.shape.face.y / 100) * r.height), r.width) : restOf(b.shape);
   };
   // Where it's headed, with its eyes spaced and sized for the form they're in.
@@ -237,7 +251,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     const b = body.current!;
     return { ...facing(), spread: spreadOf(b.look), size: sizeOf(b.shape, b.look) };
   };
-  const tick = useRef((now: number) => {
+  const tick = useRef<Tick>((now: number) => {
     const b = body.current!;
     const dt = b.last ? now - b.last : 16;
     b.last = now;
@@ -253,6 +267,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     }
     const sweeping = !!b.sweep && now < b.sweep.start + b.sweep.ms;
     const done = step(b.rig, target(), dt, b.read || b.pose ? "pose" : b.tracking ? "track" : "rest") && !b.spun && !b.flipped;
+    b.rect = undefined;
     write();
     // Reading, it's on the move even while it holds at the start of a line, and sweeping, all the way
     // along: it stops when the reading or the sweep does.
@@ -260,6 +275,11 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     b.last = 0;
     moving.delete(tick.current);
   });
+  // Following the pointer, where it is is read with every other bot's reads, before the writes.
+  tick.current.measure ??= () => {
+    const b = body.current!;
+    b.rect = b.tracking && !b.pose && !b.read && pointer.x >= 0 ? ref.current?.getBoundingClientRect() : undefined;
+  };
   /** Sets it moving toward wherever it now faces (or puts it there, when motion is reduced). */
   const move = () => {
     if (calm()) snap(body.current!.rig, target());
@@ -290,23 +310,39 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawn]);
 
-  // Following the pointer, wherever it is; let go, it eases back to looking ahead. A pose wins: it
-  // looks where the pose says, and takes the pointer up again after. At work it doesn't follow at all.
+  // Following the pointer, wherever it is (or, `trackWithin`, while it's over that); let go, it eases
+  // back to rest. A pose wins: it looks where the pose says, and takes the pointer up again after. At
+  // work it doesn't follow at all.
   useEffect(() => {
     const el = ref.current;
     if (!following || !el || calm()) return;
     const b = body.current!;
-    b.tracking = true;
-    el.dataset.tracking = "";
-    const stop = follow(() => animate(tick.current));
-    if (pointer.x >= 0) animate(tick.current);
-    return () => {
-      stop();
-      b.tracking = false;
-      delete el.dataset.tracking;
+    const set = (on: boolean) => {
+      if (b.tracking === on) return;
+      b.tracking = on;
+      if (on) el.dataset.tracking = "";
+      else delete el.dataset.tracking;
       animate(tick.current);
     };
-  }, [following]);
+    const stop = follow(() => b.tracking && animate(tick.current));
+    const scope = trackWithin === undefined ? undefined : el.closest(trackWithin);
+    if (trackWithin === undefined) set(true);
+    else if (scope) set(scope.matches(":hover"));
+    const enter = (e: Event) => {
+      const p = e as PointerEvent;
+      [pointer.x, pointer.y] = [p.clientX, p.clientY];
+      set(true);
+    };
+    const leave = () => set(false);
+    scope?.addEventListener("pointerenter", enter);
+    scope?.addEventListener("pointerleave", leave);
+    return () => {
+      stop();
+      scope?.removeEventListener("pointerenter", enter);
+      scope?.removeEventListener("pointerleave", leave);
+      set(false);
+    };
+  }, [following, trackWithin]);
 
   // Reading: from the first line, the lines going by as the clock does, for as long as it reads, and
   // back from wherever it got to after. Off screen it pauses, checked once a second. With motion
@@ -368,14 +404,22 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // then, its eyes on the lines; idle, a rest and then a blink, a calm look about or (lively) a face.
   // Dozing, there's none of it. An avatar that comes in late, or back into view, takes up the pose the
   // others are in and lets go of what has passed (a blink, a move).
+  // A life it switches to (from reading back to the work, say) takes over from the pose the last one
+  // left it in, at once. Let go and taken up a moment later, the bot would start back toward rest in
+  // between: a stutter.
+  const lived = useRef(false);
   useEffect(() => {
     const el = ref.current;
-    if (!(alive || busy) || dozing || !el || calm()) return;
+    const b = body.current!;
+    if (!(alive || busy) || dozing || !el || calm()) {
+      b.sweep = undefined;
+      setPose(undefined);
+      return;
+    }
     const kind = reads ? "read" : busy ? "busy" : plain ? "plain" : `idle${lively ? " lively" : ""}${following ? " following" : ""}`;
     const make = reads ? readBlinks : busy ? beats() : plain ? nextBlink : () => nextIdle(lively, following);
     const joined = joinLife(`${lifeKey} ${kind}`, make, performance.now());
     life.current = joined.life;
-    const b = body.current!;
     let timer: ReturnType<typeof setTimeout>;
     let seen = -1;
     const posed = (w: Step[0]) => w === null || (typeof w === "object" && ("x" in w || "sweep" in w));
@@ -418,14 +462,13 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       if (steps.length) seen = steps.at(-1)!.index;
       timer = setTimeout(run, Math.max(8, next - now));
     };
-    // A moment in, it takes up wherever the life has got to.
-    timer = setTimeout(run, 200);
+    // A moment in, it takes up wherever the life has got to; at once, coming from another life.
+    timer = setTimeout(run, lived.current ? 0 : 200);
+    lived.current = true;
     return () => {
       clearTimeout(timer);
       joined.leave();
       if (life.current === joined.life) life.current = undefined;
-      b.sweep = undefined;
-      setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [alive, busy, lively, plain, following, dozing, reads, lifeKey]);

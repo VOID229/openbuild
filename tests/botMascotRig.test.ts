@@ -1,13 +1,14 @@
 // How a bot's body moves, as arithmetic: it rests turned away and rolled over; it turns straight
-// toward the pointer; eyes, head and body move as one, on a spring that eases in and settles without
-// ever swinging past (as the reference recording does); it rolls and leans but never lifts; a flip or
-// a spin takes the face right round a puffy body; and otherwise, however far a shape turns, its eyes
-// stay on its body.
+// toward the pointer, quick and direct, the eyes darting ahead and the body after, just as it did
+// before the reference's one spring; otherwise eyes, head and body move as one, on a spring that eases
+// in and settles without ever swinging past (as the reference recording does); it rolls and leans but
+// never lifts; a flip or a spin takes the face right round a puffy body; and otherwise, however far a
+// shape turns, its eyes stay on its body.
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
 import { READING_MS, readingAt } from "../src/lib/bots/routines";
-import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeAt, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, sizeOf, snap, spreadOf, step, THICK, TRAVEL, turnAt, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeAt, eyeLook, eyesFit, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, sizeOf, snap, spreadOf, step, THICK, TRAVEL, turnAt, turnTo, warm, worked, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -45,8 +46,8 @@ test("following the pointer it leans into the turn; posed, it cocks its head the
   expect(poseTarget(orb, { x: 1, y: 0, roll: 12 }).roll).toBe(12);
 });
 
-test("it moves smoothly: easing in from rest, most of the way there in a third of a second, and never swinging past", () => {
-  for (const [mode, within] of [["track", 15], ["pose", 18]] as const) {
+test("posed, it moves smoothly: easing in from rest, most of the way there in a third of a second, and never swinging past", () => {
+  for (const [mode, within] of [["pose", 18]] as const) {
     const yaws = run(newRig(), to(YAW, PITCH / 2, 10, 0.05), mode, (r) => r.yaw.x);
     // Eased in: the first frame moves less than the next.
     expect(yaws[0]!).toBeLessThan(yaws[1]! - yaws[0]!);
@@ -58,6 +59,107 @@ test("it moves smoothly: easing in from rest, most of the way there in a third o
     // Settled within the best part of a second.
     expect(yaws.length).toBeLessThan(55);
   }
+});
+
+/**
+ * Following the pointer as it did before the reference's one spring (c7fe10f^, rig.ts): the eyes
+ * darting ahead, the head after them and the body last, each on its own spring. Written out again
+ * here, constants and all, as the yardstick it has to match.
+ */
+function before() {
+  const EYES = { stiffness: 46, damping: 0.8 }, HEAD = { stiffness: 30, damping: 0.72 }, BODY = { stiffness: 15, damping: 0.6 };
+  const r = { yaw: { x: 0, v: 0 }, pitch: { x: 0, v: 0 }, bodyYaw: { x: 0, v: 0 }, bodyPitch: { x: 0, v: 0 }, roll: { x: 0, v: 0 }, zoom: { x: 0, v: 0 }, leadX: { x: 0, v: 0 }, leadY: { x: 0, v: 0 } };
+  const pull = (a: { x: number; v: number }, to: number, { stiffness: w, damping: z }: { stiffness: number; damping: number }, h: number) => {
+    a.v += (w * w * (to - a.x) - 2 * z * w * a.v) * h;
+    a.x += a.v * h;
+  };
+  const clamp = (n: number) => Math.max(-4.5, Math.min(4.5, n));
+  return {
+    r,
+    step(to: Target, dt: number) {
+      for (let left = Math.min(dt, 100) / 1000; left > 1e-9; left -= 1 / 120) {
+        const h = Math.min(left, 1 / 120);
+        pull(r.yaw, to.yaw, HEAD, h);
+        pull(r.pitch, to.pitch, HEAD, h);
+        pull(r.bodyYaw, to.yaw, BODY, h);
+        pull(r.bodyPitch, to.pitch, BODY, h);
+        pull(r.roll, to.roll, BODY, h);
+        pull(r.zoom, to.zoom, BODY, h);
+        pull(r.leadX, clamp((to.yaw - r.yaw.x) * 0.13), EYES, h);
+        pull(r.leadY, clamp((to.pitch - r.pitch.x) * 0.13), EYES, h);
+      }
+    },
+  };
+}
+
+test("following the pointer it moves just as it did before the reference's one spring: eyes, head and body, frame by frame", () => {
+  const rig = newRig();
+  const old = before();
+  // The pointer swung about: over to the right and up, across to the left and down, then still.
+  const aims = [aimTarget(orb, 60, -20, 28), aimTarget(orb, -50, 30, 28), aimTarget(orb, 5, 40, 28)];
+  for (let i = 0; i < 150; i++) {
+    const aim = aims[Math.min(2, Math.floor(i / 30))]!;
+    // Frames that don't come evenly, as a real page's don't.
+    const dt = i % 7 === 3 ? 33 : 1000 / 60;
+    const done = step(rig, aim, dt, "track");
+    old.step(aim, dt);
+    if (done) break;
+    expect(rig.yaw.x).toBeCloseTo(old.r.yaw.x, 9);
+    expect(rig.pitch.x).toBeCloseTo(old.r.pitch.x, 9);
+    expect(rig.yaw.x + rig.lagYaw.x).toBeCloseTo(old.r.bodyYaw.x, 9);
+    expect(rig.pitch.x + rig.lagPitch.x).toBeCloseTo(old.r.bodyPitch.x, 9);
+    expect(rig.roll.x).toBeCloseTo(old.r.roll.x, 9);
+    expect(rig.leadX.x).toBeCloseTo(old.r.leadX.x, 9);
+    expect(rig.leadY.x).toBeCloseTo(old.r.leadY.x, 9);
+  }
+  // And it's drawn that way: the body turned the body's share, the eyes where the head and their lead put them.
+  const mid = newRig();
+  for (let i = 0; i < 5; i++) step(mid, aims[0]!, 1000 / 60, "track");
+  const f = frame(mid, orb, 100);
+  expect(f.body).toContain(`rotateY(${((mid.yaw.x + mid.lagYaw.x) * BODY_TURN).toFixed(2)}deg)`);
+  expect(eyesFit(orb, "open", mid.yaw.x, mid.pitch.x, 1, 1, MARGIN, 0, mid.leadX.x, mid.leadY.x)).toBe(true);
+  const [x] = f.right.slice(7, -1).split(", ").map(Number).slice(4);
+  expect(orb.face.x + eyesOf(orb).gap / 2 + x!).toBeCloseTo(eyeAt(orb, 1, mid.yaw.x, mid.pitch.x, 1, 1, 0, mid.leadX.x, mid.leadY.x).px, 1);
+});
+
+test("following the pointer the head locks on quickly, the eyes darting ahead and the body coming after", () => {
+  const frames = run(newRig(), to(YAW, 0, 10), "track", (r) => ({ head: r.yaw.x, body: r.yaw.x + r.lagYaw.x, lead: r.leadX.x }));
+  // Eased in, and most of the way there within ~150ms: quicker by far than a move to a pose.
+  expect(frames[0]!.head).toBeLessThan(frames[1]!.head - frames[0]!.head);
+  expect(frames[8]!.head).toBeGreaterThan(YAW * 0.8);
+  const posed = run(newRig(), to(YAW, 0, 10), "pose", (r) => r.yaw.x);
+  expect(posed[8]!).toBeLessThan(YAW * 0.6);
+  // A hint of overshoot onto the pointer.
+  expect(Math.max(...frames.map((f) => f.head))).toBeGreaterThan(YAW);
+  expect(Math.max(...frames.map((f) => f.head))).toBeLessThan(YAW * 1.08);
+  // The eyes out in front within a few frames, while the head has barely started; home again at the end.
+  const first = frames.findIndex((f) => f.lead > 2);
+  expect(first).toBeGreaterThanOrEqual(0);
+  expect(first).toBeLessThan(6);
+  expect(frames[first]!.head).toBeLessThan(YAW * 0.6);
+  // The body behind the head, swaying a little past.
+  for (let i = 1; i < 8; i++) expect(frames[i]!.body).toBeLessThan(frames[i]!.head);
+  expect(Math.max(...frames.map((f) => f.body))).toBeGreaterThan(YAW * 1.03);
+  expect(frames.at(-1)).toEqual({ head: YAW, body: YAW, lead: 0 });
+  expect(frames.length).toBeLessThan(70);
+});
+
+test("let go mid-follow, all of it comes back onto one spring: the body onto the head and the eyes home, with no jump", () => {
+  const rig = newRig(restOf(orb));
+  for (let i = 0; i < 6; i++) step(rig, aimTarget(orb, -60, 30, 28), 1000 / 60, "track");
+  expect(Math.abs(rig.lagYaw.x)).toBeGreaterThan(1);
+  expect(Math.abs(rig.leadX.x)).toBeGreaterThan(0.5);
+  let last = frame(rig, orb, 100);
+  const eyeX = (f: ReturnType<typeof frame>) => Number(f.left.slice(7, -1).split(", ")[4]);
+  const frames = run(rig, restOf(orb), "rest", (r) => {
+    const f = frame(r, orb, 100);
+    // Never a jump from one frame to the next.
+    expect(Math.abs(eyeX(f) - eyeX(last))).toBeLessThan(1.5);
+    last = f;
+    return r;
+  });
+  expect(frames.length).toBeLessThan(120);
+  expect(frame(rig, orb, 100)).toEqual(restFrame(orb, 100));
 });
 
 test("eyes, head and body move as one: the face is never ahead of the body, nor the body behind it", () => {
@@ -216,7 +318,7 @@ test("whatever it does, the body never lifts: it leans sideways and settles down
 test("a nod dips the head and brings it back without bobbing past: down, never up", () => {
   const rig = newRig();
   nod(rig);
-  const frames = run(rig, AHEAD, "track", (r) => ({ head: r.pitch.x, y: Number(/translate\([^,]+, (-?[\d.]+)px\)/.exec(frame(r, orb, 100).whole)?.[1] ?? 0) }));
+  const frames = run(rig, AHEAD, "track", (r) => ({ head: r.pitch.x + r.dip.x, y: Number(/translate\([^,]+, (-?[\d.]+)px\)/.exec(frame(r, orb, 100).whole)?.[1] ?? 0) }));
   // A real dip of the head; over within a second.
   const deepest = Math.max(...frames.map((f) => f.head));
   expect(deepest).toBeGreaterThan(14);
@@ -334,18 +436,50 @@ test("every shape can look around: a fair turn each way, and all the way where i
   expect(turnTo(orb, 0, 0)).toEqual([0, 0]);
 });
 
-test("a shape's turn limits are worked out ahead of its first look, a form at a time as there's a moment", () => {
+test("a shape's first look works out only the room it needs, not the whole clock: a new shape's first move holds up no frame", () => {
+  const shape = { ...SHAPES.find((s) => s.id === "clover")!, id: "clover-first-look" };
+  expect(worked(shape)).toBe(0);
+  const [yaw] = turnTo(shape, 0.7, 0.2);
+  // The two directions either side of where it looks.
+  expect(worked(shape)).toBe(2);
+  expect(yaw).toBe(turnTo(SHAPES.find((s) => s.id === "clover")!, 0.7, 0.2)[0]);
+  aimTarget(shape, -30, 10, 28);
+  expect(worked(shape)).toBe(4);
+  expect(roomOf(shape)).toEqual(roomOf(SHAPES.find((s) => s.id === "clover")!));
+});
+
+test("a spin or a flip starting or ending doesn't make the eyes jump: they go round from where they were kept off the edge", () => {
+  for (const shape of SHAPES) {
+    const rig = newRig();
+    snap(rig, to(YAW, -PITCH));
+    const still = frame(rig, shape, 100, "big");
+    for (const turn of ["spin", "flip"] as const) {
+      for (const deg of [0.2, 359.8]) {
+        rig[turn] = deg;
+        const f = frame(rig, shape, 100, "big");
+        for (const side of ["left", "right"] as const) {
+          const [a, b] = [still[side], f[side]].map((t) => t.slice(7, -1).split(", ").map(Number).slice(4));
+          expect(Math.hypot(a![0]! - b![0]!, a![1]! - b![1]!)).toBeLessThan(0.6);
+        }
+      }
+      rig[turn] = 0;
+    }
+  }
+});
+
+test("a shape's turn limits are worked out ahead of its first look, a quarter of a form at a time as there's a moment", () => {
   // A shape nothing has looked at yet.
   const shape = { ...SHAPES.find((s) => s.id === "star")!, id: "star-not-seen-yet" };
   const waiting: (() => void)[] = [];
   warm(shape, (step) => waiting.push(step));
-  // Nothing is worked out until there's a moment, and then one form of eye a turn.
+  // Nothing is worked out until there's a moment, and then a quarter of a form of eye a turn: small
+  // enough steps not to hold up a frame.
   let turns = 0;
   for (; waiting.length; turns++) {
     expect(waiting.length).toBe(1);
     waiting.shift()!();
   }
-  expect(turns).toBe(Object.keys(FORMS).length);
+  expect(turns).toBe(Object.keys(FORMS).length * 4);
   // All there now, the same as worked out on the spot for the shape it's a copy of.
   for (const form of Object.keys(FORMS) as (keyof typeof FORMS)[]) expect(roomOf(shape, form)).toEqual(roomOf(SHAPES.find((s) => s.id === "star")!, form));
   // And nothing left to do for it.

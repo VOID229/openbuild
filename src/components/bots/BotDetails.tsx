@@ -611,8 +611,6 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const { mounted, visible } = usePresence(open, 260);
   const phone = useMediaQuery("(max-width: 768px)");
   const bots = useBots((s) => s.bots);
-  const pulses = useBots((s) => s.pulses);
-  const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const working = useBusyBots(conversation);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
   const [tab, setTab] = useState<DetailsTab>(conversation.kind === "direct" ? "instructions" : "members");
@@ -708,7 +706,9 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
           <div className="bots-details-hero">
             {bot ? (
               <button type="button" className="bots-details-avatar" aria-label="Edit look" onClick={() => setEditingLook(!editingLook)}>
-                <BotAvatar look={bot.look} size={104} lively track mood={typing ? "thinking" : undefined} pulse={pulses[bot.id]} />
+                {/* Only following the pointer about the panel, and at rest otherwise: none of a bot's
+                    life, faces or reactions here. */}
+                <BotAvatar look={bot.look} size={104} alive={false} track trackWithin=".bots-details" />
                 <span className="bots-details-pencil">
                   <Pencil size={14} />
                 </span>
