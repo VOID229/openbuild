@@ -702,6 +702,8 @@ export type StreamEvent =
       /** Unified diff of a file change (edit/write). */
       patch?: string;
       ms?: number;
+      /** When the call started (epoch ms), stamped by the server on its first event, so a live timer survives a reconnect. */
+      startedAt?: number;
     }
   /** A Pi extension asks the user something (confirm, choose, type) and waits for the answer. */
   | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string; other?: boolean; secret?: boolean; /** The agent's own ask-the-user tool. Anything else (a permission prompt, an extension's dialog) leaves this unset. */ question?: boolean }
