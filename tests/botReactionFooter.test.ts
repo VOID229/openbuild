@@ -231,9 +231,10 @@ describe.skipIf(!browser)("with a mouse", () => {
         expect(m.reactions!.left - m.bubble.left).toBeGreaterThanOrEqual(0);
         expect(m.reactions!.left - m.bubble.left).toBeLessThanOrEqual(8);
         for (const p of [...m.chips, ...(m.seen ? [m.seen] : [])]) expect(overlap(p, actions)).toBe(false);
-        // The reply buttons wait over their pill's corner instead of keeping gaps between the chips.
-        expect(m.chips[1]!.left - m.chips[0]!.right).toBeLessThanOrEqual(8);
-        tidy({ ...m, replies: [] });
+        // A bot's chip keeps its reply button in room of its own after it, clear of the pill and the
+        // next chip, rather than over the pill's corner; the user's own chip needs none.
+        expect(m.replies.length).toBe(2);
+        tidy(m);
       }
       const mine = await measure(page, "b-58");
       expect(Math.abs(middle(mine.seen!) - middle(mine.chips[0]!))).toBeLessThanOrEqual(2);
