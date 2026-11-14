@@ -93,6 +93,27 @@ test("exec timeout is milliseconds, with a bounded abort fallback", async () => 
   });
 });
 
+test("a command that leaves something running returns when its shell exits, not when that ends", async () => {
+  await temporary(async (dir) => {
+    const c = fakeComputer("host", dir);
+    let out = "";
+    const start = Date.now();
+    // The sleep inherits the shell's output: waiting for that to close held the call for as long as it ran.
+    const left = await c.exec("sleep 3 & echo started", { timeout: 20_000, onData: (d) => (out += d) });
+    expect(Date.now() - start).toBeLessThan(2500);
+    expect(left).toEqual({ exitCode: 0, background: true });
+    expect(out).toBe("started\n");
+    // A command that leaves nothing behind says nothing of it, and all it printed is there.
+    out = "";
+    expect(await c.exec("printf one; sleep 0.2; printf two; exit 3", { onData: (d) => (out += d) })).toEqual({ exitCode: 3 });
+    expect(out).toBe("onetwo");
+    // The timeout still stops the whole group, a child that holds the output included.
+    const timed = Date.now();
+    await expect(c.exec("sleep 30 & sleep 30", { timeout: 150 })).rejects.toThrow("timeout:150");
+    expect(Date.now() - timed).toBeLessThan(2500);
+  });
+});
+
 test("exec does not spawn when aborted before or during ensure", async () => {
   const c = fakeComputer("host", tmpdir());
   let spawned = false, ensured = false;

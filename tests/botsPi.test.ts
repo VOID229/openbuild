@@ -195,8 +195,9 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
       a.ok(tools.includes('picked_tool'));
       a.ok(lastPrompt.includes('PICKED_EXTENSION_PROMPT'));
       for (const name of ['send_message', 'memory', 'load_tools']) a.ok(tools.includes(name), name);
-      // Without the tool list, the catalog tools still wait to be loaded.
-      for (const name of ['bash', 'ask_bot', 'bot_web_search']) a.ok(!tools.includes(name), name);
+      // Without the tool list, the catalog tools still wait to be loaded: all but the shell, which every bot starts with.
+      for (const name of ['ask_bot', 'bot_web_search']) a.ok(!tools.includes(name), name);
+      a.ok(tools.includes('bash'), 'bash');
 
       // Off again takes it all back.
       svc.updateSettings({ customExtensions: { enabled: false, ids: ['extensions/picked.ts'] } });

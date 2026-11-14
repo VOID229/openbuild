@@ -61,7 +61,7 @@ test("core tools are declared from the start with their full schemas; the rest w
     expect(tool(name).parameters.type).toBe("object");
   }
   expect(tool("send_message").parameters.required).toEqual(["text"]);
-  expect(Object.keys(tool("send_message").parameters.properties)).toEqual(["text", "machine", "conversation", "reply_to", "images", "attach_screenshot"]);
+  expect(Object.keys(tool("send_message").parameters.properties)).toEqual(["text", "done", "machine", "conversation", "reply_to", "images", "attach_screenshot"]);
   expect(tool("memory").parameters.required).toEqual(["status", "action"]);
   expect(tool("search").parameters.required).toEqual(["status", "query"]);
   expect(tool("react").parameters.required).toEqual(["message", "emoji"]);
@@ -285,8 +285,8 @@ for (const mode of ["listed", "extension"] as const) {
           if (last.role !== 'tool') {
             // A new session is shown the chat so far, so its own word is looked for first.
             if (user.includes('FRESH')) {
-              // The bot used routine in two turns: its new session declares it from the first request.
-              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'routine'].sort());
+              // The bot used routine in two turns: its new session declares it from the first request, beside the shell every bot starts with.
+              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'bash', 'routine'].sort());
               a.deepEqual(tools.find((t) => t.name === 'routine').parameters, schema('routine').parameters);
               out = use('routine', { action: 'list', status: 'Checking my schedule' });
             } else if (user.includes('DIRECT')) {
@@ -294,10 +294,11 @@ for (const mode of ["listed", "extension"] as const) {
               out = use('todo', { action: 'list' });
             } else if (user.includes('AGAIN')) {
               // A new Pi on the same session: routine is still declared, nothing else came back.
-              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'routine'].sort());
+              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'bash', 'routine'].sort());
               out = use('routine', { action: 'list', status: 'Checking my schedule' });
             } else if (user.includes('LOAD')) {
-              a.deepEqual([...names].sort(), [...CORE_TOOLS].sort());
+              // A new bot: the core, and the shell.
+              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'bash'].sort());
               const load = tools.find((t) => t.name === 'load_tools');
               a.match(load.description, /\\n- routine: /);
               a.match(load.description, /\\n- bash: /);
@@ -343,7 +344,7 @@ for (const mode of ["listed", "extension"] as const) {
         };
         const turns = () => readFileSync(process.env.OPENCHAT_DATA_DIR + '/bots/usage.jsonl', 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.calls);
         await talk('LOAD');
-        a.deepEqual(runner.preloadFor(bot.id), []);
+        a.deepEqual(runner.preloadFor(bot.id), ['bash']);
         runner.stop(bot.id);
         await talk('AGAIN');
         await talk('DIRECT');
@@ -358,7 +359,7 @@ for (const mode of ["listed", "extension"] as const) {
           a.equal(t.waiting, true);
           a.equal(t.outcome, 'replied');
           a.equal(t.failedCalls, 0);
-          a.equal(t.preloaded, 0);
+          a.equal(t.preloaded, 1);
           for (const key of ['queuedMs', 'promptMs', 'statusMs', 'toolMs', 'replyMs', 'doneMs']) a.ok(Number.isFinite(t[key]) && t[key] >= 0, key + ': ' + t[key]);
           a.ok(t.statusMs <= t.toolMs && t.toolMs <= t.replyMs && t.replyMs <= t.doneMs, JSON.stringify(t));
           a.ok(t.queuedMs <= t.promptMs);
@@ -375,7 +376,7 @@ for (const mode of ["listed", "extension"] as const) {
 
         // Two turns used routine and one used todo: routine is one of its usual tools now.
         a.deepEqual(Object.fromEntries(Object.entries(db.toolUsage(bot.id)).map(([name, times]) => [name, times.length])), { routine: 2, todo: 1 });
-        a.deepEqual(runner.preloadFor(bot.id), ['routine']);
+        a.deepEqual(runner.preloadFor(bot.id), ['bash', 'routine']);
         // A day on, the lane starts a new session (sessionGeneration): made to look that old here.
         runner.stop(bot.id);
         const lane = laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', bot.id, conversationId);
@@ -384,7 +385,7 @@ for (const mode of ["listed", "extension"] as const) {
         await talk('FRESH');
         a.equal(readdirSync(lane).length, 2);
         const fresh = turns().at(-1);
-        a.deepEqual([fresh.piStarted, fresh.preloaded, fresh.loads, fresh.unloadedCalls, fresh.firstTool], [true, 1, 0, 0, 'routine']);
+        a.deepEqual([fresh.piStarted, fresh.preloaded, fresh.loads, fresh.unloadedCalls, fresh.firstTool], [true, 2, 0, 0, 'routine']);
         process.exit(0);
       `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
       expect(err).toBe("");

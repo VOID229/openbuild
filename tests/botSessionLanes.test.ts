@@ -81,11 +81,15 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       a.equal(startA.resumed, 0);
       a.ok(startA.approve);
       a.equal(a1.dir, startA.dir);
-      const { compaction, steeringMode } = JSON.parse(readFileSync(join(db.botsDir(), 'minds', bot.id, '.pi', 'settings.json'), 'utf8'));
-      a.deepEqual(compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 131072, keepRecentTokens: 8000 });
+      const settings = () => JSON.parse(readFileSync(join(db.botsDir(), 'minds', bot.id, '.pi', 'settings.json'), 'utf8'));
+      // The first Pi on an installation starts before any model's window is known, and doesn't wait on a second Pi to find out.
+      a.deepEqual(settings().compaction.modelOverrides, {});
       // Every message that arrived while a tool ran is handed to the turn together, not one per model call.
-      a.equal(steeringMode, 'all');
+      a.equal(settings().steeringMode, 'all');
+      // Its own listing is kept, so the next Pi compacts where a model with a 1M-token window should.
+      await until(() => runner.knownWindows().length === 1, 'the model windows were never learnt');
       const b1 = await say(group.id, '@Alpha B1');
+      a.deepEqual(settings().compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 131072, keepRecentTokens: 8000 });
       const startB = starts().at(-1);
       a.notEqual(startB.pid, startA.pid);
       a.notEqual(startB.dir, startA.dir);

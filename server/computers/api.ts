@@ -233,8 +233,8 @@ async function operate(req: Request, server: Bun.Server<unknown>, rawId: string,
       async start(controller) {
         const send = (o: unknown) => controller.enqueue(enc.encode(JSON.stringify(o) + "\n"));
         try {
-          const r = (await dispatch(id, op, body, req.signal, (d) => send({ t: "out", v: b64(d) }))) as { exitCode: number | null };
-          send({ t: "exit", code: r.exitCode });
+          const r = (await dispatch(id, op, body, req.signal, (d) => send({ t: "out", v: b64(d) }))) as { exitCode: number | null; background?: boolean };
+          send({ t: "exit", code: r.exitCode, ...(r.background ? { background: true } : {}) });
         } catch (err) {
           send({ t: "error", message: (err as Error).message });
         }
@@ -255,7 +255,7 @@ async function operate(req: Request, server: Bun.Server<unknown>, rawId: string,
 
 export interface ComputerApi {
   call<T = any>(id: string, op: string, body?: Body, signal?: AbortSignal): Promise<T>;
-  exec(id: string, body: Body, onData: (chunk: Buffer) => void, signal?: AbortSignal): Promise<{ exitCode: number | null }>;
+  exec(id: string, body: Body, onData: (chunk: Buffer) => void, signal?: AbortSignal): Promise<{ exitCode: number | null; background?: boolean }>;
   capabilities(): Promise<ComputerCapabilities>;
   /**
    * What the machine allows this server's bots: everything here; on a paired device, what it said
@@ -267,7 +267,7 @@ export interface ComputerApi {
 
 const local: ComputerApi = {
   call: (id, op, body = {}, signal) => dispatch(id, op, body, signal) as Promise<any>,
-  exec: (id, body, onData, signal) => dispatch(id, "exec", body, signal, onData) as Promise<{ exitCode: number | null }>,
+  exec: (id, body, onData, signal) => dispatch(id, "exec", body, signal, onData) as Promise<{ exitCode: number | null; background?: boolean }>,
   capabilities: () => capabilities(),
   grants: async () => ({ files: true, terminal: true, browser: true, unisolated: true }),
 };
@@ -379,7 +379,7 @@ function remote(deviceId: string): ComputerApi {
           if (!line.trim()) continue;
           const e = JSON.parse(line);
           if (e.t === "out") onData(Buffer.from(e.v, "base64"));
-          else if (e.t === "exit") return { exitCode: e.code };
+          else if (e.t === "exit") return { exitCode: e.code, ...(e.background ? { background: true } : {}) };
           else if (e.t === "error") throw new Error(e.message);
         }
       }
@@ -401,10 +401,14 @@ function remote(deviceId: string): ComputerApi {
 
 export const computerApi = (device: string): ComputerApi => (device === "local" ? local : remote(device));
 
-/** Every machine bots can reach, and what each allows them right now. Asks each paired device. */
-export async function computerTargets(): Promise<ComputerTarget[]> {
-  const here = await capabilities();
-  const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, engines: here.engines };
+/**
+ * Every machine bots can reach, and what each allows them right now. Asks each paired device.
+ * Without `engines` this server's container engines aren't probed: `podman info` and `docker info`
+ * take seconds, and only Settings and the bots' computers list show what they find.
+ */
+export async function computerTargets(opts: { engines?: boolean } = {}): Promise<ComputerTarget[]> {
+  const here = opts.engines === false ? undefined : await capabilities();
+  const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, ...(here ? { engines: here.engines } : {}) };
   const remote = await Promise.all(
     devices.readDevices().map(async (d): Promise<ComputerTarget> => {
       try {

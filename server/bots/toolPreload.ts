@@ -24,6 +24,13 @@ export const PRELOAD_MIN_TURNS = 2;
 export const PRELOAD_BUDGET_CHARS = 6400;
 /** Uses remembered per tool: enough to rank by, and the record stays small. */
 export const USAGE_KEEP = 20;
+/**
+ * Declared from the start for every bot, whatever it has used: the shell. A third of all turns use
+ * it, and it does what a quick task on the bot's computer needs (write a file, read one, run
+ * something) in one call. Without it a bot's first such task, and its first in any new session
+ * until the shell counted as usual, spent a whole model request on load_tools.
+ */
+export const STARTER_TOOLS: string[] = ["bash"];
 
 let measured: Record<string, number> | undefined;
 
@@ -72,4 +79,11 @@ export function preloadTools(usage: ToolUsage | undefined, now = Date.now(), siz
     left -= t.size;
   }
   return picked;
+}
+
+/** What a bot's Pi declares from the start besides the core: the starter tools, then its usual ones in what's left of the budget. */
+export function preloadWithStarter(usage: ToolUsage | undefined, now = Date.now(), sizes: Record<string, number> = declarationSizes(), budget = PRELOAD_BUDGET_CHARS): string[] {
+  const starter = STARTER_TOOLS.filter((name) => name in sizes);
+  const rest = Object.fromEntries(Object.entries(usage ?? {}).filter(([name]) => !starter.includes(name)));
+  return [...starter, ...preloadTools(rest, now, sizes, budget - starter.reduce((n, name) => n + sizes[name]!, 0))];
 }

@@ -3,6 +3,8 @@ import * as https from "node:https";
 import { randomBytes } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { AnthropicStreamEvent, NativeMessage } from "./native-types.ts";
+// OpenBuild: when the API was called and answered, and how big the request was, for PI_CLAUDE_CODE_TRACE (trace.ts).
+import { requestSizes, trace } from "./trace.ts";
 
 function copy<T>(value: T): T {
   return structuredClone(value);
@@ -282,6 +284,7 @@ export class TurnRelay {
       if (this.transformRequest) body = this.transformRequest(body);
       this.requestBody = Buffer.from(body);
       if (this.cancelled) return;
+      trace("api-request", { bytes: body.length, ...requestSizes(body) });
 
       const headers: http.OutgoingHttpHeaders = {};
       for (const [name, value] of Object.entries(request.headers)) {
@@ -321,6 +324,8 @@ export class TurnRelay {
       });
       this.sockets.add(upstreamResponse);
       this.status = upstreamResponse.statusCode;
+      trace("api-response", { status: this.status });
+      let streamed = false;
       this.requestId =
         String(upstreamResponse.headers["request-id"] ?? upstreamResponse.headers["x-request-id"] ?? "") || undefined;
 
@@ -333,6 +338,8 @@ export class TurnRelay {
 
       for await (const rawChunk of upstreamResponse) {
         const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+        if (!streamed) trace("api-first-chunk");
+        streamed = true;
         if (this.status === 200) this.capture.feed(chunk);
         else if (this.errorBody.length < 65_536) {
           this.errorBody = Buffer.concat([this.errorBody, chunk]).subarray(0, 65_536);
@@ -340,6 +347,7 @@ export class TurnRelay {
         if (!response.write(chunk)) await this.waitForDrain(response);
       }
       if (this.status === 200) this.capture.finish();
+      trace("api-end");
       response.end();
     } catch (error) {
       this.failure = describeFailure(error);

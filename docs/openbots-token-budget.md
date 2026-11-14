@@ -24,8 +24,11 @@ per-model override (`compaction.modelOverrides["provider/id"]`) that triggers co
 the window or 131,072 tokens, whichever is smaller: a 1M-window model compacts at 128k rather
 than about 984k. Keep-recent is 1/16 of the window, capped at 8,000. Models without a known
 window use a 16,384 reserve and 8,000 keep-recent. Pi defaults at inspection were 16,384/20,000.
-Context windows come from one model listing per extension set, cached for 10 minutes and dropped
-when Pi forgets its models, so a fresh per-conversation mind doesn't cost a second Pi start. The
+Context windows are kept in the bots database (`model-windows`) and asked of each bot's own Pi
+after a turn, at most every 10 minutes, so starting a Pi never waits on a second one started only
+to list models. A Pi that started before its model's window was known, the first on an
+installation, keeps Pi's default until it next starts, or starts over between turns once its
+session is past half the compaction point (see [turn latency](openbots-turn-latency.md)). The
 runner explicitly approves its managed bot working directory so Pi 1.5 loads these settings. It
 does not change global Pi settings or credentials. Settings are generated when a process starts.
 The same file sets `steeringMode: "all"`, so every message that arrived while a tool ran reaches
@@ -131,8 +134,9 @@ in the bridge itself.
 
 ## Sticky and preloaded tools (2026-11-12)
 
-Since #234 a request declares a small core (`send_message`, `react`, `memory`, `search`,
-`load_tools`) and a bot loads the rest by name. A loaded tool is meant to stay loaded for the
+Since #234 a request declares a small core (`send_message`, `react`, `question`, `memory`, `search`,
+`load_tools`), and since 2026-11-14 the shell (`bash`, see [turn latency](openbots-turn-latency.md)),
+and a bot loads the rest by name. A loaded tool is meant to stay loaded for the
 session. In practice bots lost their tools at almost every Pi restart, and a bot's Pi restarts
 often: after 20 idle minutes, and whenever the bot moves to another conversation (a session each).
 

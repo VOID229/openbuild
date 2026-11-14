@@ -101,7 +101,8 @@ turn has to answer "started", and the result is handled one call later than it w
 Of the 4,362 calls to tools that can detach, half return in under 0.3 s and 87.6% within 3 s. The
 long tail is bash (p90 8.4 s, p99 93 s, max 420 s) and `openbuild merge` (p50 6.3 s, p90 8.8 s).
 Everything else is under a second at the median. The bot's own messaging, reactions and memory never
-come near either threshold (`send_message` p99 2.4 s, which is its typing delay).
+come near either threshold (`send_message` p99 2.4 s, which was its typing delay: since 2026-11-14
+only a bubble written right behind another is held, see [turn latency](openbots-turn-latency.md)).
 
 ### Detaching when nobody is waiting: 9 s
 

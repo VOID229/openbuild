@@ -128,7 +128,8 @@ export function startingTools(active: string[], catalog: string[], wanted: Set<s
   const kept = active.filter((name) => !inCatalog.has(name) || want(name));
   return [...kept, ...catalog.filter((name) => want(name) && !kept.includes(name))];
 }
-const status = { type: "string", minLength: 1, description: "Required, and written first, before the other arguments: the user sees it the moment you start writing this call, and while it runs. A short custom status (a few words, at most 50 characters). Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”, never a generic “Working on it”. It stays up until your next call, so name the task, not the mechanics." };
+// Every tool that does work carries this, so it's kept to what the call needs: the reasons are in the bot's prompt, once.
+const status = { type: "string", minLength: 1, description: "Required, and written first: the status line the user sees while this call runs. A few plain words (at most 50 characters) on what this specific call is for, e.g. “Figuring out why the build broke”, never a generic “Working on it”." };
 
 /**
  * Require a custom status in a work tool's parameters. It leads the schema, so the model writes it
@@ -149,7 +150,8 @@ function own(params: Params | undefined): Params {
 /** Pi hands a tool the turn's abort signal as its third argument. */
 const abortSignal = (value: unknown): AbortSignal | undefined => (value && typeof (value as AbortSignal).addEventListener === "function" && "aborted" in (value as object) ? (value as AbortSignal) : undefined);
 
-function tool(name: string, label: string, description: string, parameters: object, run: (params: Params, signal?: AbortSignal) => Promise<unknown>) {
+/** `brief` puts a result in a few words for the model, where its JSON says no more: the result stays whole in `details`. */
+function tool(name: string, label: string, description: string, parameters: object, run: (params: Params, signal?: AbortSignal) => Promise<unknown>, brief?: (value: unknown) => string | undefined) {
   return {
     name,
     label,
@@ -159,10 +161,43 @@ function tool(name: string, label: string, description: string, parameters: obje
     exposure: "model-only" as const,
     async execute(_id: string, params: Params, signal?: unknown) {
       try {
-        return ok(await run(own(params), abortSignal(signal)));
+        const value = await run(own(params), abortSignal(signal));
+        const said = brief?.(value);
+        return said ? { content: text(said), details: value } : ok(value);
       } catch (err) {
         return fail(err);
       }
+    },
+  };
+}
+
+/** A sent message, as its bot reads the result: the short id every later reference uses, not the JSON around the whole one. */
+export function sentBrief(value: unknown): string | undefined {
+  const sent = value as { id?: unknown; conversation?: unknown } | null;
+  return sent && typeof sent.id === "string" && typeof sent.conversation === "string" && Object.keys(sent).length === 2 ? `Sent as [${sent.id.slice(0, 8)}] in conversation ${sent.conversation}.` : undefined;
+}
+
+/** What send_message's `done` tells the bot. */
+export const DONE =
+  "true only on the last message of your turn, when the work is finished or there's nothing more for you to do: the turn ends the moment it's sent, and nothing after it runs. Leave it out on any message you'll follow with more work or another message, such as a note that you're starting on something.";
+
+/** The message was posted: the service answered with its id. Held back or refused, it answers without one. */
+export const posted = (result: { details?: unknown } | undefined): boolean => typeof (result?.details as { id?: unknown } | null | undefined)?.id === "string";
+
+/**
+ * A tool whose call can end the turn. After a tool's result Pi asks the model again, and after the
+ * bot's last message that request (two to three seconds, and the whole prompt again) had nothing
+ * left to say but that it was finished. When `ends` says so and the message really went out, the
+ * result is marked terminating (Pi's `terminate`), and the run stops there. Pi only stops when
+ * every result of the step is terminating, so a last message sent beside other work doesn't cut
+ * that work's results off from the model, and a message that was held back never ends anything.
+ */
+export function ending<T extends { execute: (id: string, params: Params, signal?: unknown) => Promise<{ details?: unknown }> }>(definition: T, ends: (params: Params) => boolean): T {
+  return {
+    ...definition,
+    async execute(id: string, params: Params, signal?: unknown) {
+      const result = await definition.execute(id, params, signal);
+      return ends(params) && posted(result) ? { ...result, terminate: true } : result;
     },
   };
 }
@@ -236,7 +271,8 @@ export default function openbots(pi: any) {
 
   pi.on("before_agent_start", async (event: any) => {
     try {
-      const context = (await call("context")) as { sections: Record<string, string>; load?: string[] };
+      // What's loaded goes along: the guides to tools it hasn't loaded stay out of its context (agent.ts).
+      const context = (await call("context", dynamic() ? { tools: pi.getActiveTools() } : {})) as { sections: Record<string, string>; load?: string[] };
       if (Array.isArray(context.load) && context.load.length) load(context.load);
       const opts = event.systemPromptOptions ?? event;
       const sections = { ...context.sections, ...toolRules(opts) };
@@ -286,7 +322,12 @@ export default function openbots(pi: any) {
 
   register(tool("process", "Process", "Start, read, stop or list long-running programs on your computer. action is start (command, name), read (id, input), stop (id) or list. You're told when one you started on this server exits. Processes belong to the machine they run on.", { type: "object", properties: { machine, action: str("start, read, stop or list."), command: str("For start."), name: str("A short name."), id: str("The process id."), input: str("Text to write to it.") }, required: ["action"] }, (p, signal) => call("process", p, signal)));
 
-  register(tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from.", { type: "object", properties: { text: str("The message."), machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, (p, signal) => call("send_message", p, signal)));
+  register(
+    ending(
+      tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from. done true on your last message ends the turn with it.", { type: "object", properties: { text: str("The message."), done: { type: "boolean", description: DONE }, machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, ({ done: _, ...p }, signal) => call("send_message", p, signal), sentBrief),
+      (params) => params?.done === true,
+    ),
+  );
 
   register(
     tool(
@@ -334,7 +375,8 @@ export default function openbots(pi: any) {
 
   register(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id.") }, required: ["message", "emoji"] }, (p, signal) => call("react", p, signal)));
 
-  register(tool("question", "Ask", "Ask the user something you need answered, as a card they answer with a tap: its choices as options, and they can type their own. Related questions go together in questions: one card, and you get every answer at once. Don't write such a question in a message. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices, or a suggested answer or two for an open question. Don't add Other." }, questions: { type: "array", maxItems: 5, items: { type: "object", properties: { title: { type: "string" }, hint: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["title"] }, description: "Instead of title: 2 to 5 related questions, each with its own title, hint and options." }, offer: str("Only \"developer\" or \"team\", when you're told to ask whether the user writes code or to offer the starter team. The app sets their choices and makes the team."), thread: str("When this passes on an OpenBuild thread's question: that thread's id. With thread_question, the card closes if the user answers in the thread instead."), thread_question: str("The id of the thread's question it passes on."), conversation: str("Short conversation id.") }, required: [] }, (p, signal) => call("question", p, signal)));
+  // Asking is the end of the turn by its own rule ("stop after asking"): the card ends it.
+  register(ending(tool("question", "Ask", "Ask the user something you need answered, as a card they answer with a tap: its choices as options, and they can type their own. Related questions go together in questions: one card, and you get every answer at once. Don't write such a question in a message. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices, or a suggested answer or two for an open question. Don't add Other." }, questions: { type: "array", maxItems: 5, items: { type: "object", properties: { title: { type: "string" }, hint: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["title"] }, description: "Instead of title: 2 to 5 related questions, each with its own title, hint and options." }, offer: str("Only \"developer\" or \"team\", when you're told to ask whether the user writes code or to offer the starter team. The app sets their choices and makes the team."), thread: str("When this passes on an OpenBuild thread's question: that thread's id. With thread_question, the card closes if the user answers in the thread instead."), thread_question: str("The id of the thread's question it passes on."), conversation: str("Short conversation id.") }, required: [] }, (p, signal) => call("question", p, signal)), () => true));
 
   register(tool("poll", "Poll", "Start a poll in a group chat. The user and every bot there can vote. Options are lettered A, B, C… for you.", { type: "object", properties: { question: str("The question."), options: { type: "array", items: { type: "string" }, description: "Two to ten choices." }, multiple: { type: "boolean", description: "Voters can pick several. One answer each if omitted." }, hide_votes: { type: "boolean", description: "Hide answers from each voter until they've answered. On if omitted; false shows them from the start." }, conversation: str("Short conversation id.") }, required: ["question", "options"] }, (p, signal) => call("poll", p, signal)));
 
@@ -462,7 +504,9 @@ export default function openbots(pi: any) {
       const loaded = load(asked);
       const missing = asked.filter((name) => !loaded.includes(name));
       if (!loaded.length) return fail(new Error(`${missing.length ? `No tool here is called ${missing.join(", ")}` : "Name the tools to load"}. You can load: ${catalog.join(", ")}.`));
-      const said = `Loaded ${loaded.join(", ")}: call ${loaded.length === 1 ? "it" : "them"} now.${missing.length ? ` No tool here is called ${missing.join(", ")}.` : ""}`;
+      // What the bot's context says only once a tool is loaded (how to search, how apps work) comes with the tool.
+      const notes = await call("tool_notes", { names: loaded }).then((value) => (typeof value === "string" ? value : ""), () => "");
+      const said = `Loaded ${loaded.join(", ")}: call ${loaded.length === 1 ? "it" : "them"} now.${missing.length ? ` No tool here is called ${missing.join(", ")}.` : ""}${notes ? `\n\n${notes}` : ""}`;
       return { content: text(said), details: { loaded, missing } };
     },
   });
