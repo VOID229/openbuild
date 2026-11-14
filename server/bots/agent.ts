@@ -334,23 +334,6 @@ export function contextSections(botId: string): Record<string, string> {
     threads.brief(bot),
     plugins.guide(bot),
   ];
-  const ownChat = bot.primary ? svc.directId(botId) : undefined;
-  const offered = !!ownChat && db.messages(ownChat, 20).some((r) => r.message.question?.offer === "team" && r.message.author === botId);
-  const developer = bot.primary ? svc.developerAnswer() : undefined;
-  if (developer?.kind === "no") {
-    team.push(`When you asked, the user said they don't really write code. ${svc.NO_CODE_REPLY} Offer to make bots for the things they do often.`);
-  } else if (developer && !offered) {
-    team.push(
-      developer.kind === "own"
-        ? `When you asked whether they write code, the user answered in their own words: “${developer.text}”. If that means they write code, ${svc.TEAM_OFFER} If it doesn't: ${svc.NO_CODE_REPLY}`
-        : `When you asked whether they write code, the user said they write code. Now ${svc.TEAM_OFFER}`,
-    );
-  }
-  if (offered) {
-    team.push(
-      "You offered the user a starter team in your chat. If they take it, the app makes Manager, Tracer and Researcher and a Team group with you in it by itself, so don't make them with manage_bot. Once they're there, say in a message or two how to put them to work. If the user would rather not, ask what they'd like to do, and offer to make bots for the things they do often.",
-    );
-  }
   const join = (parts: string[]) => parts.filter(Boolean).join("\n\n");
   return {
     openbots: join(lines),
@@ -594,20 +577,16 @@ export function askUser(botId: string, p: Record<string, unknown>) {
   if (listed.length > QUESTION_STEPS) throw new svc.BotsError(`A card takes up to ${QUESTION_STEPS} questions. Ask the ${QUESTION_STEPS} that matter most now, and the rest once they're answered.`);
   // Several questions are one card the user steps through. One question in the list is the plain card.
   if (listed.length > 1) {
-    if (p.offer || p.thread || p.thread_question) throw new svc.BotsError("offer, thread and thread_question go with one question, not a list of them.");
+    if (p.thread || p.thread_question) throw new svc.BotsError("thread and thread_question go with one question, not a list of them.");
     return postQuestion(botId, conversationId, listed.map(askedStep));
   }
   const only = listed.length ? askedStep(listed[0]) : askedStep(p);
-  // The first-run questions are the app's to act on, so they have fixed choices: taking the team, or saying they code, is A.
-  const offer = (p.offer === "team" || p.offer === "developer") && requireBot(botId).primary && conversationId === svc.directId(botId) ? p.offer : undefined;
-  if (offer === "team" && svc.developerAnswer()?.kind === "no") throw new svc.BotsError("The user said they don't write code, so the starter team isn't for them. Don't offer it.");
-  const step = { ...only, options: offer === "team" ? lettered(["Set up the team", "Not now"]) : offer === "developer" ? lettered(["Yes, I write code", "No, not really"]) : only.options };
   // Passing on a coding thread's question: linked, so the card closes if it's answered in the thread first.
-  if (!offer && (p.thread || p.thread_question)) return threads.cardTarget(botId, p.thread, p.thread_question).then((thread) => postQuestion(botId, conversationId, [step], undefined, thread));
-  return postQuestion(botId, conversationId, [step], offer);
+  if (p.thread || p.thread_question) return threads.cardTarget(botId, p.thread, p.thread_question).then((thread) => postQuestion(botId, conversationId, [only], thread));
+  return postQuestion(botId, conversationId, [only]);
 }
 
-function postQuestion(botId: string, conversationId: string, steps: QuestionStep[], offer?: Question["offer"], thread?: Question["thread"]) {
+function postQuestion(botId: string, conversationId: string, steps: QuestionStep[], thread?: Question["thread"]) {
   const first = steps[0]!;
   const message: BotMessage = {
     id: crypto.randomUUID(),
@@ -616,7 +595,6 @@ function postQuestion(botId: string, conversationId: string, steps: QuestionStep
     text: first.title,
     question: {
       ...first,
-      offer,
       ...(thread ? { thread } : {}),
       ...(steps.length > 1 ? { steps } : {}),
     },

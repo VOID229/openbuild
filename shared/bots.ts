@@ -336,8 +336,6 @@ export interface Question {
   steps?: QuestionStep[];
   /** A card of several questions was submitted: its answers are final, and the bot has them. */
   submitted?: boolean;
-  /** A first-run question the server sets the choices of and acts on itself: "developer" asks whether the user writes code, "team" makes the starter team when taken. */
-  offer?: "team" | "developer";
   /** The coding thread's question this card passes on, so the card closes when it's settled in the thread. */
   thread?: { id: string; ask: string };
   /**
