@@ -8,6 +8,7 @@ import {
   HTML_RENDER_DEFAULT_HEIGHT,
   HTML_RENDER_MAX_HEIGHT,
   clampHeight,
+  fitMessage,
   htmlFileName,
   htmlTheme,
   readHeightMessage,
@@ -165,6 +166,20 @@ function PageFrame({ html, title, onHeight, className, fits }: { html: string; t
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, []);
+  // The reply narrows and widens as panels open beside it: the page lays itself out again at the
+  // frame's new width (zoomed out, if it's still wider) and says how tall that made it.
+  useEffect(() => {
+    const el = frame.current;
+    if (!el || !loaded) return;
+    let width = el.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      el.contentWindow?.postMessage(fitMessage(), "*");
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loaded]);
   return (
     <iframe
       ref={frame}
