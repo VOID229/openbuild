@@ -10342,6 +10342,18 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
 .bv-address::placeholder { color: var(--text-3); }
 .bv-body { position: relative; flex: 1; min-height: 0; }
 .bv-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+/* Until its page is in, the frame shows the panel's own colour, not a white sheet. */
+.bv-frame-loading { background: var(--surface); }
+/* Loading: a short bar that sweeps along the top edge, over the page. */
+.bv-progress { position: absolute; top: 0; left: 0; right: 0; height: 2px; overflow: hidden; pointer-events: none; }
+.bv-progress::before { content: ""; position: absolute; inset: 0; width: 30%; background: var(--accent); border-radius: 1px; animation: bv-progress 1.1s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+@keyframes bv-progress { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .bv-progress::before { width: 100%; opacity: 0.4; animation: none; } }
+.bv-retry { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-size: 12.5px; }
+.bv-retry:hover { color: var(--text); border-color: var(--text-3); }
+/* A browser tab that isn't showing keeps its page, out of sight. */
+.side-keep { height: 100%; }
+.side-keep[hidden] { display: none; }
 .panel-dragging .bv-frame { pointer-events: none; }
 .bv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 24px; color: var(--text-3); font-size: 13px; text-align: center; }
 .bv-empty p { margin: 0; max-width: 320px; }

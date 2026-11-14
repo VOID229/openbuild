@@ -389,7 +389,16 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
           )}
           {showing === "diff" && <DiffView folder={folder} />}
           {showing === "pulls" && <PullRequestsView folder={folder} />}
-          {showing === "browser" && browser && <BrowserView key={browser.id} tab={browser} folder={folder} />}
+          {/* Every browser tab stays mounted, the one showing visible: its page keeps running and
+              doesn't reload each time another tab is looked at. */}
+          {browsers.map((b) => {
+            const visible = showing === "browser" && b.id === browser?.id;
+            return (
+              <div key={b.id} className="side-keep" hidden={!visible}>
+                <BrowserView tab={b} folder={folder} active={visible} />
+              </div>
+            );
+          })}
           {showing === "launcher" && <Launcher surfaces={surfaces} files={!!folder.cwd} />}
         </div>
       </div>
