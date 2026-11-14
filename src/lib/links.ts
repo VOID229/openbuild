@@ -22,6 +22,17 @@ export function isLocalUrl(url: string): boolean {
   }
 }
 
+/** A page on GitHub: github.com or one of its own subdomains (gist, docs). Not github.io, whose pages are other people's sites. */
+export function isGitHubUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    const u = new URL(url);
+    return /^https?:$/.test(u.protocol) && /(^|\.)github\.com$/i.test(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Open a loopback page through the project's authenticated preview proxy. */
 export function reachableUrl(url: string, folder?: Pick<TerminalFolder, "deviceId">): string {
   if (!isLocalUrl(url)) return url;

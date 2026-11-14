@@ -1,6 +1,6 @@
 // An OpenBots chat whose messages and activity lines name pull requests, for tests/botPullRefsChrome.test.ts.
-// Its bots started threads in one repository, so a "#n" there links to that pull request; `?theme=`
-// picks light or dark.
+// Its bots started threads in one repository, so a "#n" there links to that pull request; links to
+// GitHub show its mark and others don't; `?theme=` picks light or dark.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -22,6 +22,7 @@ const messages: BotMessage[] = [
   said("tracer", "#213 is docs-only: it removes the friends block from README.md. Model GPT 6.1 Sol #2 checked it."),
   follow,
   said("manager", "Not linked: `git log #213`, the colour: #333, https://example.com/page#12 and a heading's ##12.\n```\nfixes #210\n```"),
+  said("tracer", "The repo is github.com/VOID229/openbuild, the fix is [abc1234](https://github.com/VOID229/openbuild/commit/abc1234) and the [write-up](https://example.com/notes) is elsewhere."),
 ].map((m, i) => ({ ...m, id: `m${i}`, at: start + i * 1000 }));
 const conversation: Conversation = { id: "crew", kind: "group", name: "Crew", botIds: ["manager", "tracer"], createdAt: start, updatedAt: start, messages };
 

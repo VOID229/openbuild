@@ -20,7 +20,7 @@ import { PULL_REF_RE, conversationRepo, pullRefHref, pullRefUrl } from "../../li
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
-import { Linkify, WebLink } from "../Linkify";
+import { LinkText, Linkify, WebLink } from "../Linkify";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
@@ -253,10 +253,10 @@ function MessageActivity({ event, other }: { event: NonNullable<BotMessage["even
   );
 }
 
-/** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. */
+/** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. GitHub's mark leads it. */
 function PullLink({ url, children }: { url: string; children: React.ReactNode }) {
   // An event row toggles open on click; following its link shouldn't do that as well.
-  return <a className="link" href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{children}</a>;
+  return <a className="link" href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}><LinkText href={url}>{children}</LinkText></a>;
 }
 
 /** The repository the open conversation's "#n" are in, when it can be told (conversationRepo). */
