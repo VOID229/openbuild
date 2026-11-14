@@ -1,9 +1,10 @@
-// OpenBots' dialogs: making a bot, a group or a poll, naming things, and confirming a delete. The shape and
-// colour picker here is also the details panel's avatar editor.
-import { Check, Plus, Trash, X } from "lucide-react";
+// OpenBots' dialogs: making a bot, a group or a poll, naming things, and confirming a retire or a delete.
+// The shape and colour picker here is also the details panel's avatar editor.
+import { Archive, Check, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { COLORS, SHAPES, randomLook, shapeOf, type BotLook } from "../../lib/bots/looks";
 import { useBots } from "../../lib/bots/store";
+import type { Bot } from "../../lib/bots/types";
 import { uid } from "../../lib/id";
 import { makePoll, POLL_OPTIONS, ROLE_MAX } from "../../../shared/bots";
 import { cx, useMediaQuery } from "../../lib/ui";
@@ -143,8 +144,10 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
 export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose: () => void; onCreated?: (conversationId: string) => void; preset?: string[] }) {
   const touch = useMediaQuery("(pointer: coarse)");
   const modal = useModal(onClose);
-  const bots = useBots((s) => s.bots);
-  const [picked, setPicked] = useState<string[]>(preset);
+  // A retired bot isn't one to pick: it can't be in a chat until it's rehired.
+  const all = useBots((s) => s.bots);
+  const bots = all.filter((b) => !b.retiredAt);
+  const [picked, setPicked] = useState<string[]>(() => preset.filter((id) => !all.find((b) => b.id === id)?.retiredAt));
   const [name, setName] = useState("");
   const members = bots.filter((b) => picked.includes(b.id));
   const ok = name.trim() && picked.length >= 2;
@@ -356,7 +359,11 @@ export function NameDialog({ title, initial = "", action, placeholder, onSubmit,
   );
 }
 
-export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /> Delete</>, onConfirm, onClose }: { title: string; body: string; action?: React.ReactNode; onConfirm: () => void; onClose: () => void }) {
+/**
+ * Confirms something worth a second look. `tone` is how its button reads: red for what can't be undone
+ * (a delete, a reset), plain ink for what can (retiring a bot).
+ */
+export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /> Delete</>, tone = "danger", onConfirm, onClose }: { title: string; body: string; action?: React.ReactNode; tone?: "danger" | "calm"; onConfirm: () => void; onClose: () => void }) {
   const modal = useModal(onClose);
   return (
     <dialog {...modal} className="confirm-dialog bots-small-dialog" aria-label={title}>
@@ -368,7 +375,7 @@ export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /
         </button>
         <button
           type="button"
-          className="btn btn-sm btn-danger"
+          className={cx("btn btn-sm", tone === "calm" ? "btn-calm" : "btn-danger")}
           onClick={() => {
             onConfirm();
             onClose();
@@ -378,5 +385,41 @@ export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /
         </button>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * Retiring a bot: the delete dialog's shape with a quieter button, since it can be undone. Wherever
+ * it's asked from (the sidebar's menu, the details panel, Settings), it says the same.
+ */
+export function RetireBotDialog({ bot, onClose, onDone }: { bot: Bot; onClose: () => void; onDone?: () => void }) {
+  return (
+    <ConfirmDeleteDialog
+      title={`Retire “${bot.name}”?`}
+      body="It keeps its memory, instructions and routines, but can't be mentioned or used until you rehire it. Your other bots will be told. You can rehire it or delete it for good anytime."
+      action={<><Archive size={14} /> Retire</>}
+      tone="calm"
+      onClose={onClose}
+      onConfirm={() => {
+        useBots.getState().retireBot(bot.id);
+        onDone?.();
+      }}
+    />
+  );
+}
+
+/** Deleting a bot for good. Only a retired bot gets here, so this is always the second step. */
+export function DeleteBotDialog({ bot, onClose, onDone }: { bot: Bot; onClose: () => void; onDone?: () => void }) {
+  return (
+    <ConfirmDeleteDialog
+      title={`Delete “${bot.name}” permanently?`}
+      body="This retired bot, its memory, instructions, routines and conversation are deleted for good. It can't be rehired after this."
+      action={<><Trash size={14} /> Delete permanently</>}
+      onClose={onClose}
+      onConfirm={() => {
+        useBots.getState().deleteBot(bot.id);
+        onDone?.();
+      }}
+    />
   );
 }

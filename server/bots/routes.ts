@@ -322,6 +322,25 @@ export function botRoutes(api: Api) {
         }
       }),
     },
+    // Retire: a pause it can come back from. Rehire undoes it. Deleting (above) takes a retired bot.
+    "/api/bots/:id/retire": {
+      POST: api((req: Bun.BunRequest<"/api/bots/:id/retire">) => {
+        try {
+          return json(svc.retireBot(req.params.id, { by: "me" }));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/:id/rehire": {
+      POST: api((req: Bun.BunRequest<"/api/bots/:id/rehire">) => {
+        try {
+          return json(svc.rehireBot(req.params.id, { by: "me" }));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/bots/:id/routines/:routineId": {
       PATCH: api(async (req: Bun.BunRequest<"/api/bots/:id/routines/:routineId">) => {
         try {

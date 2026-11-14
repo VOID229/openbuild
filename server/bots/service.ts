@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -49,6 +49,8 @@ type Hooks = {
   wake: (botId: string, wake: Wake) => void;
   stop: (botId: string) => void;
   pendingAssignments?: (botId: string) => { conversationId: string; messageIds: string[] }[];
+  /** The conversations with a message waiting for the bot, or one its turn is on right now: what retiring it hands back. */
+  pendingChats?: (botId: string) => string[];
   /** What arrived in a conversation since the bot's turn there showed it, as transcript lines; shown from then on. */
   unseen?: (botId: string, conversationId: string) => string[];
   /** The bot's turn is answering the user in this conversation: a request of theirs, not a bot's message or a note. */
@@ -213,6 +215,19 @@ const num = (n: unknown, min: number, max: number) => Math.min(max, Math.max(min
 const strings = (list: unknown, max: number) => [...new Set((Array.isArray(list) ? list : []).filter((s): s is string => typeof s === "string" && !!s))].slice(0, max);
 const clip = (s: unknown, max: number) => (typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined);
 
+/** A bot that's there and not retired: the only kind that's woken, asked, added to a chat or counted on the team. */
+const active = (id: string) => {
+  const bot = db.getBot(id);
+  return !!bot && !bot.retiredAt;
+};
+/** Whether this bot is retired (see retireBot). */
+export const retired = (id: string) => isRetired(db.getBot(id));
+
+/** Every wake goes through here: a retired bot is never woken, whatever asked for it. */
+function wakeUp(botId: string, wake: Wake) {
+  if (active(botId)) hooks.wake(botId, wake);
+}
+
 export function fullBot(id: string): Bot | undefined {
   const bot = db.getBot(id);
   return bot ? { ...bot, memory: db.memories(id), routines: db.routines(id) } : undefined;
@@ -268,7 +283,7 @@ const activityTimes = (mem.openbotsActivityTimes ??= new Map<string, { turnStart
 /** Primary-only metadata projection. Never includes prompts, activity text or credentials. */
 export function botWorkStatus(requester: string) {
   if (!db.getBot(requester)?.primary) throw new BotsError("Only the primary bot can read all bots' status.", 403);
-  return { bots: db.listBots().map((bot) => {
+  return { bots: db.listBots().filter((bot) => !bot.retiredAt).map((bot) => {
     const current = getStatus(bot.id);
     const times = activityTimes.get(bot.id);
     // Between turns with tool calls or threads still out (BotStatus.jobs, .threads), it's free: idle, and waiting on those.
@@ -461,7 +476,7 @@ function greet() {
   updateSettings({ onboarding: "done" });
   // An install from before this welcome may already be talking; leave that chat alone.
   if (db.messages(conversationId, 1).length) return;
-  hooks.wake(bot.id, {
+  wakeUp(bot.id, {
     kind: "note",
     conversationId,
     text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then ask whether they write code, with the question tool and offer "developer": the app sets its choices, and they can type their own answer. Stop there and wait for it. If they say they do, ${TEAM_OFFER} If they say they don't: ${NO_CODE_REPLY}`,
@@ -579,6 +594,7 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
   }
   if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, scope: patch.threads.scope === "all" || patch.threads.scope === "exclude" ? patch.threads.scope : "choose", projects: strings(patch.threads.projects, 200), excluded: strings(patch.threads.excluded, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true, others: patch.threads.others === true };
   if (patch.primary) {
+    if (bot.retiredAt) throw new BotsError(`${bot.name} is retired. Rehire it before making it primary.`);
     for (const other of db.listBots()) if (other.primary && other.id !== id) db.putBot({ ...other, primary: undefined });
     bot.primary = true;
   }
@@ -859,7 +875,7 @@ export function settleChangeNotes(botId: string, shown: ChangeNote[]) {
 export function tellPrimary(text: string, about?: string) {
   const primary = db.listBots().find((b) => b.primary);
   const conversationId = primary && primary.id !== about ? directId(primary.id) : undefined;
-  if (primary && conversationId) hooks.wake(primary.id, { kind: "note", conversationId, text });
+  if (primary && conversationId) wakeUp(primary.id, { kind: "note", conversationId, text });
 }
 
 const quote = (text: string, max = 200) => `“${text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text}”`;
@@ -875,7 +891,8 @@ async function departureNotice(bot: db.StoredBot): Promise<string> {
   const short = (id: string) => id.slice(0, 8);
   const named = (c: db.StoredConversation) => `“${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}” (${short(c.id)})`;
   const chats = db.listConversations().filter((c) => c.botIds.includes(bot.id));
-  const groups = chats.filter((c) => c.kind === "group");
+  // It left its groups when it was retired: those are the ones it was in.
+  const groups = db.listConversations().filter((c) => c.kind === "group" && (c.botIds.includes(bot.id) || bot.retiredFrom?.includes(c.id)));
   const nameOf = (id: string) => (id === "me" ? user : firstName(bots.find((b) => b.id === id)?.name ?? "A bot"));
   // A friend's words and names come from another person's OpenBuild: data, never the user's say.
   const friendOf = (c: db.StoredConversation, author: string) => {
@@ -890,7 +907,8 @@ async function departureNotice(bot: db.StoredBot): Promise<string> {
   const left = await hooks.leftThreads?.(bot.id).catch((err): undefined => void console.error("[bots] Reading a deleted bot's threads failed:", err));
   if (left?.threads.length) sections.push(`Open coding threads it started or was following, still in OpenBuild (openbuild action read, by the thread id in brackets, if you have the project):\n${left.threads.join("\n")}`);
 
-  const routines = db.routines(bot.id).filter((r) => r.enabled);
+  // Retiring it paused them: the ones that were on until then are the ones it ran.
+  const routines = db.routines(bot.id).filter((r) => r.enabled || bot.retiredRoutines?.includes(r.id));
   if (routines.length) {
     const where = (r: Routine) => {
       const c = r.conversationId ? db.getConversation(r.conversationId) : undefined;
@@ -943,14 +961,253 @@ async function departureNotice(bot: db.StoredBot): Promise<string> {
   ].join("\n\n");
 }
 
+// ------------------------------------------------------------------ retiring and rehiring
+
+/** A wait on a retired bot's answer was called off: no answer is coming until it's rehired. */
+export class BotRetiredError extends BotsError {
+  constructor(readonly bot: string) {
+    super(`${bot} is retired.`);
+  }
+}
+
 /**
- * Delete a bot. `by` is who did: the user ("me") or the primary, through manage_bot. When it's the
+ * What another bot hasn't heard yet about a teammate being retired or rehired: shown with its next
+ * turn. One per reader and teammate: `retired` is how things stand now, `knew` what the reader last
+ * knew, so a bot retired and rehired between two of its turns leaves nothing to say. One the reader
+ * was shown is kept until its turn ends, in case it changes back meanwhile (see settleTeamNotes).
+ */
+export interface TeamNote {
+  to: string;
+  botId: string;
+  retired: boolean;
+  knew: boolean;
+}
+const TEAM_NOTES = "team-notes";
+const teamNotes = () => db.getValue<TeamNote[]>(TEAM_NOTES) ?? [];
+
+/** Every other bot on the team is owed a word that `botId` was retired or is back, except `but`: whoever did it knows. */
+function noteTeam(botId: string, nowRetired: boolean, but?: string) {
+  let list = teamNotes();
+  for (const reader of db.listBots()) {
+    if (reader.id === botId || reader.id === but || reader.retiredAt) continue;
+    const i = list.findIndex((n) => n.to === reader.id && n.botId === botId);
+    const knew = i >= 0 ? list[i]!.knew : !nowRetired;
+    list = [...list.filter((_, j) => j !== i), { to: reader.id, botId, retired: nowRetired, knew }];
+  }
+  db.setValue(TEAM_NOTES, list);
+}
+
+export function pendingTeamNotes(botId: string): TeamNote[] {
+  return teamNotes().filter((n) => n.to === botId && n.retired !== n.knew && db.getBot(n.botId));
+}
+
+export function teamNoteText(notes: TeamNote[]): string {
+  if (!notes.length) return "";
+  const lines = notes.map((n) => {
+    const bot = db.getBot(n.botId);
+    const who = `${bot?.name ?? "A bot"} (${n.botId.slice(0, 8)})`;
+    return n.retired
+      ? `- ${who} was retired: it's off the team until it's rehired, so don't mention it, message it or hand it work.`
+      : `- ${who} was rehired: it's back on the team, and can be mentioned, messaged and handed work again.`;
+  });
+  return `Since your last turn:\n${lines.join("\n")}\nThat's just so you know; it needs no reply.`;
+}
+
+/** The bot was shown these. One that changed again meanwhile keeps what it hasn't heard. */
+export function settleTeamNotes(botId: string, shown: TeamNote[]) {
+  const list = teamNotes();
+  const next = list.flatMap((n) => {
+    if (n.to !== botId) return [n];
+    const seen = shown.find((s) => s.botId === n.botId);
+    if (!seen) return n.retired === n.knew ? [] : [n];
+    return seen.retired === n.retired ? [] : [{ ...n, knew: seen.retired }];
+  });
+  if (JSON.stringify(next) !== JSON.stringify(list)) db.setValue(TEAM_NOTES, next);
+}
+
+/** What a rehired bot is told with its first turn back: how long it was away, and what didn't wait for it. */
+const REHIRED = "rehired:";
+export function rehireNote(botId: string): string {
+  const back = db.getValue<{ since: number; at: number } | null>(REHIRED + botId);
+  if (!back) return "";
+  const hours = Math.max(0, back.at - back.since) / 3_600_000;
+  const away = hours < 1 ? "less than an hour" : hours < 48 ? `about ${Math.round(hours)} ${Math.round(hours) === 1 ? "hour" : "hours"}` : `about ${Math.round(hours / 24)} days`;
+  const user = settings().user?.name || "the user";
+  return `You were retired for ${away}, and ${user} or the primary bot has rehired you: you're back on the team. Nothing reached you while you were away, and what was waiting for you when you were retired went back to whoever sent it, so don't pick it up again unless you're asked. Your routines are paused until ${user} turns them back on. That's just so you know; it needs no reply.`;
+}
+export function settleRehireNote(botId: string) {
+  if (db.getValue(REHIRED + botId)) db.setValue(REHIRED + botId, null);
+}
+
+/** How many unanswered messages one chat says were handed back; any more are counted. */
+const RETURNED_SHOWN = 3;
+
+/**
+ * Retire a bot: a pause between active and deleted, undone by rehireBot. `by` is who did it: the user
+ * ("me"), or the primary through manage_bot.
+ *
+ * It keeps its memory, instructions, look, model settings, sessions, computers and chats. Its own
+ * chat stays to read, and nothing more can be written in it. It leaves its groups (and rejoins them
+ * when rehired), so nothing there routes to it, and its routines are paused. Whatever was waiting on
+ * it goes back to whoever sent it: the user's unanswered messages are said to be so in their chat, a
+ * bot that asked it something is told no answer is coming, and its side chats close. Every other bot
+ * hears it was retired with its next turn. Coding threads it started keep running, and report to the
+ * primary (threads.ts).
+ */
+export function retireBot(id: string, { by = "me" }: { by?: Author } = {}): Bot {
+  const bot = db.getBot(id);
+  if (!bot) throw new BotsError("No such bot.", 404);
+  if (bot.primary) throw new BotsError("The primary bot can't be retired. Make another one primary first.");
+  if (bot.retiredAt) return fullBot(id)!;
+  const name = mentionName(bot.name);
+  const quoted = (text: string) => quote(text.replace(/\s+/g, " ").trim() || "(no text)", 160);
+  const chats = db.listConversations().filter((c) => c.botIds.includes(id));
+
+  // Read before it's stopped: its queue goes with its turn.
+  const waiting = new Set(hooks.pendingChats?.(id) ?? []);
+  const assigned = hooks.pendingAssignments?.(id) ?? [];
+  const returned = new Map<string, BotMessage[]>();
+  for (const c of chats) {
+    const mine =
+      c.kind === "direct"
+        ? waiting.has(c.id) ? db.messagesAfter(c.id, db.cursor(id, c.id), 200).map((r) => r.message) : []
+        : c.kind === "group"
+          ? (assigned.find((a) => a.conversationId === c.id)?.messageIds ?? []).flatMap((messageId) => db.getMessage(messageId)?.message ?? [])
+          : [];
+    // Only the user's own: a friend's request is theirs to ask again, and a bot's is told below.
+    const unanswered = mine.filter((m) => m.author === "me" && !m.event);
+    if (unanswered.length) returned.set(c.id, unanswered);
+  }
+
+  // Its turn ends without a reply or an error, and its queue and background jobs go. Its Pi sessions stay on disk.
+  hooks.halt?.(id);
+  hooks.stop(id);
+  for (const conversationId of Object.keys(typing)) if (typing[conversationId]?.includes(id)) setTyping(conversationId, id, false);
+  for (const d of drafts.filter((d) => d.botId === id)) setDraft(undefined, d);
+  setStatus(id, { state: "idle" });
+
+  // From here on nothing wakes it. Its routines pause, and stay paused when it's rehired until the user turns them on.
+  const running = db.routines(id).filter((r) => r.enabled);
+  bot.retiredAt = Date.now();
+  bot.retiredFrom = chats.filter((c) => c.kind === "group").map((c) => c.id);
+  if (running.length) bot.retiredRoutines = running.map((r) => r.id);
+  db.putBot(bot);
+  for (const routine of running) db.putRoutine(id, { ...routine, enabled: false, nextRunAt: undefined });
+
+  // What other bots asked it. A mention in a group: the asker is told there.
+  const all = handoffs();
+  const asked = all.filter((h) => h.to === id);
+  if (all.some((h) => h.to === id || h.from === id)) db.setValue("handoffs", all.filter((h) => h.to !== id && h.from !== id));
+  const noAnswer = `so no answer is coming. It can't be asked until it's rehired: do it yourself, hand it to another bot, or tell the user if they're waiting on it. If it no longer matters, stay [silent].`;
+  for (const h of asked) {
+    wakeUp(h.from, { kind: "note", conversationId: h.conversationId, text: `${name} was retired before it answered what you asked in [${h.id.slice(0, 8)}] (${quoted(db.getMessage(h.id)?.message.text ?? "")}), ${noAnswer}` });
+  }
+  for (const c of chats.filter((c) => c.kind === "side")) {
+    // A side chat it was working something out in closes: whoever opened it reports back with what there is.
+    if (c.huddle) {
+      if (!c.huddle.closedAt) closeHuddle(c.id, `${name} was retired.`, c.huddle.by === id ? (c.botIds.find((b) => b !== id) ?? id) : c.huddle.by);
+      continue;
+    }
+    // A question it hadn't answered: a bot still waiting on it (ask_bot) is told where it asked from, any other in the side chat.
+    const held = waiters.filter((w) => w.conversationId === c.id && w.botId !== id);
+    for (const w of held) {
+      waiters.splice(waiters.indexOf(w), 1);
+      w.reject(new BotRetiredError(name));
+    }
+    const last = db.messagesAfter(c.id, db.cursor(id, c.id), 200).findLast((r) => !r.message.event);
+    const asker = last?.message.author;
+    if (last && asker && asker !== id && asker !== "me" && !held.some((w) => w.botId === asker)) {
+      wakeUp(asker, { kind: "note", conversationId: c.id, text: `${name} was retired before it answered what you asked here (${quoted(last.message.text)}), ${noAnswer}` });
+    }
+  }
+
+  // Said in its chats, by whoever did it: the user's own line doesn't leave a chat unread.
+  const author: Author = by === "me" ? "me" : id;
+  const say = (conversationId: string, text: string, detail?: string) =>
+    postMessage(conversationId, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "left", text, ...(detail ? { detail } : {}) } });
+  const handBack = (conversationId: string) => {
+    const list = returned.get(conversationId) ?? [];
+    for (const m of list.slice(-RETURNED_SHOWN)) say(conversationId, `${name} was retired before answering`, quoted(m.text));
+    if (list.length > RETURNED_SHOWN) say(conversationId, `${name} was retired before answering ${list.length - RETURNED_SHOWN} more ${list.length - RETURNED_SHOWN === 1 ? "message" : "messages"}`);
+  };
+  for (const c of chats) {
+    if (c.kind === "side") continue;
+    say(c.id, `${name} was retired`);
+    handBack(c.id);
+  }
+  // Nothing from before is new to it when it comes back.
+  for (const c of chats) db.setCursor(id, c.id, db.latestSeq(c.id));
+
+  // It leaves its groups, so nothing there routes to it, names it or waits on it.
+  for (const c of chats.filter((c) => c.kind === "group")) {
+    const now = db.getConversation(c.id);
+    if (!now) continue;
+    const next = { ...now, botIds: now.botIds.filter((b) => b !== id) };
+    db.putConversation(next);
+    const follow = db.groupFollow(c.id);
+    if (follow) db.setGroupFollow(c.id, { ...follow, ids: follow.ids.filter((b) => b !== id) });
+    emitConversation(c.id);
+    settlePolls(c.id);
+    if (next.friend && !next.friend.ended) friendHooks.members(next);
+  }
+
+  noteTeam(id, true, by === "me" ? undefined : by);
+  emitBot(id);
+  return fullBot(id)!;
+}
+
+/**
+ * Rehire a retired bot: it's back as it was, in its own chat and in the groups it was retired from
+ * that are still there. Its routines stay paused until the user turns them on, and the other bots
+ * hear it's back with their next turn.
+ */
+export function rehireBot(id: string, { by = "me" }: { by?: Author } = {}): Bot {
+  const bot = db.getBot(id);
+  if (!bot) throw new BotsError("No such bot.", 404);
+  if (!bot.retiredAt) return fullBot(id)!;
+  const name = mentionName(bot.name);
+  const since = bot.retiredAt;
+  const groups = bot.retiredFrom ?? [];
+  delete bot.retiredAt;
+  delete bot.retiredFrom;
+  delete bot.retiredRoutines;
+  db.putBot(bot);
+  const author: Author = by === "me" ? "me" : id;
+  const say = (conversationId: string) => {
+    postMessage(conversationId, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "joined", text: `${name} was rehired` } });
+    // It starts from here: what was said while it was away isn't waiting for it.
+    db.setCursor(id, conversationId, db.latestSeq(conversationId));
+  };
+  for (const groupId of groups) {
+    const c = db.getConversation(groupId);
+    if (!c || c.kind !== "group" || c.friend?.ended) continue;
+    if (!c.botIds.includes(id)) {
+      const next = { ...c, botIds: [...c.botIds, id] };
+      db.putConversation(next);
+      emitConversation(c.id);
+      if (next.friend) friendHooks.members(next);
+    }
+    say(c.id);
+  }
+  const own = directId(id);
+  if (own) say(own);
+  db.setValue(REHIRED + id, { since, at: Date.now() });
+  touchHeartbeat(id);
+  noteTeam(id, false, by === "me" ? undefined : by);
+  emitBot(id);
+  return fullBot(id)!;
+}
+
+/**
+ * Delete a bot, for good. Only a retired bot can be: deleting is always a second, deliberate step
+ * after retiring. `by` is who did: the user ("me") or the primary, through manage_bot. When it's the
  * user, the primary is told what the bot left behind, since it's the one handing out the work.
  */
 export async function deleteBot(id: string, { by }: { by?: Author } = {}) {
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
   if (bot.primary) throw new BotsError("The primary bot can't be deleted. Make another one primary first.");
+  if (!bot.retiredAt) throw new BotsError(`${bot.name} isn't retired. Retire it first: only a retired bot can be deleted for good.`);
   const notice = by === "me" ? await departureNotice(bot) : undefined;
   hooks.stop(id);
   await destroyComputers(id);
@@ -974,6 +1231,8 @@ export async function deleteBot(id: string, { by }: { by?: Author } = {}) {
   db.deleteBot(id);
   db.setValue(CHANGE_NOTES, changeNotes().filter((n) => n.botId !== id));
   db.setValue(RENAME_NOTES, renameNotes().filter((n) => n.botId !== id));
+  db.setValue(TEAM_NOTES, teamNotes().filter((n) => n.botId !== id && n.to !== id));
+  settleRehireNote(id);
   status.delete(id);
   emit({ t: "bot-deleted", id });
   if (notice) tellPrimary(notice, id);
@@ -988,6 +1247,8 @@ export function createConversation(input: { id?: string; kind: Conversation["kin
   if (input.kind === "direct") throw new BotsError("A bot's own chat is created with the bot.");
   if (input.friend && input.kind !== "group") throw new BotsError("Only groups are shared with friends.");
   const botIds = [...new Set(input.botIds)].filter((id) => db.getBot(id));
+  const away = botIds.map((id) => db.getBot(id)!).find((b) => b.retiredAt);
+  if (away) throw new BotsError(`${away.name} is retired. Rehire it to add it to a chat.`);
   if (!input.friend && botIds.length < 2) throw new BotsError("Pick at least two bots.");
   if (input.kind === "group" && !clip(input.name, 80)) throw new BotsError("A group needs a name.");
   const now = Date.now();
@@ -1031,7 +1292,8 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   if ("section" in patch) c.section = clip(patch.section, 40);
   const before = c.botIds.join();
   if (patch.botIds && c.kind === "group") {
-    const ids = [...new Set(patch.botIds)].filter((b) => db.getBot(b));
+    // A retired bot isn't added to a group: it rejoins the ones it left when it's rehired.
+    const ids = [...new Set(patch.botIds)].filter(active);
     // A shared chat can be down to none of this side's bots: the friend's are still talking in it.
     if (ids.length >= (c.friend ? 0 : 1)) {
       c.botIds = ids;
@@ -1104,6 +1366,17 @@ function checkMessage(m: BotMessage) {
   }
 }
 
+/**
+ * A retired bot's own chat, and a side chat it's in, stay to read and take nothing new: no message,
+ * reaction or answer. Activity lines still land there (that it was retired, that it's back).
+ */
+function assertWritable(c: db.StoredConversation) {
+  if (c.kind === "group") return;
+  const away = c.botIds.flatMap((id) => db.getBot(id) ?? []).find((b) => b.retiredAt);
+  if (!away) return;
+  throw new BotsError(c.kind === "direct" ? `${away.name} is retired, so its chat is read-only. Rehire it to message it.` : `${mentionName(away.name)} is retired, so this side chat is read-only until it's rehired.`);
+}
+
 /** A poll as a new message: whatever it came with, it starts with no votes. */
 function cleanPoll(raw: Poll): Poll {
   const labels = Array.isArray(raw.options) ? raw.options.map((o) => String(o?.label ?? "")) : [];
@@ -1116,7 +1389,7 @@ function cleanPoll(raw: Poll): Poll {
 /** Who a message should pull in. Events wake nobody. A poll asks everyone. */
 function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
   if (message.event) return [];
-  const members = c.botIds.filter((id) => db.getBot(id));
+  const members = c.botIds.filter(active);
   if (message.poll) return members.filter((id) => id !== message.author);
   if (message.author === "me") {
     if (c.kind !== "group") return members;
@@ -1193,7 +1466,7 @@ export function settleHandoffs(working: (botId: string) => boolean, now = Date.n
   for (const h of list) {
     const c = db.getConversation(h.conversationId);
     const asked = db.getBot(h.to);
-    if (!c || !asked || !db.getBot(h.from) || !c.botIds.includes(h.from) || !c.botIds.includes(h.to)) continue;
+    if (!c || !asked || asked.retiredAt || !active(h.from) || !c.botIds.includes(h.from) || !c.botIds.includes(h.to)) continue;
     const age = now - h.at;
     const busy = working(h.to);
     // Still at it: what it has said so far isn't the whole answer yet.
@@ -1208,7 +1481,7 @@ export function settleHandoffs(working: (botId: string) => boolean, now = Date.n
       const last = answers.at(-1)?.seq ?? 0;
       // Already the asker's: it has written since, or a turn of its own has shown it.
       const heard = !answers.length || later.some((r) => r.seq > last && r.message.author === h.from) || db.cursor(h.from, h.conversationId) >= last;
-      if (!heard) hooks.wake(h.from, { kind: "messages", conversationId: h.conversationId, replies: answers.map((r) => r.message.id) });
+      if (!heard) wakeUp(h.from, { kind: "messages", conversationId: h.conversationId, replies: answers.map((r) => r.message.id) });
       continue;
     }
     if (age < HANDOFF_WAIT_MS) {
@@ -1218,7 +1491,7 @@ export function settleHandoffs(working: (botId: string) => boolean, now = Date.n
     const status = getStatus(h.to);
     const why = busy ? ": it's still busy with something else" : status?.state === "error" ? `: its turn failed (${(status.error ?? "").slice(0, 120)})` : "";
     const quote = db.getMessage(h.id)?.message.text.slice(0, 160) ?? "";
-    hooks.wake(h.from, {
+    wakeUp(h.from, {
       kind: "note",
       conversationId: h.conversationId,
       text: `${mentionName(asked.name)} hasn't read what you asked in [${h.id.slice(0, 8)}] (“${quote}”) after ${Math.round(age / 60_000)} minutes${why}. Ask again, do it another way, or tell the user if they're waiting on it. If it no longer matters, stay [silent].`,
@@ -1234,7 +1507,7 @@ const CLOCK_SKEW_MS = 60_000;
 // mid-window doesn't hand the next message to the primary. Only user requests refresh the clock.
 
 /** The group's bots that are still around. */
-const groupMembers = (c: db.StoredConversation) => c.botIds.filter((id) => db.getBot(id));
+const groupMembers = (c: db.StoredConversation) => c.botIds.filter(active);
 
 /**
  * Who the user was last talking to in a group: the bots their last tagged (or quoted) request went to,
@@ -1310,6 +1583,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
   const fromFriend = parseFriendAuthor(message.author)?.friend;
   const friendHere = !!fromFriend && c.friend?.friend === fromFriend;
   if (message.author !== "me" && !c.botIds.includes(message.author) && !friendHere) throw new BotsError("That bot isn't in this conversation.");
+  if (!message.event) assertWritable(c);
   if (c.huddle && !message.event) {
     if (message.author === "me") throw new BotsError("Side chats are between bots. You can read along.");
     if (c.huddle.closedAt) throw new BotsError(`That side chat has closed.${message.author === c.huddle.by ? " Report back in the chat it came from." : ""}`);
@@ -1367,7 +1641,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     if (message.author !== "me" && !friendHere) noteHandoffs(c, message, seq, targets);
     // Several bots asked at once: one answers, and the others add only what's theirs.
     const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets, talking) : undefined;
-    for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
+    for (const botId of targets) if (!skip.has(botId)) wakeUp(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
   }
   return message;
 }
@@ -1427,7 +1701,7 @@ export function backgroundTurn(botId: string, conversationId: string): boolean {
 
 /** Wake a bot from outside a message: a background job's result, say. */
 export function wakeBot(botId: string, wake: Wake) {
-  if (db.getBot(botId)) hooks.wake(botId, wake);
+  wakeUp(botId, wake);
 }
 
 /** The user's request a bot is answering in a conversation right now, for what it starts there to report back to. */
@@ -1502,7 +1776,11 @@ export function openHuddle(by: string, from: string, botIds: string[], topic: st
   if (!text) throw new BotsError("Say what the side chat is for.");
   const others = [...new Set(botIds)].filter((id) => id !== by);
   if (!others.length || others.length > 4) throw new BotsError("Pick one to four other bots.");
-  for (const id of others) if (!db.getBot(id)) throw new BotsError("No such bot.");
+  for (const id of others) {
+    const other = db.getBot(id);
+    if (!other) throw new BotsError("No such bot.");
+    if (other.retiredAt) throw new BotsError(`${mentionName(other.name)} is retired, so it can't join a side chat.`);
+  }
   if (db.listConversations().some((c) => c.huddle && !c.huddle.closedAt && c.botIds.includes(by))) throw new BotsError("You're already in an open side chat. Finish that one first.");
   const request = requestIn(by, from);
   const members = [by, ...others];
@@ -1530,7 +1808,7 @@ export function closeHuddle(id: string, why: string, author: string) {
   if (c.botIds.includes(author)) postMessage(id, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text: "Side chat closed", detail: why } });
   const from = db.getConversation(huddle.from);
   if (!db.getBot(huddle.by) || !from?.botIds.includes(huddle.by)) return;
-  hooks.wake(huddle.by, { kind: "note", conversationId: huddle.from, ...(huddle.request?.length ? { messageIds: huddle.request } : {}), text: huddleReport(c, why) });
+  wakeUp(huddle.by, { kind: "note", conversationId: huddle.from, ...(huddle.request?.length ? { messageIds: huddle.request } : {}), text: huddleReport(c, why) });
 }
 
 /** What the bot that reports back is told: the whole huddle (it's short) and what to do with it. */
@@ -1600,6 +1878,8 @@ export const REACT_BACK = "React back to it with react's to_reaction so they kno
 export function toggleReaction(conversationId: string, messageId: string, emoji: string, by: string, to?: string): BotMessage {
   const row = db.getMessage(messageId);
   if (!row || row.conversationId !== conversationId) throw new BotsError("No such message.", 404);
+  const here = db.getConversation(conversationId);
+  if (here) assertWritable(here);
   const reactions = row.message.reactions ?? [];
   const target = to ? reactions.find((r) => reactionId(r) === to) : undefined;
   if (to && !target) throw new BotsError("No such reaction.", 404);
@@ -1616,7 +1896,7 @@ export function toggleReaction(conversationId: string, messageId: string, emoji:
     const text = target
       ? `${who} reacted ${emoji} to your ${target.emoji} reaction on [${short}] ${quote}. That's reaction #${next.length} there. ${REACT_BACK}`
       : `${who} reacted ${emoji} to your message [${short}]: ${quote}. That's reaction #${next.length} there. ${REACT_BACK}`;
-    hooks.wake(owner, { kind: "reaction", conversationId, text, reaction: { messageId, emoji, by, to } });
+    wakeUp(owner, { kind: "reaction", conversationId, text, reaction: { messageId, emoji, by, to } });
   }
   return patched;
 }
@@ -1627,12 +1907,21 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
   if (question.closed) throw new BotsError("That question was settled in its thread.", 409);
   if (question.steps) throw new BotsError("That card asks several questions: answer them together.");
+  assertAnswerable(conversationId, row.message.author);
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
   // The first-run offers are the app's, not the bot's: taking the team makes it here, once, and whether they code is kept for the bot's context.
   const primary = !question.answer && !!db.getBot(row.message.author)?.primary;
   if (primary && question.offer === "team" && key === "A") createTeam(row.message.author);
   if (primary && question.offer === "developer") db.setValue(DEVELOPER, key === "A" ? { kind: "yes" } : key === "B" ? { kind: "no" } : { kind: "own", text: key.slice(0, 300) });
   return patched;
+}
+
+/** A retired bot's question can't be answered: nobody would hear the answer. */
+function assertAnswerable(conversationId: string, author: string) {
+  const c = db.getConversation(conversationId);
+  if (c) assertWritable(c);
+  const asker = db.getBot(author);
+  if (asker?.retiredAt) throw new BotsError(`${asker.name} is retired, so it won't hear the answer. Rehire it first.`);
 }
 
 /**
@@ -1646,6 +1935,7 @@ export function answerSteps(conversationId: string, messageId: string, answers: 
   if (!row || !question?.steps) throw new BotsError("That message isn't a card of several questions.", 404);
   // Sent again after it landed (a retry): it stays as submitted.
   if (question.submitted) return row.message;
+  assertAnswerable(conversationId, row.message.author);
   const steps = question.steps.map(({ answer: _, ...step }, i): QuestionStep => {
     const answer = typeof answers[i] === "string" ? (answers[i] as string).trim().slice(0, 2000) : "";
     return answer ? { ...step, answer } : step;
@@ -1697,7 +1987,7 @@ function closePoll(conversationId: string, message: BotMessage, by: string): Bot
   const closed = patchMessage(conversationId, message.id, { poll });
   postMessage(conversationId, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "poll", text: "Poll closed", detail: poll.question } });
   if (db.getConversation(conversationId)?.botIds.includes(message.author)) {
-    hooks.wake(message.author, { kind: "note", conversationId, text: `Everyone has answered your poll [${message.id.slice(0, 8)}] “${poll.question}”, so it's closed. Results: ${pollTally(poll)}. Share the outcome or act on it if that helps; otherwise reply [silent].` });
+    wakeUp(message.author, { kind: "note", conversationId, text: `Everyone has answered your poll [${message.id.slice(0, 8)}] “${poll.question}”, so it's closed. Results: ${pollTally(poll)}. Share the outcome or act on it if that helps; otherwise reply [silent].` });
   }
   return closed;
 }
@@ -1735,7 +2025,7 @@ function reportPollChanges(now: number) {
     if (message.author === "me") {
       if (members.includes(by)) postMessage(conversationId, { id: crypto.randomUUID(), author: by, at: now, text: "", event: { kind: "poll", text: `${db.getBot(by)?.name ?? "A bot"} changed their answer`, detail: `${poll.question} ${change}` } });
     } else if (members.includes(message.author)) {
-      hooks.wake(message.author, { kind: "note", conversationId, text: `${pollPerson(by)} changed their answer in your closed poll [${messageId.slice(0, 8)}] “${poll.question}”: ${change}. Results now: ${pollTally(poll)}. Say something or act on it if it matters; otherwise reply [silent].` });
+      wakeUp(message.author, { kind: "note", conversationId, text: `${pollPerson(by)} changed their answer in your closed poll [${messageId.slice(0, 8)}] “${poll.question}”: ${change}. Results now: ${pollTally(poll)}. Say something or act on it if it matters; otherwise reply [silent].` });
     }
   }
 }
@@ -1810,7 +2100,10 @@ export function forgetMemory(botId: string, which: string): MemoryItem {
 }
 
 export function saveRoutine(botId: string, routine: Routine): Routine {
-  if (!db.getBot(botId)) throw new BotsError("No such bot.", 404);
+  const bot = db.getBot(botId);
+  if (!bot) throw new BotsError("No such bot.", 404);
+  // Paused with the bot: they can be edited or removed, and turned on once it's rehired.
+  if (bot.retiredAt && routine.enabled !== false) throw new BotsError(`${bot.name} is retired, so its routines stay paused. Rehire it to turn one on.`);
   const owner = routine.id && db.routineOwner(routine.id);
   if (owner && owner !== botId) throw new BotsError("That routine belongs to another bot.");
   if (routine.conversationId) {
@@ -1870,7 +2163,7 @@ export function tick(busy: (botId: string) => boolean) {
   for (const { botId, routine } of db.dueRoutines(now)) {
     const conversationId = routine.conversationId || directId(botId);
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;
-    if (!db.getBot(botId) || !conversation?.botIds.includes(botId)) {
+    if (!active(botId) || !conversation?.botIds.includes(botId)) {
       db.putRoutine(botId, { ...routine, enabled: false, nextRunAt: undefined });
       emitBot(botId);
       continue;
@@ -1896,7 +2189,7 @@ export function tick(busy: (botId: string) => boolean) {
       text: "",
       event: { kind: "routine", text: routine.followUp ? "Followed up" : "Ran a routine", detail: routine.title },
     });
-    hooks.wake(botId, { kind: "routine", conversationId, text });
+    wakeUp(botId, { kind: "routine", conversationId, text });
   }
   if (settings().onboarding === "active") {
     // Waiting on Pi with a tab open: look again, in case it was set up from a terminal.
@@ -1905,12 +2198,12 @@ export function tick(busy: (botId: string) => boolean) {
   }
   for (const bot of db.listBots()) {
     const every = { off: 0, low: 8, normal: 3, high: 1 }[bot.proactivity ?? "normal"];
-    if (!every || busy(bot.id) || quietNow(new Date(now))) continue;
+    if (!every || bot.retiredAt || busy(bot.id) || quietNow(new Date(now))) continue;
     const key = `hb:${bot.id}`;
     const due = db.getValue<number>(key) ?? 0;
     if (due && now < due) continue;
     db.setValue(key, now + every * 60 * 60 * 1000 * (0.75 + Math.random() * 0.5));
-    hooks.wake(bot.id, {
+    wakeUp(bot.id, {
       kind: "heartbeat",
       conversationId: directId(bot.id),
       text: "Nobody has messaged you in a while. Look at your memory, routines and recent chats. If something is worth telling the user, send it. If not, reply [silent].",

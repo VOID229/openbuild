@@ -264,7 +264,21 @@ export interface Bot {
   threads?: BotThreadAccess;
   /** Who made it: "me", or the primary bot's id. */
   by?: string;
+  /**
+   * When it was retired: paused, between active and deleted. It keeps everything (memory, instructions,
+   * look, model, sessions and its chats, which turn read-only), but it can't be mentioned, messaged,
+   * added to a group or woken, and its routines are paused. Rehiring clears this; only a retired bot
+   * can be deleted. The primary is never retired.
+   */
+  retiredAt?: number;
+  /** The groups it was in when it was retired, by id: it left them then, and rejoins the ones still there when rehired. */
+  retiredFrom?: string[];
+  /** The routines that were on when it was retired, by id. Retiring paused them, and they stay paused when it's rehired. */
+  retiredRoutines?: string[];
 }
+
+/** Retired (see Bot.retiredAt): still there, but out of the team until it's rehired. */
+export const isRetired = (bot: Pick<Bot, "retiredAt"> | undefined): boolean => !!bot?.retiredAt;
 
 /** "me" is the user; anything else is a bot's id. */
 export type Author = "me" | (string & {});
@@ -1159,6 +1173,8 @@ export interface MissedMention {
   tag: string;
   could?: string[];
   absent?: string;
+  /** A retired bot it names: nobody to reach until it's rehired. */
+  retired?: string;
 }
 
 /**

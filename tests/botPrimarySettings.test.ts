@@ -197,6 +197,7 @@ test("what the user changes in a bot's settings reaches the primary once, on its
     await patch(primary.id, { model: 'google/gemini-4' });
     await patch(primary.id, { model: '' });
     await patch(gone.id, { effort: 'low' });
+    svc.retireBot(gone.id);
     await svc.deleteBot(gone.id);
     a.equal(text(), [
       'Since your last turn, in the app\\'s settings:',

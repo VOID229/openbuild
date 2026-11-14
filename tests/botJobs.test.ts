@@ -626,6 +626,9 @@ test("deleting a bot takes its board and its results with it", () => run("forget
   await use(beta.bot, 'bash', { command: 'long', status: 'Running it' });
   of(beta.bot)[0].finish('Running.');
   await idle(beta.bot);
+  // Retiring it is what stops it: its running job is cancelled then, and deleting takes what's left.
+  svc.retireBot(beta.bot.id);
+  a.equal(aborted, true);
   await svc.deleteBot(beta.bot.id);
   a.equal(aborted, true);
   a.deepEqual(jobs.jobsOf(beta.bot.id), []);

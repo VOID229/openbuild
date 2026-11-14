@@ -166,6 +166,8 @@ const wokeAt = new WeakMap<Wake, number>();
 const meters = new Map<string, TurnMeter>();
 
 export function wake(botId: string, item: Wake) {
+  // A retired bot is never woken, whatever asks: service.ts holds to it too, and this is the last door.
+  if (svc.retired(botId)) return;
   if (!wokeAt.has(item)) wokeAt.set(item, Date.now());
   const mind = minds.get(mindKey(botId, laneOf(item.conversationId)));
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
@@ -302,6 +304,8 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
 }
 
 function enqueue(botId: string, item: Wake) {
+  // Retired while this was on its way (a steer that failed, a held message): it's dropped with the rest of its queue.
+  if (svc.retired(botId)) return;
   if (!wokeAt.has(item)) wokeAt.set(item, Date.now());
   const list = queue.get(botId) ?? [];
   list.push(item);
@@ -325,6 +329,8 @@ export function waitingIn(botId: string): string[] {
 }
 
 function setStatus(botId: string, next: BotStatus) {
+  // A retired bot shows nothing going on: the threads it started carry on, and report to the primary.
+  if (svc.retired(botId)) return svc.setStatus(botId, { state: "idle" });
   // Between turns with jobs still running, or OpenBuild threads it started or wrote to still working, its
   // status says which: it's free, and this is what it's waiting on. Its jobs first: they're its own.
   if (next.state === "idle") {
@@ -997,6 +1003,13 @@ export { activityFor } from "./steps";
 
 const activeAssignments = new Map<string, Wake[]>();
 
+/** The conversations with a message waiting for the bot, or one its turn is on now (svc.retireBot hands them back). */
+export function pendingChats(botId: string): string[] {
+  const held = [...minds].filter(([key]) => key === botId || key.startsWith(`${botId}~`)).flatMap(([, mind]) => [...(mind.held ?? []), ...(mind.steered ?? [])]);
+  const jobs: Wake[] = [...(queue.get(botId) ?? []), ...(activeAssignments.get(botId) ?? []), ...held];
+  return [...new Set(jobs.flatMap((job) => (job.kind === "messages" && job.conversationId ? [job.conversationId] : [])))];
+}
+
 /** Exact delivery references only; text and routine payloads stay private. */
 export function pendingAssignments(botId: string) {
   const jobs = [...(queue.get(botId) ?? []), ...(activeAssignments.get(botId) ?? []), ...[...minds].filter(([key]) => key === botId || key.startsWith(`${botId}~`)).flatMap(([, mind]) => mind.steered ?? [])];
@@ -1018,7 +1031,7 @@ async function run(botId: string, all: Wake[]) {
 
 async function runTurn(botId: string, all: Wake[]) {
   const jobs = all.filter((j) => !j.reaction || stillReacted(j.reaction));
-  if (!jobs.length) return;
+  if (!jobs.length || svc.retired(botId)) return;
   const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.directId(botId);
   const lane = laneOf(conversationId);
   const key = mindKey(botId, lane);
@@ -1083,9 +1096,12 @@ async function runTurn(botId: string, all: Wake[]) {
     if (!delivered.size) { try { handoff = readFileSync(join(mind.sessionPath!, "handoff.txt"), "utf8"); } catch {} }
     // A new name is told to its bot in any chat: it's how everyone there will call it.
     const renames = svc.pendingRenameNotes(botId);
+    // A teammate retired or rehired since it last looked, and its own return from retirement: its own lane only.
+    const team = lane === "main" ? svc.pendingTeamNotes(botId) : [];
+    const rehired = lane === "main" ? svc.rehireNote(botId) : "";
     // Memory from before the split, for the bot to sort once: its own lane only, never a friend's, and taken for good now.
     const review = lane === "main" ? svc.memoryReviewNote(botId) : "";
-    const message = [handoff, svc.renameNoteText(renames), svc.changeNoteText(botId, notes), review, rendered].filter(Boolean).join("\n\n");
+    const message = [handoff, rehired, svc.renameNoteText(renames), svc.teamNoteText(team), svc.changeNoteText(botId, notes), review, rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -1191,14 +1207,16 @@ async function runTurn(botId: string, all: Wake[]) {
     catch { /* A lost optimization must never fail an otherwise completed assignment. */ }
     svc.settleChangeNotes(botId, notes);
     svc.settleRenameNotes(renames);
+    svc.settleTeamNotes(botId, team);
+    if (rehired) svc.settleRehireNote(botId);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
     if (minds.get(key) === m && !m.needsRecovery && !m.proc.exited) writeFileSync(join(m.sessionPath!, "settled"), "", { mode: 0o600 });
     setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // The user stopped it: a Pi that had to be closed to make it stop isn't a failed reply.
-    if (halted.has(botId)) {
+    // The user stopped it, or it was retired mid-turn: a Pi that had to be closed to make it stop isn't a failed reply.
+    if (halted.has(botId) || svc.retired(botId)) {
       outcome = "stopped";
       setStatus(botId, { state: "idle" });
       if (mind?.proc.exited) {
@@ -1478,7 +1496,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
 /** Who's in a group and what each does, so a bot can tell whether a message is its job or someone else's. */
 function membersNote(c: db.StoredConversation, botId: string): string {
   if (c.kind !== "group" || c.huddle) return "";
-  const members = c.botIds.flatMap((id) => db.getBot(id) ?? []);
+  const members = c.botIds.flatMap((id) => db.getBot(id) ?? []).filter((b) => !b.retiredAt);
   if (members.length < 2) return "";
   return `Bots here: ${members.map((b) => `${b.id === botId ? "you" : mentionName(b.name)} (${roleLine(b) || "no role yet"})`).join("; ")}.\n`;
 }
@@ -1706,7 +1724,7 @@ export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
 
 export function startBots() {
   listen();
-  svc.setHooks({ wake, stop, pendingAssignments, unseen, userWoke, halt, background, leftThreads });
+  svc.setHooks({ wake, stop, pendingAssignments, pendingChats, unseen, userWoke, halt, background, leftThreads });
   setJobHooks({ waiting: waitedOn, label: toolLabel, changed: jobsChanged });
   // Jobs that were running when the server last went down have no result coming: their bots are told.
   recoverJobs();

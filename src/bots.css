@@ -3929,6 +3929,59 @@ button.bots-details-name:hover {
   font-weight: 500;
 }
 
+/* Retired: the same quiet tag, on a bot that's paused until it's rehired. */
+.bots-retired-pill {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* Where a retired bot's composer was: why nothing can be written, and the way back. */
+.bots-retired-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.bots-retired-note-text {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bots-retired-note-text svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.bots-retired-note .btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bots-head-retired {
+  margin-left: 6px;
+}
+
+/* An unanswered card in a chat that's only there to read. */
+.bm-card-frozen {
+  opacity: 0.65;
+}
+
+/* A retired bot's row: there to read, a step back from the ones at work. */
+.bots-row-retired .bots-avatar-wrap {
+  opacity: 0.5;
+  filter: grayscale(0.7);
+}
+
+.bots-row-retired .bots-row-title {
+  color: var(--text-2);
+}
+
 /* Tabs: a plain underlined row that never scrolls. Past the first few they're under More, so they fit
    the panel; where they wouldn't (a narrow phone, a wide font), each gives up a little of its label to
    an ellipsis rather than the row scrolling sideways. The line under the row is a shadow, under the
@@ -4290,6 +4343,49 @@ button.bots-details-name:hover {
 
 .btn.bots-delete:disabled {
   color: var(--text-3);
+}
+
+/* Retiring a bot sits where deleting did: as quiet, and without the red, since it can be undone. */
+.btn.bots-retire {
+  gap: 6px;
+  margin-left: -10px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.btn.bots-retire:disabled {
+  color: var(--text-3);
+}
+
+@media (hover: hover) {
+  .btn.bots-retire:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
+/* A retired bot's two ways on: back, or gone for good. */
+.bots-details-foot-retired {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bots-details-foot-retired .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bots-details-foot-retired .btn.bots-delete {
+  margin-left: 0;
+}
+
+.bots-member-retired .bots-member-main {
+  opacity: 0.6;
 }
 
 @media (hover: hover) {

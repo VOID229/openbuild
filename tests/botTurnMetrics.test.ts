@@ -336,6 +336,7 @@ test("the runner logs each turn's metrics and learns the bot's usual tools", asy
       const beta = svc.createBot({ name: 'Beta' }).bot;
       db.setToolUsage(beta.id, { bash: [Date.now()] });
       a.deepEqual(Object.keys(db.toolUsage(beta.id)), ['bash']);
+      svc.retireBot(beta.id);
       await svc.deleteBot(beta.id);
       a.equal(db.toolUsage(beta.id), undefined);
       a.deepEqual(runner.preloadFor(bot.id), ['bash']);

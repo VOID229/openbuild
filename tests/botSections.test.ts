@@ -52,8 +52,10 @@ test("a sidebar section goes, saved, when its last chat moves out or is deleted"
       // Deleting the last chat, or the bot whose chat it was, removes the section too.
       svc.deleteConversation(group.id);
       a.deepEqual(sections(), ['Fresh']);
+      svc.retireBot(second.bot.id);
       await svc.deleteBot(second.bot.id);
       a.deepEqual(sections(), ['Fresh']);
+      svc.retireBot(third.bot.id);
       await svc.deleteBot(third.bot.id);
       a.deepEqual(sections(), []);
 
