@@ -897,7 +897,7 @@
   bottom: 0;
   left: 0;
   z-index: 1;
-  background: var(--bg);
+  background: var(--bg-fill);
   pointer-events: none;
   animation: bots-list-out calc(var(--sidebar-ms) * 0.6) var(--ease-out) both;
 }
