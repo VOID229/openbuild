@@ -184,6 +184,108 @@ describe.skipIf(!browser)("a card of several questions", () => {
     expect(await summary()).toEqual(done);
   }, 60_000);
 
+  test("words typed in a question's box set its pick aside, and a pick afterwards sets the words aside", async () => {
+    const page = await open();
+    const typed = (text: string) => page.until(`document.querySelector('[data-id="many"] .bm-own input')?.value === ${JSON.stringify(text)}`);
+    const type = async (text: string) => {
+      await page.click('[data-id="many"] .bm-own input');
+      await page.send("Input.insertText", { text });
+      await typed(text);
+    };
+    await page.pick("many", "SQLite");
+    await page.at("2 of 3");
+    await page.pick("many", "Every night");
+    await page.at("3 of 3");
+
+    // Picked, then typed instead: the pick goes, and Submit sends the words.
+    await page.pick("many", "Yes");
+    await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+    await type("Yes, and tell me");
+    expect(await page.state()).toMatchObject({ count: "3 of 3", on: [], submit: "on" });
+    // Set aside in the workspace too, so a reload can't bring it back.
+    for (let i = 0; i < 50 && card("many").steps![2]!.answer !== undefined; i++) await Bun.sleep(50);
+    expect(card("many").steps!.map((s) => s.answer)).toEqual(["B", "A", undefined]);
+
+    // A pick after typing takes the words back out of the box.
+    await page.click('[data-id="many"] button[aria-label="Previous question"]');
+    await page.at("2 of 3");
+    expect((await page.state()).on).toEqual(["Every night"]);
+    await type("Sundays at 3am");
+    expect((await page.state()).on).toEqual([]);
+    await page.pick("many", "Every hour");
+    await page.at("3 of 3");
+    // The words typed on the last question are still its answer.
+    expect(await page.state()).toMatchObject({ on: [], submit: "on" });
+    expect(await page.eval<string>(`document.querySelector('[data-id="many"] .bm-own input').value`)).toBe("Yes, and tell me");
+    await page.key("ArrowLeft");
+    await page.at("2 of 3");
+    expect(await page.state()).toMatchObject({ on: ["Every hour"] });
+    expect(await page.eval<string>(`document.querySelector('[data-id="many"] .bm-own input').value`)).toBe("");
+
+    // Typed over a typed answer: the new words are the answer.
+    await type("Twice a day");
+    await page.key("Enter");
+    await page.at("3 of 3");
+    await page.key("ArrowLeft");
+    await page.at("2 of 3");
+    expect((await page.state()).on).toEqual(["Twice a day"]);
+    await type("Weekly");
+    expect((await page.state()).on).toEqual([]);
+    await page.click('[data-id="many"] button[aria-label="Next question"]');
+    await page.at("3 of 3");
+
+    expect(posts()).toEqual([]);
+    await page.click('[data-id="many"] .bm-steps-submit');
+    await page.until(`!!document.querySelector('[data-id="many"] .bm-answered')`);
+    const text = "1. Which database should it use? → SQLite\n2. When should the backup run? → Weekly\n3. Deploy to Dev when it's green? → Yes, and tell me";
+    expect(posts().map((m) => m.text)).toEqual([text]);
+    expect(card("many").steps!.map((s) => s.answer)).toEqual(["B", "Weekly", "Yes, and tell me"]);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('[data-id="many"] .bm-answered-answer')].map((a) => a.textContent)`)).toEqual(["SQLite", "Weekly", "Yes, and tell me"]);
+  }, 60_000);
+
+  test("the box's own arrow sends the words typed after a pick", async () => {
+    const page = await open();
+    await page.pick("many", "SQLite");
+    await page.at("2 of 3");
+    await page.key("ArrowLeft");
+    await page.at("1 of 3");
+    await page.click('[data-id="many"] .bm-own input');
+    await page.send("Input.insertText", { text: "SQLite and Postgres" });
+    await page.until(`document.querySelector('[data-id="many"] .bm-own input')?.value === "SQLite and Postgres"`);
+    expect((await page.state()).on).toEqual([]);
+    await page.click('[data-id="many"] .bm-own button[type="submit"]');
+    await page.at("2 of 3");
+    expect(card("many").steps!.map((s) => s.answer)).toEqual(["SQLite and Postgres", undefined, undefined]);
+    await page.key("ArrowLeft");
+    await page.at("1 of 3");
+    expect((await page.state()).on).toEqual(["SQLite and Postgres"]);
+  }, 30_000);
+
+  test("a card of one question sends the words typed, or a pick made after typing", async () => {
+    let page = await open();
+    const one = '[data-id="one"]';
+    await page.click(`${one} .bm-own input`);
+    await page.send("Input.insertText", { text: "Yes and rotate it" });
+    await page.until(`document.querySelector('${one} .bm-own input')?.value === "Yes and rotate it"`);
+    await page.click(`${one} .bm-own button[type="submit"]`);
+    await page.until(`document.querySelector('${one} .bm-option-on .bm-option-label')?.textContent === "Yes and rotate it"`);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('${one} .bm-option-on .bm-option-label')].map((o) => o.textContent)`)).toEqual(["Yes and rotate it"]);
+    expect(posts().map((m) => m.text)).toEqual(["Yes and rotate it"]);
+    expect(card("one").answer).toBe("Yes and rotate it");
+
+    // Typed, then picked: the pick is the answer.
+    stored.find((m) => m.id === "one")!.question = { title: "Use the staging key?", options: lettered(["Yes", "No"]) };
+    writes = [];
+    page = await open();
+    await page.click(`${one} .bm-own input`);
+    await page.send("Input.insertText", { text: "Maybe" });
+    await page.until(`document.querySelector('${one} .bm-own input')?.value === "Maybe"`);
+    await page.pick("one", "No");
+    await page.until(`document.querySelector('${one} .bm-option-on .bm-option-label')?.textContent === "No"`);
+    expect(posts().map((m) => m.text)).toEqual(["B: No"]);
+    expect(card("one").answer).toBe("B");
+  }, 30_000);
+
   test("a card of one question has no steps and answers with a tap, as before", async () => {
     const page = await open();
     expect(await page.eval<unknown>(`(() => { const c = document.querySelector('[data-id="one"]'); return { steps: !!c.querySelector('.bm-steps-head, .bm-steps-submit, .bm-steps'), title: c.querySelector('.bm-question-title').textContent, options: [...c.querySelectorAll('.bm-option-label')].map((o) => o.textContent), own: !!c.querySelector('.bm-own input') }; })()`)).toEqual({ steps: false, title: "Use the staging key?", options: ["Yes", "No"], own: true });

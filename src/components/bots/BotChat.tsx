@@ -509,11 +509,21 @@ function QuestionOptions({ q, settled, onPick }: { q: QuestionStep; settled: boo
 function QuestionSteps({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
   const q = message.question!;
   // Picked here, ahead of the workspace's copy: an echo of an earlier pick can't take a later one back.
-  const [picked, setPicked] = useState<Record<number, string>>({});
-  const steps = q.steps!.map((s, i) => (picked[i] === undefined ? s : { ...s, answer: picked[i] }));
+  // Null is a pick set aside by typing.
+  const [picked, setPicked] = useState<Record<number, string | null>>({});
+  const steps = q.steps!.map((s, i): QuestionStep => {
+    if (picked[i] === undefined) return s;
+    const { answer: _, ...step } = s;
+    return picked[i] === null ? step : { ...step, answer: picked[i] };
+  });
   const first = steps.findIndex((s) => s.answer === undefined);
   const [at, setAt] = useState(first < 0 ? steps.length - 1 : first);
+  // Words in a question's box are its answer, in place of any pick, until a pick takes them out.
   const [own, setOwn] = useState<Record<number, string>>({});
+  const answers = steps.map((s, i) => {
+    const typed = own[i]?.trim();
+    return typed ? { ...s, answer: typed } : s;
+  });
   const card = useRef<HTMLDivElement>(null);
   if (q.submitted) {
     return (
@@ -532,7 +542,7 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
   }
   const step = steps[at]!;
   const last = at === steps.length - 1;
-  const left = steps.flatMap((s, i) => (s.answer === undefined ? [i] : []));
+  const left = answers.flatMap((s, i) => (s.answer === undefined ? [i] : []));
   // Earlier ones passed over with the arrows: Submit waits for them, and says which.
   const skipped = left.filter((i) => i !== at);
   const go = (to: number) => {
@@ -541,17 +551,29 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
     // The button just used goes with its step: focus stays in the card, so the arrow keys keep working.
     card.current?.focus({ preventScroll: true });
   };
-  const answer = (key: string) => {
+  // Kept in the workspace: the picks, and the answers sent with the arrow. Words still in a box are this card's alone.
+  const keep = (key: string | null) => {
     const next = { ...picked, [at]: key };
     setPicked(next);
-    useBots.getState().answerSteps(conversation.id, message.id, steps.map((s, i) => next[i] ?? s.answer ?? null), false);
+    useBots.getState().answerSteps(conversation.id, message.id, steps.map((s, i) => (i === at ? key : (s.answer ?? null))), false);
+  };
+  const answer = (key: string) => {
+    setOwn({ ...own, [at]: "" });
+    keep(key);
     go(last ? at : at + 1);
+  };
+  const type = (text: string) => {
+    setOwn({ ...own, [at]: text });
+    if (text.trim() && step.answer !== undefined) keep(null);
   };
   const submit = () => {
     if (left.length) return;
     const st = useBots.getState();
-    st.answerSteps(conversation.id, message.id, steps.map((s) => s.answer ?? null), true);
-    st.post(conversation.id, { author: "me", text: answersText(steps), replyTo: message.id });
+    const final = answers.map((s) => s.answer ?? null);
+    setPicked(Object.fromEntries(final.map((a, i) => [i, a])));
+    setOwn({});
+    st.answerSteps(conversation.id, message.id, final, true);
+    st.post(conversation.id, { author: "me", text: answersText(answers), replyTo: message.id });
     noticeAnswer(conversation.id, message.author, "");
   };
   return (
@@ -587,12 +609,10 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
         onSubmit={(e) => {
           e.preventDefault();
           const text = (own[at] ?? "").trim();
-          if (!text) return;
-          setOwn({ ...own, [at]: "" });
-          answer(text);
+          if (text) answer(text);
         }}
       >
-        <input className="input input-sm" value={own[at] ?? ""} maxLength={2000} placeholder="Type your own answer…" aria-label="Your own answer" onChange={(e) => setOwn({ ...own, [at]: e.target.value })} />
+        <input className="input input-sm" value={own[at] ?? ""} maxLength={2000} placeholder="Type your own answer…" aria-label="Your own answer" onChange={(e) => type(e.target.value)} />
         <IconButton label={last ? "Use answer" : "Next with this answer"} tooltip={false} type="submit" disabled={!(own[at] ?? "").trim()}>
           <ArrowUp size={16} />
         </IconButton>
