@@ -1,9 +1,11 @@
 // OpenBots: how a bot's body moves. A bot is one solid thing: a flat shape with its face a little
 // proud of it, like eyes painted on a dome. It turns (yaw and pitch, in 3D), rolls and leans as a
 // whole, the face sliding across the body and narrowing toward the edge as it turns away. Nothing is
-// keyframed: every part rides a spring toward where the bot wants to face, the eyes darting ahead,
-// the head after them and the body last, so a change of mind mid-move stays smooth. This file is the
-// arithmetic (no DOM), so tests can run it; BotAvatar.tsx writes what it works out to the page.
+// keyframed here: the whole bot rides one critically damped spring toward where it wants to face, so
+// a move starts gently, carries on smoothly and settles without swinging past, and a change of mind
+// mid-move stays smooth. Eyes, head and body move as one, as they do in the reference recording of
+// Grok Bot's mascots. This file is the arithmetic (no DOM), so tests can run it; BotAvatar.tsx writes
+// what it works out to the page.
 //
 // A shape is drawn upright, facing straight out (lib/bots/looks.ts). That's how a bot looks at you,
 // and how it works; left to itself it rests turned up and away to one side and rolled over, which is
@@ -11,7 +13,8 @@
 //
 // The body is turned by the browser, in perspective. The face on it is worked out here and painted
 // flat inside the body's outline. An eye never comes nearer its edge than MARGIN: where a turn would
-// take it nearer, it goes no further while the body turns on under it.
+// take it nearer, it goes no further while the body turns on under it. Only a flip or a spin, the
+// face going right round the body, takes the eyes over its edge.
 import type { Shape } from "./looks";
 
 /** An open eye's size in the 100-unit box, before the shape's own scale: a tall pill. */
@@ -27,12 +30,21 @@ export const FORMS = {
   round: [1.3, 0.8],
   /** Narrowed to a dash, longer than an open eye is wide. */
   squint: [1.3, 0.24],
-  /** At work: much bigger, fat and deep, a quarter of the face between them. */
-  big: [1.6, 1.48],
-  /** Reading: the big eyes of work with their lids come down a third, onto the page (lowered too: DRAWN.read). */
-  read: [1.45, 1],
+  /** At work: much bigger, fat and deep, a third of an eye between them. */
+  big: [1.65, 1.48],
+  /** Curious, or mulling something over: round dots, as wide as they're tall (EYE_W × 1.65 = EYE_H × 0.767). */
+  dot: [1.65, 0.767],
+  /** Reading: wide ovals, a fifth wider than they're tall, all but touching (SPREAD). */
+  read: [2.16, 0.91],
 } as const satisfies Record<string, readonly [number, number]>;
 export type EyeForm = keyof typeof FORMS;
+
+/**
+ * How far apart a form sets the eyes, as a multiple of the shape's own gap: the bigger eyes stand a
+ * little wider apart, the reading ovals so that they all but touch. The rest keep the shape's gap.
+ */
+export const SPREAD: Partial<Record<string, number>> = { big: 1.1, dot: 1.15, read: 1.14 };
+export const spreadOf = (look: string | undefined) => (look && SPREAD[look]) || 1;
 
 /** How far the head turns at most, in degrees: side to side, and up or down. */
 export const YAW = 46;
@@ -47,11 +59,23 @@ export const PERSPECTIVE = 260;
 /** How much of the head's turn the body takes: it's one solid thing, but a soft one. */
 export const BODY_TURN = 0.42;
 /** How much smaller the eyes are at a full turn: turned away, the face is further off, but only a little. */
-export const FAR = 0.12;
+export const FAR = 0.05;
 /** How much of the turn's narrowing an eye takes: under a third, so it stays a full pill turned away. */
 export const SOFT = 0.3;
 /** How much of an eye, about its middle, has to stay on the body: its ends may slip under the edge. */
 export const CORE = 0.75;
+/**
+ * How much of a turn's foreshortening the space between the eyes takes: a quarter, so turned well
+ * over they come only a little nearer each other, as the reference's do, and never run together.
+ */
+export const SOFT_GAP = 0.25;
+/** How far the whole bot travels toward where it looks, side to side, at a full turn: in the 100-unit box. */
+export const TRAVEL = 8;
+/**
+ * How thick a bot is, front to back, for its height or width: seen edge-on in a flip or a spin it's
+ * this much of itself, a puffy thing rather than a flat card.
+ */
+export const THICK = 0.7;
 /**
  * How near the body's edge an eye ever comes, in the 100-unit box: the same for every shape. Turned
  * further, the eyes stop there and the body turns on under them, so the edge never cuts one.
@@ -74,11 +98,6 @@ export interface Drawn {
 }
 export const DRAWN = {
   ...(Object.fromEntries(Object.entries(FORMS).map(([k, [w, h]]) => [k, { w, h }])) as Record<EyeForm, Drawn>),
-  /**
-   * Its top come well down from a big eye's and its foot only a little up: lowered by an eighth of an
-   * open eye. Lower still, a star's eyes would have no room left to read along a line.
-   */
-  read: { w: FORMS.read[0], h: FORMS.read[1], drop: 0.12 },
   /** Pleased: a thick arch, lifted a little, its feet squarer. */
   happy: { w: 1.36, h: 0.54, drop: -0.08, bottom: 0.22 },
   sleepy: { w: 1.25, h: 0.15 },
@@ -101,7 +120,7 @@ export function eyeLook(mood: string | undefined, eyes: EyeForm | undefined, asl
   if (mood === "sleepy") asked.add("sleepy");
   if (mood === "surprised") asked.add("round");
   if (mood === "squint" || mood === "thinking") asked.add("squint");
-  return (["happy", "sleepy", "read", "big", "squint", "round", "wide"] as const).find((k) => asked.has(k)) ?? "open";
+  return (["happy", "sleepy", "read", "big", "dot", "squint", "round", "wide"] as const).find((k) => asked.has(k)) ?? "open";
 }
 
 
@@ -109,11 +128,17 @@ export function eyeLook(mood: string | undefined, eyes: EyeForm | undefined, asl
 export interface Pose {
   x: number;
   y: number;
-  /** Degrees, clockwise. Left out, it leans a little into the look. */
+  /** Degrees, clockwise. Left out, it cocks its head a little away from the look, as the reference does. */
   roll?: number;
   /** Bigger or smaller, as leaning in or back: 0.1 is a tenth bigger. */
   zoom?: number;
-  eyes?: Exclude<EyeForm, "open" | "big">;
+  /** Its eyes' form. At work, left out (or "wide"), they're big; "open" keeps them small even then. */
+  eyes?: Exclude<EyeForm, "big">;
+  /**
+   * Quizzical: the eye on the side it looks toward this much bigger, and the other this much smaller
+   * (0.2 is a fifth), as the reference's curious looks have it.
+   */
+  near?: number;
 }
 
 type Point = [number, number];
@@ -229,19 +254,17 @@ export function eyesOf(shape: Shape) {
 }
 
 /**
- * The points of both eyes that have to stay on the body, in the face's own plane: the middle of each
- * (CORE of it). Looking hard over, the rest of an eye slips under the body's edge, which cuts it off.
+ * The points of an eye that have to stay on the body, about its middle in the face's own plane: the
+ * middle of it (CORE of it). Looking hard over, the rest of an eye slips under the body's edge, which
+ * cuts it off.
  */
 function eyePoints(shape: Shape, form: EyeForm): Point[] {
-  const { w, h, gap } = eyesOf(shape);
+  const { w, h } = eyesOf(shape);
   const [fw, fh] = FORMS[form];
   const out: Point[] = [];
-  for (const side of [-1, 1]) {
-    const [cx, cy] = [shape.face.x + (side * gap) / 2, shape.face.y];
-    // All over it: a lobed or spiky shape's notches reach in between a few points.
-    for (const fy of [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4])
-      for (const fx of Math.abs(fy) > 0.35 ? [-0.14, 0, 0.14] : Math.abs(fy) > 0.25 ? [-0.3, 0, 0.3] : [-0.42, -0.21, 0, 0.21, 0.42]) out.push([cx + w * fw * fx * CORE, cy + h * fh * fy * CORE]);
-  }
+  // All over it: a lobed or spiky shape's notches reach in between a few points.
+  for (const fy of [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4])
+    for (const fx of Math.abs(fy) > 0.35 ? [-0.14, 0, 0.14] : Math.abs(fy) > 0.25 ? [-0.3, 0, 0.3] : [-0.42, -0.21, 0, 0.21, 0.42]) out.push([w * fw * fx * CORE, h * fh * fy * CORE]);
   return out;
 }
 
@@ -302,30 +325,41 @@ function apart(poly: Point[], [x, y]: Point): number {
 }
 
 /**
- * Where an eye lands with the head turned that far and the eyes leading by (lx, ly): its middle on the
- * body, and how the face is stretched there (a 2×2 matrix, a b c d as in CSS). Some of the narrowing a
- * turn would give it (SOFT), and a little smaller the further it's turned away (FAR).
+ * Where an eye lands with the head turned that far, the eyes set `spread` times the shape's gap apart
+ * and drawn `size` times their form's size: its middle on the body, and how the face is stretched
+ * there (a 2×2 matrix, a b c d as in CSS). Some of the narrowing a turn would give it (SOFT), a little
+ * smaller the further it's turned away (FAR), and quizzical (`near`), the eye on the side it looks
+ * toward bigger and the other smaller.
  */
-function eyeAt(shape: Shape, side: number, yaw: number, pitch: number, lx: number, ly: number) {
+export function eyeAt(shape: Shape, side: number, yaw: number, pitch: number, spread = 1, size = 1, near = 0) {
   const at = projector(yaw, pitch);
   const [x, y] = [shape.face.x + (side * eyesOf(shape).gap) / 2, shape.face.y];
-  const [px, py] = at(x + lx, y + ly);
-  const [ax, ay] = at(x + lx + 1, y + ly);
-  const [bx, by] = at(x + lx, y + ly + 1);
+  // (Its home on the face, `x`, is where the page has it; a wider spread is a slide from there.)
+  const sx = shape.face.x + (side * eyesOf(shape).gap * spread) / 2;
+  // Its middle: as far from the middle of the face as a true turn would put it for SOFT_GAP of it,
+  // and as a flat slide (in the perspective there) for the rest.
+  const [mx, my] = at(shape.face.x, y);
+  const [qx, qy] = at(sx, y);
+  // (A flat slide is only as much nearer or further as the middle of the face is: 1 straight ahead.)
+  const flat = (sx - shape.face.x) * ((PERSPECTIVE - DEPTH) / (PERSPECTIVE - DEPTH * Math.cos(rad(yaw)) * Math.cos(rad(pitch))));
+  const [px, py] = [mx + (qx - mx) * SOFT_GAP + flat * (1 - SOFT_GAP), my + (qy - my) * SOFT_GAP];
+  const [ax, ay] = at(sx + 1, y);
+  const [bx, by] = at(sx, y + 1);
   const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
-  const far = 1 - FAR * m * m;
-  return { x, y, px, py, a: (1 + (ax - px - 1) * SOFT) * far, b: (ay - py) * SOFT * far, c: (bx - px) * SOFT * far, d: (1 + (by - py - 1) * SOFT) * far };
+  const k = (1 - FAR * m * m) * (1 + side * Math.max(-1, Math.min(1, (2 * yaw) / YAW)) * near) * size;
+  return { x, y, px, py, a: (1 + (ax - qx - 1) * SOFT) * k, b: (ay - qy) * SOFT * k, c: (bx - qx) * SOFT * k, d: (1 + (by - qy - 1) * SOFT) * k };
 }
 
 /**
  * Whether both eyes, drawn in that form with the head turned that far, are on the body with `margin`
- * to spare all round: no point of its edge is nearer either eye than that.
+ * to spare all round: no point of its edge is nearer either eye than that. The spread and size are
+ * the form's own unless given.
  */
-export function eyesFit(shape: Shape, look: EyeLook, yaw: number, pitch: number, lx = 0, ly = 0, margin = MARGIN): boolean {
+export function eyesFit(shape: Shape, look: EyeLook, yaw: number, pitch: number, spread = spreadOf(look), size = sizeOf(shape, look), margin = MARGIN, near = 0): boolean {
   const nap = (DRAWN[look] as Drawn).nap ?? 0;
   const edge = edgeOf(shape);
   for (const side of [-1, 1]) {
-    const { px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, lx, ly);
+    const { px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, spread, size, near);
     if (!covers(shape, px, py + nap)) return false;
     const eye = eyeOutline(shape, look).map(([ex, ey]): Point => [px + a * ex + c * ey, py + nap + b * ex + d * ey]);
     // Only the edge near it can be too near.
@@ -338,15 +372,40 @@ export function eyesFit(shape: Shape, look: EyeLook, yaw: number, pitch: number,
 }
 
 /** How far inside the edge an eye is at its nearest, to a tenth of a unit (negative: over it). */
-export function clearance(shape: Shape, look: EyeLook, yaw: number, pitch: number, lx = 0, ly = 0): number {
+export function clearance(shape: Shape, look: EyeLook, yaw: number, pitch: number, spread = spreadOf(look), size = sizeOf(shape, look)): number {
   let [lo, hi] = [-3, 30];
-  if (!eyesFit(shape, look, yaw, pitch, lx, ly, lo)) return lo;
+  if (!eyesFit(shape, look, yaw, pitch, spread, size, lo)) return lo;
   while (hi - lo > 0.1) {
     const mid = (lo + hi) / 2;
-    if (eyesFit(shape, look, yaw, pitch, lx, ly, mid)) lo = mid;
+    if (eyesFit(shape, look, yaw, pitch, spread, size, mid)) lo = mid;
     else hi = mid;
   }
   return lo;
+}
+
+const sizes = new Map<string, number>();
+/**
+ * How big a shape draws its eyes in a form, as a share of the form's size: whole, unless even looking
+ * straight out they wouldn't be MARGIN inside its edge (a slender shape's reading ovals), when they're
+ * drawn as much smaller as that takes.
+ */
+export function sizeOf(shape: Shape, look: string): number {
+  const key = `${shape.id} ${look}`;
+  let k = sizes.get(key);
+  if (k !== undefined) return k;
+  // (Set first: eyesFit asks again, with the size it's given.)
+  sizes.set(key, 1);
+  const form = (look in DRAWN ? look : "open") as EyeLook;
+  if (!eyesFit(shape, form, 0, 0, spreadOf(form), 1)) {
+    let [lo, hi] = [0.3, 1];
+    for (let i = 0; i < 8; i++) {
+      const mid = (lo + hi) / 2;
+      if (eyesFit(shape, form, 0, 0, spreadOf(form), mid)) lo = mid;
+      else hi = mid;
+    }
+    sizes.set(key, (k = Math.floor(lo * 100) / 100));
+  } else k = 1;
+  return k;
 }
 
 const DIRECTIONS = 36;
@@ -358,9 +417,13 @@ const rooms = new Map<string, number[]>();
  */
 function reach(shape: Shape, form: EyeForm, angle: number): number {
   const points = eyePoints(shape, form);
+  const [spread, size] = [spreadOf(form), sizeOf(shape, form)];
   const fits = (m: number) => {
-    const at = projector(Math.cos(angle) * YAW * m, Math.sin(angle) * PITCH * m);
-    return points.every(([x, y]) => covers(shape, ...at(x, y)));
+    for (const side of [-1, 1]) {
+      const { px, py, a, b, c, d } = eyeAt(shape, side, Math.cos(angle) * YAW * m, Math.sin(angle) * PITCH * m, spread, size);
+      for (const [dx, dy] of points) if (!covers(shape, px + a * dx + c * dy, py + b * dx + d * dy)) return false;
+    }
+    return true;
   };
   // Out from straight ahead a step at a time to the first turn that doesn't fit (a spiky shape can
   // fit again further on, in the next point along: that's no use), then closer in on it.
@@ -392,6 +455,11 @@ export interface Target {
   pitch: number;
   roll: number;
   zoom: number;
+  /** The eyes' spacing and size for the form they're in (1 when left out: an open eye's). */
+  spread?: number;
+  size?: number;
+  /** How quizzical it looks (Pose.near). */
+  near?: number;
 }
 /** Upright and facing straight out, as its shape is drawn. */
 export const AHEAD: Target = { yaw: 0, pitch: 0, roll: 0, zoom: 0 };
@@ -408,19 +476,23 @@ export function turnTo(shape: Shape, x: number, y: number, form: EyeForm = "open
   return [x * k * YAW, y * k * PITCH];
 }
 
-/** How far a bot leans (rolls) into a look to one side when the pose doesn't say, in degrees. */
-const LEAN = 7;
+/** How far a bot cocks its head (rolls) the other way from a look to one side when the pose doesn't say, in degrees. */
+const LEAN = 16;
 const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
 
 /** Where a pose takes a shape. At work its eyes are big whenever the pose would have them open or staring, and need the room. */
 export function poseTarget(shape: Shape, pose: Pose, atWork = false): Target {
   const [yaw, pitch] = turnTo(shape, pose.x, pose.y, eyesFor(pose, atWork) ?? "open");
   // It leans by where it means to look, so a shape with little room to turn its head still moves.
-  return { yaw, pitch, roll: pose.roll ?? clamp1(pose.x) * LEAN, zoom: pose.zoom ?? 0 };
+  return { yaw, pitch, roll: pose.roll ?? -clamp1(pose.x) * LEAN, zoom: pose.zoom ?? 0, ...(pose.near && { near: pose.near }) };
 }
 
-/** The form a pose's eyes take: its own, or at work the big eyes in place of open or staring ones. */
+/**
+ * The form a pose's eyes take: its own, or at work the big eyes in place of staring ones or none said.
+ * "open" is the small eyes of a bot at ease, at work or not: drawn as no form at all.
+ */
 export function eyesFor(pose: Pose | undefined, atWork: boolean): Exclude<EyeForm, "open"> | undefined {
+  if (pose?.eyes === "open") return undefined;
   return atWork && (!pose?.eyes || pose.eyes === "wide") ? "big" : pose?.eyes;
 }
 
@@ -458,46 +530,46 @@ export interface Spring {
   /** 1 settles without swinging past; less overshoots. */
   damping: number;
 }
-/** A part's springs: locked onto the pointer, moving to a pose, and coming back to rest. */
+/** A bot's spring: locked onto the pointer, moving to a pose, and coming back to rest. */
 export type Springs = { track: Spring; pose: Spring; rest: Spring };
 export type Mode = keyof Springs;
 
-/** The eyes dart ahead of the head: quick, and all but dead-beat. */
-export const EYES: Springs = { track: { stiffness: 46, damping: 0.8 }, pose: { stiffness: 42, damping: 0.78 }, rest: { stiffness: 24, damping: 1 } };
-/** The head turns after them, with a hint of overshoot onto a look, and none coming home. */
-export const HEAD: Springs = { track: { stiffness: 30, damping: 0.72 }, pose: { stiffness: 24, damping: 0.66 }, rest: { stiffness: 15, damping: 1 } };
-/** The body last, slower and heavier, swaying a little past and back. */
-export const BODY: Springs = { track: { stiffness: 15, damping: 0.6 }, pose: { stiffness: 13, damping: 0.58 }, rest: { stiffness: 10, damping: 0.95 } };
+/**
+ * How a bot moves: all of it at once, on one spring that never swings past. A move to a pose is most
+ * of the way there in a third of a second and settled in a little over half; following the pointer is
+ * a touch quicker, and coming back to rest a touch slower. Measured off the reference recording.
+ */
+export const MOTION: Springs = { track: { stiffness: 13, damping: 1 }, pose: { stiffness: 12, damping: 1 }, rest: { stiffness: 9, damping: 1 } };
 
 export interface Axis {
   x: number;
   v: number;
 }
-const axis = (): Axis => ({ x: 0, v: 0 });
+const axis = (x = 0): Axis => ({ x, v: 0 });
 
-/** Everything about a bot that moves. Angles in degrees, the eyes' lead in the 100-unit box. */
+/**
+ * Everything about a bot that moves. Angles in degrees. `spread` and `size` are its eyes' spacing and
+ * size for the form they're in (SPREAD, sizeOf), eased from one form's to the next.
+ */
 export interface Rig {
   yaw: Axis;
   pitch: Axis;
-  bodyYaw: Axis;
-  bodyPitch: Axis;
   roll: Axis;
   zoom: Axis;
-  leadX: Axis;
-  leadY: Axis;
-  /** A turn right round, 0 to 360 while it lasts (the press of a playful bot). */
+  spread: Axis;
+  size: Axis;
+  near: Axis;
+  /** A turn right round, side to side, 0 to 360 while it lasts: the face goes off to the left and comes back from the right. */
   spin: number;
+  /** A flip right over, 0 to 360 while it lasts: the face goes up over the top and comes back from below. */
+  flip: number;
 }
 /** A rig facing straight ahead, or come to rest on a target. */
 export function newRig(at: Target = AHEAD): Rig {
-  const rig: Rig = { yaw: axis(), pitch: axis(), bodyYaw: axis(), bodyPitch: axis(), roll: axis(), zoom: axis(), leadX: axis(), leadY: axis(), spin: 0 };
+  const rig: Rig = { yaw: axis(), pitch: axis(), roll: axis(), zoom: axis(), spread: axis(1), size: axis(1), near: axis(), spin: 0, flip: 0 };
   snap(rig, at);
   return rig;
 }
-
-/** How far ahead of the head the eyes dart, in the 100-unit box for each degree it has left to turn. */
-const LEAD = 0.13;
-const LEAD_MAX = 4.5;
 
 function pull(a: Axis, to: number, { stiffness: w, damping: z }: Spring, h: number) {
   a.v += (w * w * (to - a.x) - 2 * z * w * a.v) * h;
@@ -509,29 +581,28 @@ function pull(a: Axis, to: number, { stiffness: w, damping: z }: Spring, h: numb
  * to rest exactly on the target: true once it has, so the frames can stop.
  */
 export function step(rig: Rig, to: Target, dt: number, mode: Mode): boolean {
-  // A long frame (a busy main thread, a hidden tab) is taken in short steps, so the springs stay stable.
+  const spring = MOTION[mode];
+  const [spread, size] = [to.spread ?? 1, to.size ?? 1];
+  // A long frame (a busy main thread, a hidden tab) is taken in short steps, so the spring stays stable.
   for (let left = Math.min(dt, 100) / 1000; left > 1e-9; left -= 1 / 120) {
     const h = Math.min(left, 1 / 120);
-    pull(rig.yaw, to.yaw, HEAD[mode], h);
-    pull(rig.pitch, to.pitch, HEAD[mode], h);
-    pull(rig.bodyYaw, to.yaw, BODY[mode], h);
-    pull(rig.bodyPitch, to.pitch, BODY[mode], h);
-    pull(rig.roll, to.roll, BODY[mode], h);
-    pull(rig.zoom, to.zoom, BODY[mode], h);
-    // The eyes go first: as far ahead as the head still has to turn, and back onto it as it arrives.
-    const clamp = (n: number) => Math.max(-LEAD_MAX, Math.min(LEAD_MAX, n));
-    pull(rig.leadX, clamp((to.yaw - rig.yaw.x) * LEAD), EYES[mode], h);
-    pull(rig.leadY, clamp((to.pitch - rig.pitch.x) * LEAD), EYES[mode], h);
+    pull(rig.yaw, to.yaw, spring, h);
+    pull(rig.pitch, to.pitch, spring, h);
+    pull(rig.roll, to.roll, spring, h);
+    pull(rig.zoom, to.zoom, spring, h);
+    pull(rig.spread, spread, spring, h);
+    pull(rig.size, size, spring, h);
+    pull(rig.near, to.near ?? 0, spring, h);
   }
   const off = (a: Axis, t: number, near: number) => Math.abs(t - a.x) > near || Math.abs(a.v) > near * 12;
-  if (off(rig.yaw, to.yaw, 0.05) || off(rig.pitch, to.pitch, 0.05) || off(rig.bodyYaw, to.yaw, 0.05) || off(rig.bodyPitch, to.pitch, 0.05)) return false;
-  if (off(rig.roll, to.roll, 0.05) || off(rig.zoom, to.zoom, 0.0008) || off(rig.leadX, 0, 0.02) || off(rig.leadY, 0, 0.02)) return false;
+  if (off(rig.yaw, to.yaw, 0.05) || off(rig.pitch, to.pitch, 0.05) || off(rig.roll, to.roll, 0.05)) return false;
+  if (off(rig.zoom, to.zoom, 0.0008) || off(rig.spread, spread, 0.002) || off(rig.size, size, 0.002) || off(rig.near, to.near ?? 0, 0.002)) return false;
   settle(rig, to);
   return true;
 }
 
 const settle = (rig: Rig, to: Target) => {
-  for (const [a, t] of [[rig.yaw, to.yaw], [rig.pitch, to.pitch], [rig.bodyYaw, to.yaw], [rig.bodyPitch, to.pitch], [rig.roll, to.roll], [rig.zoom, to.zoom], [rig.leadX, 0], [rig.leadY, 0]] as [Axis, number][]) {
+  for (const [a, t] of [[rig.yaw, to.yaw], [rig.pitch, to.pitch], [rig.roll, to.roll], [rig.zoom, to.zoom], [rig.spread, to.spread ?? 1], [rig.size, to.size ?? 1], [rig.near, to.near ?? 0]] as [Axis, number][]) {
     a.x = t;
     a.v = 0;
   }
@@ -540,65 +611,101 @@ const settle = (rig: Rig, to: Target) => {
 /** Puts a rig on a target at once, for when nothing should be seen to move. */
 export function snap(rig: Rig, to: Target) {
   rig.spin = 0;
+  rig.flip = 0;
   settle(rig, to);
 }
 
 /**
- * A nod: the head is knocked forward and its own springs bring it back, the body dipping after it.
- * Down and back, on top of whatever it's doing; nothing lifts.
+ * A nod: the head is knocked forward and its spring brings it back, without swinging past. Down and
+ * back, on top of whatever it's doing; nothing lifts.
  */
 export function nod(rig: Rig) {
-  rig.pitch.v += 900;
-  rig.bodyPitch.v += 430;
-  rig.leadY.v += 60;
+  rig.pitch.v += 700;
 }
+
+/**
+ * How far round a flip or a spin is, `t` from 0 to 1 of the way through it: off at once (the face is
+ * over the edge in a twentieth of it and out of sight for barely a fifth), then easing all the way
+ * back round, as the reference's do.
+ */
+export const turnAt = (t: number) => (t >= 1 ? 360 : t <= 0 ? 0 : 360 * (1 - Math.pow(1 - t, 5)));
 
 const n = (v: number, digits = 2) => {
   const s = v.toFixed(digits);
   return Number(s) === 0 ? "0" : s;
 };
 
+/** Half a shape's width and height about the middle of its box, for how far round its face goes in a spin or a flip. */
+const halves = new Map<string, [number, number]>();
+function halfOf(shape: Shape): [number, number] {
+  let half = halves.get(shape.id);
+  if (!half) {
+    const pts = outline(shape.path).flat();
+    const far = (k: 0 | 1) => Math.max(...pts.map((p) => Math.abs(p[k] - 50)));
+    halves.set(shape.id, (half = [far(0), far(1)]));
+  }
+  return half;
+}
+
 /**
  * A rig as what to draw, for a shape on an avatar `size` px across, its eyes drawn in `look`: the
- * whole bot (rolled, leant and zoomed, about its middle), the body (turned part of the way, in
- * perspective), and each eye where the head's turn puts it on that body: slid across, narrowed a
- * little, and smaller the further it has turned away (FAR). The eyes are worked out here (a flat
- * transform each, `project` at the eye and how it stretches there) rather than turned by the browser,
- * so the body stays one layer with the face painted on it. Straight ahead everything is "none".
- * `back` is true while a turn right round shows the body's back, the face out of sight.
+ * whole bot (rolled, carried toward where it looks and zoomed, about its middle), the body (turned
+ * part of the way, in perspective), and each eye where the head's turn puts it on that body: slid
+ * across, narrowed a little, the near one bigger and the far one smaller, and both a little smaller the
+ * further it has turned away (FAR). The eyes are worked out here (a flat transform each, `project` at
+ * the eye and how it stretches there) rather than turned by the browser, so the body stays one layer
+ * with the face painted on it. Straight ahead everything is "none".
  *
- * The eyes never go nearer the edge than MARGIN: where the head's turn, a swing past, the eyes darting
- * ahead or a nod would take them nearer, they go only as far along as they still fit, the body
- * turning on under them. Anywhere else this draws them just as it always has.
+ * In a spin or a flip the body squeezes to its edge-on thickness (THICK) and back, a puffy thing seen
+ * from the side, while the face slides off over its edge, round the back (`back`: the face is out of
+ * sight) and in again from the other side.
+ *
+ * Otherwise the eyes never go nearer the edge than MARGIN: where the head's turn or a nod would take
+ * them nearer, they go only as far along as they still fit, the body turning on under them.
  */
 export function frame(rig: Rig, shape: Shape, size: number, look: EyeLook = "open"): { whole: string; body: string; left: string; right: string; back: boolean } {
   const u = size / 100;
   const rest = restOf(shape);
-  // Leaning into a turn from where it rests, and settling a little to look down: never lifting to look up.
-  const tx = ((rig.bodyYaw.x - rest.yaw) / YAW) * 2.6 * u;
-  const ty = (Math.max(0, rig.bodyPitch.x) / PITCH) * 1.4 * u;
+  // Carried toward where it looks, from where it rests, and settling a little to look down: never lifting to look up.
+  const tx = ((rig.yaw.x - rest.yaw) / YAW) * TRAVEL * u;
+  const ty = (Math.max(0, rig.pitch.x) / PITCH) * 1.4 * u;
   const move = Number(n(tx)) || Number(n(ty)) ? `translate(${n(tx)}px, ${n(ty)}px) ` : "";
   const whole = move || rig.roll.x || rig.zoom.x ? `${move}rotate(${n(rig.roll.x)}deg) scale(${n(1 + rig.zoom.x, 4)})` : "none";
-  const by = rig.bodyYaw.x * BODY_TURN + rig.spin;
-  const bp = rig.bodyPitch.x * BODY_TURN;
-  const body = by || bp ? `perspective(${n(PERSPECTIVE * u, 1)}px) rotateX(${n(-bp)}deg) rotateY(${n(by)}deg)` : "none";
-  let [yaw, pitch, lx, ly] = [rig.yaw.x, rig.pitch.x, rig.leadX.x, rig.leadY.x];
-  const facing = ((by % 360) + 360) % 360;
-  const back = facing > 90 && facing < 270;
-  if (!eyesFit(shape, look, yaw, pitch, lx, ly)) {
+  const by = rig.yaw.x * BODY_TURN;
+  const bp = rig.pitch.x * BODY_TURN;
+  // Round in a spin or a flip: how far, and how squeezed the body is seen from there.
+  const [cs, ss, cf, sf] = [Math.cos(rad(rig.spin)), Math.sin(rad(rig.spin)), Math.cos(rad(rig.flip)), Math.sin(rad(rig.flip))];
+  const [kx, ky] = [Math.hypot(cs, THICK * ss), Math.hypot(cf, THICK * sf)];
+  const squeeze = Number(n(kx, 3)) !== 1 || Number(n(ky, 3)) !== 1 ? ` scale(${n(kx, 4)}, ${n(ky, 4)})` : "";
+  const turned = by || bp ? `perspective(${n(PERSPECTIVE * u, 1)}px) rotateX(${n(-bp)}deg) rotateY(${n(by)}deg)` : "";
+  const body = turned || squeeze ? `${turned}${squeeze}`.trim() : "none";
+  const back = cs < 0 || cf < 0;
+  const round = Math.abs(ss) > 0.001 || Math.abs(sf) > 0.001;
+  let [yaw, pitch] = [rig.yaw.x, rig.pitch.x];
+  const [spread, scale, near] = [rig.spread.x, rig.size.x, rig.near.x];
+  if (!round && !eyesFit(shape, look, yaw, pitch, spread, scale, MARGIN, near)) {
     // As far along toward where it is as they fit (nearer straight ahead, where they always do).
     let [lo, hi] = [0, 1];
     for (let i = 0; i < 7; i++) {
       const mid = (lo + hi) / 2;
-      if (eyesFit(shape, look, yaw * mid, pitch * mid, lx * mid, ly * mid)) lo = mid;
+      if (eyesFit(shape, look, yaw * mid, pitch * mid, spread, scale, MARGIN, near)) lo = mid;
       else hi = mid;
     }
-    [yaw, pitch, lx, ly] = [yaw * lo, pitch * lo, lx * lo, ly * lo];
+    [yaw, pitch] = [yaw * lo, pitch * lo];
   }
-  if (!yaw && !pitch && !lx && !ly) return { whole, body, left: "none", right: "none", back };
+  if (!yaw && !pitch && spread === 1 && scale === 1 && !near && !round) return { whole, body, left: "none", right: "none", back };
+  const [hw, hh] = halfOf(shape);
   const eye = (side: number) => {
-    // Where its middle lands (the eyes' lead is a slide within the face), and how the face is stretched there.
-    const { x, y, px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, lx, ly);
+    // Where its middle lands, and how the face is stretched there.
+    let { x, y, px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, spread, scale, near);
+    if (round) {
+      // Round the body's thickness: off over the edge at a quarter of the way, and narrowed to nothing there.
+      const [X, Y] = [px - 50, py - 50];
+      px = 50 + (X * cs - THICK * hw * ss) / kx;
+      py = 50 + (Y * cf - THICK * hh * sf) / ky;
+      [a, c] = [(a * cs) / kx, (c * cs) / kx];
+      [b, d] = [(b * cf) / ky, (d * cf) / ky];
+    }
     return `matrix(${n(a, 4)}, ${n(b, 4)}, ${n(c, 4)}, ${n(d, 4)}, ${n((px - x) * u)}, ${n((py - y) * u)})`;
   };
   return { whole, body, left: eye(-1), right: eye(1), back };

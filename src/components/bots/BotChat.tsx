@@ -1337,7 +1337,7 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
 }
 
 /**
- * A bot at work here: its mascot, fidgeting and swelling at each new step, and what it's on: the line
+ * A bot at work here: its mascot, in step with its others (the header's, the sidebar's), and what it's on: the line
  * its status names, kept from its last step while it works out the next (activity.ts, shownLine).
  * Only with nothing at all to name does the mascot turn into three dots, for a moment, as it does in
  * the sidebar and the header at the same time (usePlainPhases); then it's back with plain words. The
@@ -1362,7 +1362,7 @@ function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direc
   }
   // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
   const [reads] = useReading([bot.id]);
-  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy reading={reads && !typing} dots={dots} mood={typing ? "thinking" : undefined} pulse={{ key: step.current ?? "", mood: "idle", action: "pop" }} />;
+  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy reading={reads && !typing} dots={dots} mood={typing ? "thinking" : undefined} />;
   return (
     <div className="bm-working" role="status" aria-label={typing ? `${bot.name} is typing` : `${bot.name}: ${activity}`} data-dots={dots || undefined}>
       {direct ? avatar : <span className="bm-avatar">{avatar}</span>}

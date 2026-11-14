@@ -1,18 +1,20 @@
 // OpenBots' bots: a flat shape in one colour with two big, deep eyes, and nothing else. What makes
 // one alive is how it moves: it's a solid thing that turns, rolls and leans as a whole (see
-// lib/bots/rig.ts), the face sliding across the body as the head turns and the eyes darting ahead of
-// it. A still bot rests turned up and away and rolled over. Left alone it breathes, stares straight
-// out, blinks and looks around; at work it faces you, eyes grown big, brisk, rocking, peering and
-// leaning in. It can follow the pointer, turning and leaning toward it; a held
-// mood (thinking while typing, happy at a reaction) changes its eyes, and in a group the ones not at
-// work doze, a "zzz" floating up over them. At work with nothing at all to say what on, it can turn
-// into three dots for a moment and back (`dots`, which activity.ts decides). Reading something, it
-// reads: eyes down, along a line and back to the start of the next. Nothing ever hops, and nothing
-// spins of its own accord.
+// lib/bots/rig.ts), the face sliding across the body as the head turns, all of it on one smooth
+// spring. A still bot rests turned up and away and rolled over, and holds quite still. Left alone it
+// rests, blinks and now and then looks about; at work its eyes grow big and it plays the reference's
+// clips (lib/bots/routines.ts): looking round, swaying, curious round-eyed spells, a breather, and now
+// and then a flip or a spin right round. Every avatar of the same bot at the same thing moves as one
+// (lib/bots/life.ts). It can follow the pointer, turning and leaning toward it; a held mood (thinking
+// while typing, happy at a reaction) changes its eyes, and in a group the ones not at work doze, a
+// "zzz" floating up over them. At work with nothing at all to say what on, it can turn into three dots
+// for a moment and back (`dots`, which activity.ts decides). Reading something, its eyes go to wide
+// ovals and dart along the lines. Nothing ever hops.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
-import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type EyeLook, type Pose } from "../../lib/bots/rig";
-import { nextBeat, nextBlink, nextIdle, READING_STILL, readingAt, THINKING, type Step } from "../../lib/bots/routines";
+import { joinLife, type Life } from "../../lib/bots/life";
+import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, sizeOf, snap, spreadOf, step, turnAt, warm, type EyeLook, type Pose, type Target } from "../../lib/bots/rig";
+import { AFTER_DOTS, beats, nextBlink, nextIdle, READING_STILL, readingAt, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
 export type { Action, Mood };
@@ -66,14 +68,17 @@ function offScreen(el: Element) {
 
 /** How long a bot takes to come back from three dots, ms (see .bot-dots). */
 const DOTS_OUT = 560;
+/** A reading bot's only routine: a blink now and then, its eyes on the lines. */
+const readBlinks = (): Step[] => [[null, rand(2400, 5000)], ["blink", 300]];
 /** How long a bot looks pleased after a reaction or finishing something, ms. */
 const PLEASED = 5200;
 /** When the page has a moment to spare (or soon enough anyway). */
 const whenIdle = (step: () => void) => void (typeof requestIdleCallback === "function" ? requestIdleCallback(step, { timeout: 3000 }) : setTimeout(step, 300));
 
-/** How long a turn right round takes, ms. */
+/** How long a turn right round takes, ms: a spin (pressed, or of its own at work) or a flip. */
 const SPIN = 720;
-const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+/** A pose some way between two, `k` of the way from `a` to `b`. */
+const between = (a: Pose, b: Pose, k: number): Pose => ({ ...b, x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, roll: (a.roll ?? 0) + ((b.roll ?? 0) - (a.roll ?? 0)) * k, zoom: (a.zoom ?? 0) + ((b.zoom ?? 0) - (a.zoom ?? 0)) * k });
 
 /**
  * One eye: a solid pill and nothing in it, its form set by the mood and pose in CSS (see
@@ -156,8 +161,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const skinRef = useRef<HTMLSpanElement>(null);
   const leftRef = useRef<HTMLSpanElement>(null);
   const rightRef = useRef<HTMLSpanElement>(null);
-  /** How long the lids take to close, a little different every blink; unset when they're open. */
-  const [blink, setBlink] = useState<number>();
+  /** How long the lids take to close, a little different every blink; "open" while they open again, and unset once they have. */
+  const [blink, setBlink] = useState<number | "open">();
   const [action, setAction] = useState<Action>();
   const [flash, setFlash] = useState<Mood>();
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -199,12 +204,17 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // The form its eyes are drawn in, which says how near the edge they can go.
   const drawn = eyeLook(shown, form, sleeping);
 
+  // Every avatar of this bot at the same thing shares one life (lib/bots/life.ts), under its look.
+  const lifeKey = `${shape.id}:${color.id}`;
+  const life = useRef<Life>(undefined);
+
   // The body: springs toward wherever it's facing (a pose, the pointer, or back to rest), stepped
   // frame by frame while anything moves and written straight to the layers, so none of it renders.
   // It's drawn at rest to begin with (`rest`, below), with nothing run to put it there.
   // `read` is when it began reading (held `still`, with motion reduced): while it's set, where it looks is the line it's on.
-  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; pose?: Pose; read?: { since: number; still: boolean }; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
-  body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, pose: held, shape, size, busy, look: drawn };
+  // `sweep` is a look moving steadily from one pose to the next; `spun` and `flipped` when a spin or a flip began.
+  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; flipped: number; pose?: Pose; sweep?: { from: Pose; start: number; ms: number }; read?: { since: number; still: boolean }; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
+  body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, flipped: 0, pose: held, shape, size, busy, look: drawn };
   Object.assign(body.current, { pose: held, shape, size, busy, look: drawn });
   const write = () => {
     const b = body.current!;
@@ -212,14 +222,20 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     for (const [el, t] of [[wholeRef.current, f.whole], [bodyRef.current, f.body], [leftRef.current, f.left], [rightRef.current, f.right]] as const) if (el) el.style.transform = t;
     if (skinRef.current) skinRef.current.style.visibility = f.back ? "hidden" : "";
   };
-  const target = () => {
+  const facing = (): Target => {
     const b = body.current!;
     const el = ref.current;
     if (b.read) return poseTarget(b.shape, b.read.still ? READING_STILL : readingAt(performance.now() - b.read.since), true);
+    if (b.pose && b.sweep) return poseTarget(b.shape, between(b.sweep.from, b.pose, Math.min(1, Math.max(0, (performance.now() - b.sweep.start) / b.sweep.ms))), b.busy);
     if (b.pose) return poseTarget(b.shape, b.pose, b.busy);
     if (!b.tracking || !el || pointer.x < 0) return restOf(b.shape);
     const r = el.getBoundingClientRect();
     return r.width ? aimTarget(b.shape, pointer.x - (r.left + (b.shape.face.x / 100) * r.width), pointer.y - (r.top + (b.shape.face.y / 100) * r.height), r.width) : restOf(b.shape);
+  };
+  // Where it's headed, with its eyes spaced and sized for the form they're in.
+  const target = (): Target => {
+    const b = body.current!;
+    return { ...facing(), spread: spreadOf(b.look), size: sizeOf(b.shape, b.look) };
   };
   const tick = useRef((now: number) => {
     const b = body.current!;
@@ -227,13 +243,20 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     b.last = now;
     if (b.spun) {
       const t = (now - b.spun) / SPIN;
-      b.rig.spin = t >= 1 ? 0 : 360 * easeInOut(Math.max(0, t));
+      b.rig.spin = t >= 1 ? 0 : turnAt(t);
       if (t >= 1) b.spun = 0;
     }
-    const done = step(b.rig, target(), dt, b.read || b.pose ? "pose" : b.tracking ? "track" : "rest") && !b.spun;
+    if (b.flipped) {
+      const t = (now - b.flipped) / SPIN;
+      b.rig.flip = t >= 1 ? 0 : turnAt(t);
+      if (t >= 1) b.flipped = 0;
+    }
+    const sweeping = !!b.sweep && now < b.sweep.start + b.sweep.ms;
+    const done = step(b.rig, target(), dt, b.read || b.pose ? "pose" : b.tracking ? "track" : "rest") && !b.spun && !b.flipped;
     write();
-    // Reading, it's on the move even while it holds at the start of a line: it stops when the reading does.
-    if (!done || b.read) return;
+    // Reading, it's on the move even while it holds at the start of a line, and sweeping, all the way
+    // along: it stops when the reading or the sweep does.
+    if (!done || b.read || sweeping) return;
     b.last = 0;
     moving.delete(tick.current);
   });
@@ -258,12 +281,12 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [held, shape, size]);
 
-  // A new face may not go as near the edge: drawn again, its eyes kept off it.
+  // A new face may not go as near the edge, and may set its eyes wider apart: on its way there, its eyes kept off the edge.
   const lastLook = useRef(drawn);
   useLayoutEffect(() => {
     if (lastLook.current === drawn) return;
     lastLook.current = drawn;
-    write();
+    move();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawn]);
 
@@ -293,10 +316,13 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     if (!reads || !el) return;
     const b = body.current!;
     const still = calm();
-    b.read = { since: performance.now(), still };
+    // Where it's got to on the page is the bot's, not this avatar's: every avatar of it reads the same line.
+    const { life: page, leave } = joinLife(`${lifeKey} read`, readBlinks, performance.now());
+    b.read = { since: page.start, still };
     if (still) {
       move();
       return () => {
+        leave();
         b.read = undefined;
         move();
       };
@@ -305,26 +331,29 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     const check = setInterval(() => (offScreen(el) ? moving.delete(tick.current) : animate(tick.current)), 1000);
     return () => {
       clearInterval(check);
+      leave();
       b.read = undefined;
       animate(tick.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reads]);
+  }, [reads, lifeKey]);
 
-  // Lids snap down, held a moment, and up a touch slower (see .bot-eye-fill): never the same blink twice.
+  // Lids come down, held a moment, and up about as quickly (see .bot-eye-fill): never the same blink twice.
   const doBlink = (twice = false) => {
-    const close = Math.round(rand(70, 110));
+    const close = Math.round(rand(80, 110));
     setBlink(close);
-    later(() => setBlink(undefined), close + rand(30, 80));
-    if (twice) later(() => doBlink(), rand(260, 360));
+    later(() => setBlink("open"), close + rand(20, 50));
+    later(() => setBlink((cur) => (cur === "open" ? undefined : cur)), close + 200);
+    if (twice) later(() => doBlink(), rand(300, 380));
   };
   const doAction = (a: Action) => {
     if (calm()) return;
     // A turn right round and a nod are the body's own: the face goes round the back and comes out the
     // other side, or dips and comes back up. The rest are played over it (.bot-act).
     if (a === "spin") body.current!.spun = performance.now();
+    if (a === "flip") body.current!.flipped = performance.now();
     if (a === "nod") nod(body.current!.rig);
-    if (a === "spin" || a === "nod") animate(tick.current);
+    if (a === "spin" || a === "flip" || a === "nod") animate(tick.current);
     setAction(undefined);
     requestAnimationFrame(() => setAction(a));
     later(() => setAction((cur) => (cur === a ? undefined : cur)), 1000);
@@ -334,40 +363,80 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     later(() => setFlash((cur) => (cur === m ? undefined : cur)), ms);
   };
 
-  // A life of its own, one routine after another: busy, brisk poses with blinks between; reading, only
-  // a blink now and then, its eyes on the lines; idle, a rest staring straight out and then a stare, a
-  // look around, a blink or (lively) a move. Dozing, there's none of it: just the breathing, in CSS.
+  // A life, one routine after another, shared with every other avatar of the bot at the same thing
+  // (lib/bots/life.ts): busy, the reference's clips one after another; reading, only a blink now and
+  // then, its eyes on the lines; idle, a rest and then a blink, a calm look about or (lively) a face.
+  // Dozing, there's none of it. An avatar that comes in late, or back into view, takes up the pose the
+  // others are in and lets go of what has passed (a blink, a move).
   useEffect(() => {
     const el = ref.current;
     if (!(alive || busy) || dozing || !el || calm()) return;
+    const kind = reads ? "read" : busy ? "busy" : plain ? "plain" : `idle${lively ? " lively" : ""}${following ? " following" : ""}`;
+    const make = reads ? readBlinks : busy ? beats() : plain ? nextBlink : () => nextIdle(lively, following);
+    const joined = joinLife(`${lifeKey} ${kind}`, make, performance.now());
+    life.current = joined.life;
+    const b = body.current!;
     let timer: ReturnType<typeof setTimeout>;
-    let steps: Step[] = [];
-    const next = () => {
+    let seen = -1;
+    const posed = (w: Step[0]) => w === null || (typeof w === "object" && ("x" in w || "sweep" in w));
+    const run = () => {
+      const now = performance.now();
       if (offScreen(el)) {
-        timer = setTimeout(next, 2000);
+        timer = setTimeout(run, 2000);
         return;
       }
       // Three dots for a while: nothing of it shows, so nothing of it moves until it's back.
       if (staying.current) {
-        timer = setTimeout(next, 300);
+        timer = setTimeout(run, 300);
         return;
       }
-      if (!steps.length) steps = reads ? [[null, rand(2400, 5000)], ["blink", 300]] : busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : plain ? nextBlink() : [[null, rand(800, 2600)], ...nextIdle(lively, following)];
-      const [what, ms] = steps.shift()!;
-      if (what === null) setPose(undefined);
-      else if (what === "blink" || what === "blink2") doBlink(what === "blink2");
-      else if (typeof what === "string") doAction(what);
-      else if ("flash" in what) doFlash(what.flash, ms);
-      else setPose(what);
-      timer = setTimeout(next, ms);
+      const { steps, next } = joined.life.due(seen, now);
+      const latest = steps.findLast((s) => posed(s.what));
+      for (const s of steps) {
+        const what = s.what;
+        if (posed(what)) {
+          if (s !== latest) continue;
+          if (what === null) {
+            b.sweep = undefined;
+            setPose(undefined);
+          } else if ("sweep" in what) {
+            // Steadily on from wherever it's looking now.
+            b.sweep = { from: b.pose ?? { x: 0, y: 0 }, start: s.at, ms: s.ms };
+            setPose(what.sweep);
+            animate(tick.current);
+          } else {
+            b.sweep = undefined;
+            setPose(what);
+          }
+          continue;
+        }
+        if (now - s.at > 160) continue;
+        if (what === "blink" || what === "blink2") doBlink(what === "blink2");
+        else if (typeof what === "string") doAction(what);
+        else if (what && "flash" in what) doFlash(what.flash, s.ms);
+      }
+      if (steps.length) seen = steps.at(-1)!.index;
+      timer = setTimeout(run, Math.max(8, next - now));
     };
-    timer = setTimeout(next, busy ? 200 : rand(300, 1500));
+    // A moment in, it takes up wherever the life has got to.
+    timer = setTimeout(run, 200);
     return () => {
       clearTimeout(timer);
+      joined.leave();
+      if (life.current === joined.life) life.current = undefined;
+      b.sweep = undefined;
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, busy, lively, plain, following, dozing, reads]);
+  }, [alive, busy, lively, plain, following, dozing, reads, lifeKey]);
+
+  // Back from three dots at work, it comes round-eyed and leans back a moment before it gets on (AFTER_DOTS).
+  const wasDots = useRef(stayDots);
+  useEffect(() => {
+    if (wasDots.current && !stayDots && busy && !reads && !calm()) life.current?.restart(performance.now(), AFTER_DOTS);
+    wasDots.current = stayDots;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stayDots]);
 
   // Woken to work, it has a little stretch on the way up.
   const wasDozing = useRef(dozing);
@@ -405,7 +474,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       className={cx("bot", alive && "bot-alive", playful && "bot-playful", className)}
       data-color={color.id}
       data-mood={shown}
-      data-blink={blink ? "" : undefined}
+      data-blink={blink === "open" ? "open" : blink ? "" : undefined}
       data-action={action}
       data-looking={held ? "" : undefined}
       data-busy={busy || undefined}
@@ -416,7 +485,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       role={label ? "img" : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
-      style={{ width: size, height: size, "--u": `${size / 100}px`, "--bot-color": color.hex, "--bob-delay": delay, ...(blink ? { "--blink": `${blink}ms` } : {}) } as React.CSSProperties}
+      style={{ width: size, height: size, "--u": `${size / 100}px`, "--bot-color": color.hex, "--bob-delay": delay, ...(typeof blink === "number" ? { "--blink": `${blink}ms` } : {}) } as React.CSSProperties}
       onPointerEnter={playful ? () => { doAction("nod"); doFlash("happy", 1100); } : undefined}
       onPointerDown={playful ? () => doAction("spin") : undefined}
       onAnimationEnd={(e) => {

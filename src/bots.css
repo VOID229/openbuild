@@ -79,22 +79,24 @@
 .bot-eye-fill {
   --w: calc(var(--eye-w) * var(--fw, 1));
   --h: calc(var(--eye-h) * var(--fh, 1));
+  /* How much of it the lids leave open: all of it, but in a blink (.bot[data-blink]). */
+  --open: var(--h);
   position: absolute;
   left: calc(var(--u) * var(--w) * -0.5);
-  top: calc(var(--u) * (var(--h) * -0.5 - var(--eye-h) * var(--lift, 0)));
+  top: calc(var(--u) * (var(--open) * -0.5 - var(--eye-h) * var(--lift, 0)));
   width: calc(var(--u) * var(--w));
-  height: calc(var(--u) * var(--h));
+  height: calc(var(--u) * var(--open));
   /* Round ends whichever way it's longer; the lower pair can flatten (--flat, for a smile). */
   border-radius: calc(var(--u) * var(--w) * 0.5) calc(var(--u) * var(--w) * 0.5) calc(var(--u) * var(--w) * var(--flat, 0.5)) calc(var(--u) * var(--w) * var(--flat, 0.5));
   background: var(--bot-eye);
-  /* Lids come down to a little below the middle. */
   transform-origin: 50% 58%;
+  /* One form eases into the next, nothing springing past. */
   transition:
-    width 170ms cubic-bezier(0.3, 1.3, 0.5, 1),
-    height 170ms cubic-bezier(0.3, 1.3, 0.5, 1),
-    left 170ms cubic-bezier(0.3, 1.3, 0.5, 1),
-    top 170ms cubic-bezier(0.3, 1.3, 0.5, 1),
-    border-radius 170ms ease-out,
+    width 220ms cubic-bezier(0.45, 0, 0.25, 1),
+    height 220ms cubic-bezier(0.45, 0, 0.25, 1),
+    left 220ms cubic-bezier(0.45, 0, 0.25, 1),
+    top 220ms cubic-bezier(0.45, 0, 0.25, 1),
+    border-radius 220ms ease-out,
     transform 150ms cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 
@@ -118,18 +120,24 @@
   --fh: 0.24;
 }
 
-/* At work the eyes are big: fat and deep, a quarter of the face between them. */
+/* At work the eyes are big: fat and deep, a third of an eye between them (and set a little wider
+   apart: SPREAD in rig.ts, which places them). */
 .bot[data-eyes="big"] .bot-eye-fill {
-  --fw: 1.6;
+  --fw: 1.65;
   --fh: 1.48;
 }
 
-/* Reading: the big eyes of work with the lids come down a third onto the page, mostly from the top
-   (FORMS.read, DRAWN.read). */
+/* Curious: round dots. */
+.bot[data-eyes="dot"] .bot-eye-fill {
+  --fw: 1.65;
+  --fh: 0.767;
+}
+
+/* Reading: wide ovals, all but touching (FORMS.read, SPREAD.read). */
 .bot[data-eyes="read"] .bot-eye-fill {
-  --fw: 1.45;
-  --fh: 1;
-  --lift: -0.12;
+  --fw: 2.16;
+  --fh: 0.91;
+  border-radius: 50%;
 }
 
 .bot[data-mood="sleepy"] .bot-eye-fill {
@@ -179,18 +187,21 @@
   fill: var(--bot-eye);
 }
 
-/* A blink snaps shut to a dash (its speed set per blink, --blink, so no two are quite alike) and
-   opens a touch slower. */
+/* A blink: the lids close to a thick dash, two fifths of the eye's width (its speed set per blink,
+   --blink, so no two are quite alike), and open again about as quickly (data-blink="open"). Eyes
+   already narrower than that only flinch. It's the eye's own height that changes, not a scale, so it
+   stays sharp all the way. */
 .bot[data-blink] .bot-eye-fill {
-  transform: scale(1.15, 0.17);
-  transition: transform var(--blink, 90ms) cubic-bezier(0.55, 0, 0.8, 0.4);
+  --open: min(var(--h), var(--w) * 0.42);
+  transition-property: height, top;
+  transition-duration: var(--blink, 90ms);
+  transition-timing-function: cubic-bezier(0.5, 0, 0.75, 0.6);
 }
 
-/* Eyes already narrowed to a dash only flinch: a blink mustn't thin them to a hair. */
-.bot[data-blink][data-eyes="squint"] .bot-eye-fill,
-.bot[data-blink][data-mood="squint"] .bot-eye-fill,
-.bot[data-blink][data-mood="thinking"] .bot-eye-fill {
-  transform: scale(1.06, 0.8);
+.bot[data-blink="open"] .bot-eye-fill {
+  --open: var(--h);
+  transition-duration: 120ms;
+  transition-timing-function: cubic-bezier(0.25, 0.4, 0.4, 1);
 }
 
 /* Dozing: the eyes grow heavy and shut, the face drops and the whole bot leans (into the huddle's
@@ -314,41 +325,13 @@
   }
 }
 
-/* Breathing, for a bot that's alive: a few breaths to a cycle and no two quite alike, swelling a
-   little about its middle with the faintest sway, never lifting off. Asleep, it's shallower and much
-   slower, with a sigh among them. On the bot's own box, where Chrome runs it on the compositor; the
-   long cycle keeps the main thread out of it too, as it's told each time a cycle comes round.
-   --bob-delay starts each bot somewhere else in it. */
-.bot-alive {
-  animation: bot-bob 11.4s ease-in-out infinite;
-  animation-delay: var(--bob-delay, 0s);
-}
-
+/* Awake, a bot holds quite still between its moves, as the reference's do. Asleep, it breathes:
+   shallow and slow, with a sigh among the breaths. On the bot's own box, where Chrome runs it on the
+   compositor; the long cycle keeps the main thread out of it too, as it's told each time a cycle
+   comes round. --bob-delay starts each bot somewhere else in it. */
 .bot-alive[data-asleep] {
-  animation-name: bot-breathe;
-  animation-duration: 23.8s;
-}
-
-@keyframes bot-bob {
-  0%,
-  23.16%,
-  49.47%,
-  73.68%,
-  100% {
-    transform: none;
-  }
-  11.58% {
-    transform: scale(1.028) rotate(0.9deg);
-  }
-  36.32% {
-    transform: scale(1.02) rotate(-0.7deg);
-  }
-  61.58% {
-    transform: scale(1.034) rotate(-1.1deg);
-  }
-  86.84% {
-    transform: scale(1.024) rotate(0.8deg);
-  }
+  animation: bot-breathe 23.8s ease-in-out infinite;
+  animation-delay: var(--bob-delay, 0s);
 }
 
 @keyframes bot-breathe {

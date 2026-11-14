@@ -81,9 +81,10 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       expect(rest.pitch!).toBeLessThan(0);
       expect(rest.lean!).toBeLessThan(-15);
 
-      // Off to the right of the avatar, a little below: the head turns right over that way, and a little down.
+      // Off to the right of the avatar, a little below: the head turns right over that way, and a little
+      // down (it rests looking up and to the right already, so it's there once it's no longer looking up).
       await pointAt(page, find, "far", 12);
-      await until(page, find, `tracking && yaw > ${YAW * 0.65}`);
+      await until(page, find, `tracking && yaw > ${YAW * 0.65} && pitch > 0`);
       const right = (await mascots(page, find))[0]!;
       expect(right.yaw!).toBeLessThan(YAW * 1.3);
       expect(right.pitch!).toBeGreaterThan(0);
@@ -91,7 +92,7 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       // No hop and no smile on the way in.
       expect(right.action).toBeNull();
       expect(right.mood).toBe("idle");
-      // The whole body turns under the head, by less and a beat behind, and leans toward the pointer.
+      // The whole body turns with the head, by less, and leans toward the pointer.
       await until(page, find, `bodyYaw > ${YAW * 0.25} && lean > 8`);
       const turned = (await mascots(page, find))[0]!;
       expect(turned.bodyYaw!).toBeLessThan(turned.yaw!);
