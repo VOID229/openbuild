@@ -224,6 +224,8 @@ export interface SearchProviderConfig {
   label: string;
   /** "url" = a self-hosted instance address rather than a secret key. */
   credential: "key" | "url";
+  /** What the provider calls the one key search takes, when it shows several (X: Bearer Token). */
+  keyName?: string;
   /** Where to get a key (or set up an instance). */
   site: string;
 }
@@ -234,7 +236,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProviderConfig> = 
   kagi: { id: "kagi", label: "Kagi", credential: "key", site: "https://kagi.com/settings?p=api" },
   firecrawl: { id: "firecrawl", label: "Firecrawl", credential: "key", site: "https://www.firecrawl.dev/app/api-keys" },
   tavily: { id: "tavily", label: "Tavily", credential: "key", site: "https://app.tavily.com/home" },
-  x: { id: "x", label: "X", credential: "key", site: "https://developer.x.com/en/portal/dashboard" },
+  x: { id: "x", label: "X", credential: "key", keyName: "Bearer Token", site: "https://developer.x.com/en/portal/dashboard" },
   youtube: { id: "youtube", label: "YouTube", credential: "key", site: "https://console.cloud.google.com/apis/library/youtube.googleapis.com" },
   searxng: { id: "searxng", label: "SearXNG", credential: "url", site: "https://docs.searxng.org/admin/installation.html" },
 };

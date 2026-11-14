@@ -44,14 +44,14 @@ function validateInstanceUrl(raw: string) {
 }
 
 function KeyField({ provider, value, index, total, autoFocus, status, onRetry, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
-  const { label, credential } = SEARCH_PROVIDERS[provider];
+  const { label, credential, keyName } = SEARCH_PROVIDERS[provider];
   const isUrl = credential === "url";
   const [editing, setEditing] = useState(!value);
   const [draft, setDraft] = useState("");
   const [invalid, setInvalid] = useState<string>();
   const input = useRef<HTMLInputElement>(null);
   const masked = !editing && !isUrl && !!value;
-  const noun = isUrl ? "address" : "key";
+  const noun = isUrl ? "address" : (keyName ?? "key");
   const actionId = `${provider}-${index}`;
 
   useEffect(() => {
@@ -89,7 +89,7 @@ function KeyField({ provider, value, index, total, autoFocus, status, onRetry, o
   else if (value && status && !editing) {
     if (status.status === "checking") badge = (<><Spinner size={12} /> Checking</>);
     else if (status.status === "valid") badge = (<><Check size={13} className="ok" /> {isUrl ? "Reachable" : "Works"}</>);
-    else if (status.status === "invalid") line = (<><CircleAlert size={13} className="bad" /> {status.error ?? `Invalid ${noun}`}: {isUrl ? "edit" : "replace"} it to continue</>);
+    else if (status.status === "invalid") line = (<><CircleAlert size={13} className="bad" /> {status.error && /[.!?]$/.test(status.error) ? status.error : <>{status.error ?? `Invalid ${noun}`}: {isUrl ? "edit" : "replace"} it to continue</>}</>);
     else
       line = (
         <>
@@ -115,7 +115,7 @@ function KeyField({ provider, value, index, total, autoFocus, status, onRetry, o
             inputMode={isUrl ? "url" : undefined}
             readOnly={!editing}
             value={editing ? draft : isUrl ? value : ""}
-            placeholder={masked ? undefined : isUrl ? "http://192.168.1.10:8080" : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
+            placeholder={masked ? undefined : isUrl ? "http://192.168.1.10:8080" : index === 0 ? `Paste your ${label} ${noun}` : `Paste another ${label} ${noun}`}
             aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
             autoComplete="off"
             spellCheck={false}

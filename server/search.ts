@@ -50,10 +50,17 @@ class SearchError extends Error {
     message: string,
     /** Whether the next key/instance should be tried. */
     readonly fallback: boolean,
+    /** The provider's HTTP status, when it answered with an error. */
+    readonly status?: number,
+    /** The provider's error body (JSON), when it sent one. */
+    readonly body?: any,
   ) {
     super(message);
   }
 }
+
+/** Statuses that mean the key or the provider account is the problem: whoever set the key must act. */
+const ACCOUNT_STATUSES = [401, 402, 403, 429];
 
 const query = { type: "string", description: "The search query." };
 const recency = (what = "Only return results published within this period.") => ({ type: "string", enum: ["day", "week", "month", "year"], description: what });
@@ -103,7 +110,7 @@ async function call(url: string, init: RequestInit, label: string): Promise<any>
       body?.error?.message ?? body?.error?.[0]?.msg ?? body?.errors?.[0]?.message ?? (typeof body?.error === "string" ? body.error : undefined) ?? body?.detail?.error ?? body?.detail ?? body?.message;
     const message = `${label} returned HTTP ${res.status}${detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : ""}`;
     // Rejected, out of credit, or rate limited: worth trying the next key.
-    throw new SearchError(message, [401, 402, 403, 429].includes(res.status) || res.status >= 500);
+    throw new SearchError(message, ACCOUNT_STATUSES.includes(res.status) || res.status >= 500, res.status, body);
   }
   if (body === undefined) throw new SearchError(`${label} returned a response that isn't JSON.`, true);
   return body;
@@ -117,6 +124,41 @@ export function searxngBase(raw: string) {
   u.search = "";
   u.hash = "";
   return u.toString().replace(/\/+$/, "").replace(/\/search$/, "");
+}
+
+/**
+ * The X Bearer Token to send: exactly as the X developer console shows it, without a pasted "Bearer "
+ * in front. Never URL-decoded: an app-only token holds escapes such as %2B and %3D, and X takes it only
+ * as issued (docs.x.com, OAuth 2.0 Bearer Token). Decoding them sent a different token, and X answered 401.
+ */
+export const xBearer = (key: string) => key.trim().replace(/^bearer\s+/i, "");
+
+/** Whether a key has the shape of an X app-only Bearer Token: a long run of A's, then about 90 more characters. */
+const looksLikeXBearer = (token: string) => /^A{10,}/.test(token) && token.length >= 80;
+
+const WHERE_X_KEY = "Settings → Bots → Web search → X";
+
+/**
+ * What X's error means for whoever set the key, with X's own words: a refused token, no credits, a
+ * spending limit, an app without access, or a rate limit. Never the token itself.
+ */
+export function xProblem(status: number, body: any, token: string): string {
+  const title = typeof body?.title === "string" ? body.title : undefined;
+  const detail = [body?.detail, body?.errors?.[0]?.message, body?.reason].find((v): v is string => typeof v === "string" && v.trim() !== "");
+  const said = [...new Set([title, detail].filter(Boolean))].join(": ");
+  // X doesn't echo the token, but never pass it on if it ever does.
+  const shown = (token ? said.replaceAll(token, "[hidden]") : said).slice(0, 300);
+  const what = `X returned HTTP ${status}${shown ? ` (${shown})` : ""}.`;
+  const words = [title, detail, body?.type, body?.reason].filter((v) => typeof v === "string").join(" ");
+  if (status === 401) {
+    const shape = looksLikeXBearer(token) ? "" : " The saved key doesn't look like a Bearer Token (that starts with a long run of A's and is about 110 characters): it may be the API Key or API Key Secret.";
+    return `${what} X refused the Bearer Token. Paste the app's Bearer Token from console.x.com (your app → Keys and tokens → Bearer Token) into ${WHERE_X_KEY}, exactly as shown. X search doesn't use the API Key, API Key Secret or Access Token.${shape}`;
+  }
+  if (status === 402 || /credit/i.test(words)) return `${what} The X developer account has no credits left. Buy credits in console.x.com (pay-per-use billing).`;
+  if (/usage.?cap|spend/i.test(words)) return `${what} The X account reached its spending limit or usage cap for this billing cycle. Raise the limit in console.x.com, or searches start again next cycle.`;
+  if (status === 429) return `${what} X is rate limiting the searches. Try again in a few minutes.`;
+  if (status === 403) return `${what} X doesn't let this app search posts. In console.x.com, the app needs API access with pay-per-use credits; then paste its Bearer Token into ${WHERE_X_KEY}.`;
+  return what;
 }
 
 const PROVIDERS: Record<SearchProviderId, Provider> = {
@@ -330,9 +372,14 @@ const PROVIDERS: Record<SearchProviderId, Provider> = {
         expansions: "author_id",
         "user.fields": "username,name,verified",
       });
-      // Accept a pasted "Bearer …" header value as well as the bare token.
-      const token = decodeURIComponent(key.replace(/^bearer\s+/i, ""));
-      const body = await call(`https://api.x.com/2/tweets/search/recent?${params}`, { headers: { authorization: `Bearer ${token}` }, signal }, "X");
+      const token = xBearer(key);
+      let body: any;
+      try {
+        body = await call(`https://api.x.com/2/tweets/search/recent?${params}`, { headers: { authorization: `Bearer ${token}` }, signal }, "X");
+      } catch (err) {
+        if (err instanceof SearchError && err.status) throw new SearchError(xProblem(err.status, err.body, token), err.fallback, err.status, err.body);
+        throw err;
+      }
       const users = new Map<string, any>((body.includes?.users ?? []).map((u: any) => [u.id, u]));
       const results: Result[] = (body.data ?? []).map((t: any) => {
         const u = users.get(t.author_id);
@@ -445,6 +492,8 @@ export async function checkSearch(id: SearchProviderId, credential: string, sign
     if (signal?.aborted) throw err;
     const e = err as Error;
     if (e.name === "TimeoutError") return { provider: id, status: "error", error: `${label} didn't answer within 20 seconds` };
+    // X: its own words and what to do. Only a 401 means the wrong token; a 403 is the app's access, 429 a limit.
+    if (id === "x" && err instanceof SearchError && err.status) return { provider: id, status: err.status === 401 ? "invalid" : "error", error: e.message };
     // YouTube rejects a bad key with HTTP 400; its 403s (quota used up, API not enabled) explain themselves.
     const rejected = id === "youtube" ? /API key not valid/i.test(e.message) : id !== "searxng" && /HTTP (401|403)\b/.test(e.message);
     if (rejected) return { provider: id, status: "invalid", error: `${label} rejected this key` };
@@ -611,6 +660,10 @@ export function searchToolkit(creds: SearchCredentials[], opts: { hosted?: boole
           if (signal.aborted) throw err;
           const e = err as Error;
           lastError = e.name === "TimeoutError" ? `${label} timed out.` : e.message;
+          // Key or account problems are worth a line in the server log: the status and X's title, never the key.
+          if (err instanceof SearchError && err.status && ACCOUNT_STATUSES.includes(err.status)) {
+            console.warn(`[search] ${label} refused a search (HTTP ${err.status}${typeof err.body?.title === "string" ? `: ${err.body.title.slice(0, 80)}` : ""})`);
+          }
           if (err instanceof SearchError && !err.fallback) break;
           if (i < keys.length - 1) console.warn(`[search] ${label} ${SEARCH_PROVIDERS[id].credential} ${i + 1} failed (${lastError}); trying ${i + 2}`);
         }
