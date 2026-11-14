@@ -1,7 +1,6 @@
 // OpenBots' details panel never scrolls sideways, in a real Chrome on a desktop and on phones: on every
 // tab of a bot's details and a group's, nothing in the panel is wider than it, while the mascot leans
-// after a pointer at the window's edges and plays its moves too, and a sideways wheel or swipe over it
-// moves nothing. The tabs fit with their labels whole; where they can't (a 280px screen), they end in
+// after a pointer at the panel's corners too, and a sideways wheel or swipe over it moves nothing. The tabs fit with their labels whole; where they can't (a 280px screen), they end in
 // an ellipsis instead. Text fields scroll their own text, as they do anywhere. The fixture
 // (fixtures/botDetails/page.tsx) fills the panel with words too long to wrap.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
@@ -90,14 +89,12 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
       expect(seen).toEqual(["Instructions", "Routines", "Tasks", "Advanced"]);
       // Every tab shows its whole label.
       expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);
-      // The mascot leaning after a pointer at each of the window's edges, and playing each of its moves.
-      for (const [x, y] of [[0, 0], [width - 1, 0], [0, height - 1], [width - 1, height - 1]]) {
+      // The mascot leaning after a pointer at each of the panel's corners (it follows the pointer
+      // only about the panel, and plays no moves of its own: botDetailsMascot.test.ts).
+      const box = await page.eval<{ l: number; t: number; r: number; b: number }>("(() => { const r = document.querySelector('.bots-details').getBoundingClientRect(); return { l: r.left + 1, t: r.top + 1, r: r.right - 2, b: Math.min(r.bottom, innerHeight) - 2 }; })()");
+      for (const [x, y] of [[box.l, box.t], [box.r, box.t], [box.l, box.b], [box.r, box.b]]) {
         await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
         expect(await watch(page, 300)).toEqual([]);
-      }
-      for (const action of ["spin", "wiggle", "squish", "nod", "stretch"]) {
-        await page.eval(`bots.setState((s) => ({ pulses: { egg: { key: (s.pulses.egg?.key ?? 0) + 1, action: ${JSON.stringify(action)} } } })), true`);
-        expect({ action, wide: await watch(page, 500) }).toEqual({ action, wide: [] });
       }
     }, 60_000);
 
