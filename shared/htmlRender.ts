@@ -129,6 +129,7 @@ export const HTML_LAYOUT_GUIDE = htmlLayoutGuide();
 
 const MSG_HEIGHT = "openbuild:html-height";
 const MSG_THEME = "openbuild:html-theme";
+const MSG_FIT = "openbuild:html-fit";
 
 /** How tall the page says it is, from a message its frame posted. */
 export function readHeightMessage(data: unknown): number | undefined {
@@ -138,6 +139,9 @@ export function readHeightMessage(data: unknown): number | undefined {
 }
 
 export const themeMessage = (theme: HtmlTheme) => ({ type: MSG_THEME, theme });
+
+/** Tells the page its frame changed width, so it lays itself out again and says how tall it is now. */
+export const fitMessage = () => ({ type: MSG_FIT });
 
 export const clampHeight = (h: number) => Math.min(HTML_RENDER_MAX_HEIGHT, Math.max(HTML_RENDER_MIN_HEIGHT, Math.ceil(h)));
 
@@ -161,15 +165,20 @@ const baseCss = (opaque: boolean) =>
 // web links in a new tab (the frame itself must never navigate away from the page).
 // Once the frame fits, the document's scrollHeight can't see content hanging past the end of the
 // page, and it can't tell when the page shrinks: the body's can, whatever the frame's height.
+// The frame's width follows the reply's, which narrows when a panel opens beside it: the page lays
+// itself out again (its own resize, the frame's message), and one wider than the frame is zoomed out
+// to fit it, measured each time at its own size, rather than cut off at the right.
 const script = (base: string) =>
-  `(function(){var s=document.getElementById("openbuild-theme"),h=0,P=window.parent;if(P===window)P=null;` +
-  `window.addEventListener("message",function(e){var d=e.data,t=d&&d.theme;if(e.source!==P||!d||d.type!==${JSON.stringify(MSG_THEME)}||!t||typeof t.variables!=="object")return;` +
+  `(function(){var s=document.getElementById("openbuild-theme"),h=0,f=1,P=window.parent;if(P===window)P=null;` +
+  `window.addEventListener("message",function(e){var d=e.data,t=d&&d.theme;if(e.source!==P||!d)return;if(d.type===${JSON.stringify(MSG_FIT)})return z();if(d.type!==${JSON.stringify(MSG_THEME)}||!t||typeof t.variables!=="object")return;` +
   `var c=(typeof t.fonts==="string"?t.fonts.replace(/</g,""):"")+":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables)if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";s.textContent=c+"}"+${JSON.stringify(base)};});` +
   `document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]"),u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI)}catch(x){return}` +
   `if(/^https?:$/.test(u.protocol)){a.setAttribute("target","_blank");a.setAttribute("rel","noopener noreferrer")}},true);` +
-  `if(!P)return;var z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:Math.max(r.getBoundingClientRect().height,document.body?document.body.scrollHeight:0));` +
-  `if(v===h)return;h=v;P.postMessage({type:${JSON.stringify(MSG_HEIGHT)},height:v},"*")};` +
-  `var o=window.ResizeObserver?new ResizeObserver(z):null;if(o)o.observe(document.documentElement);` +
+  `function z(){if(!P)return;var r=document.documentElement,b=document.body,w,c;` +
+  `if(b){if(f!==1){b.style.removeProperty("zoom");f=1}w=r.scrollWidth;c=r.clientWidth;if(c>0&&w>c+1){f=c/w;b.style.setProperty("zoom",String(f),"important")}}` +
+  `var v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:Math.max(r.getBoundingClientRect().height,b?b.scrollHeight*f:0));` +
+  `if(v===h)return;h=v;P.postMessage({type:${JSON.stringify(MSG_HEIGHT)},height:v},"*")}` +
+  `if(!P)return;var o=window.ResizeObserver?new ResizeObserver(z):null;if(o)o.observe(document.documentElement);window.addEventListener("resize",z);` +
   `document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z()});window.addEventListener("load",z);setTimeout(z,0);})();`;
 
 /** What goes in front of the page: charset, viewport, the theme and the script above. */
