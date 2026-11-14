@@ -1,7 +1,7 @@
 // The bots in a group, watched in a real Chrome: the member at work is awake and the rest doze,
 // wherever the group shows its bots (its tile and row in the sidebar, the chat's header and the
 // mascots beside messages, the details panel). Waking and nodding off are eased, dozing costs the
-// main thread nothing, reduced motion holds the pose, and nothing spins or hops.
+// main thread nothing, reduced motion holds the pose, and nothing hops.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -195,7 +195,7 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     expect(await moving()).toBe(0);
   }, 20_000);
 
-  test("however busy the bots get, nothing spins or hops, in the sidebar or the chat", async () => {
+  test("however busy the bots get, nothing hops, in the sidebar or the chat: they move in place", async () => {
     const page = await open();
     await page.eval(`(() => {
       window.moves = [];
@@ -213,8 +213,9 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     await Bun.sleep(3000);
     const moves = await page.eval<string[]>("window.moves");
     expect(await page.eval<number>("window.poses")).toBeGreaterThan(5);
-    // The ones that woke stretched; whatever else they did, none of it was a spin or a hop.
+    // The ones that woke stretched; whatever else they did stayed in place (going right round, a flip
+    // or a spin, is in place too), and none of it was a hop.
     expect(moves).toContain("stretch");
-    expect(moves.filter((m) => m === "spin" || m === "hop")).toEqual([]);
+    for (const m of moves) expect(["stretch", "flip", "spin", "nod", "pop", "wiggle", "jelly"]).toContain(m);
   }, 30_000);
 });

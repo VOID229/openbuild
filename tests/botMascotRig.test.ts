@@ -1,12 +1,13 @@
 // How a bot's body moves, as arithmetic: it rests turned away and rolled over; it turns straight
-// toward the pointer, the eyes darting ahead, the head after them and the body last, each on a spring
-// that eases in and settles; it rolls and leans but never lifts; and however far a shape turns, its
-// eyes stay on its body.
+// toward the pointer; eyes, head and body move as one, on a spring that eases in and settles without
+// ever swinging past (as the reference recording does); it rolls and leans but never lifts; a flip or
+// a spin takes the face right round a puffy body; and otherwise, however far a shape turns, its eyes
+// stay on its body.
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
-import { READING, readingAt } from "../src/lib/bots/routines";
-import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { READING_MS, readingAt } from "../src/lib/bots/routines";
+import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeAt, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, sizeOf, snap, spreadOf, step, THICK, TRAVEL, turnAt, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -34,61 +35,57 @@ test("following the pointer, a bot turns straight toward it: all the way by its 
   for (let d = 0; d < 400; d += 7) expect(aimTarget(orb, d, d, 28).yaw).toBeLessThanOrEqual(YAW);
 });
 
-test("it leans into the turn: rolling toward the pointer, and the other way on the other side", () => {
+test("following the pointer it leans into the turn; posed, it cocks its head the other way unless the pose says", () => {
   expect(aimTarget(orb, 60, 0, 28).roll).toBeGreaterThan(8);
   expect(aimTarget(orb, -60, 0, 28).roll).toBeLessThan(-8);
   expect(aimTarget(orb, 0, -60, 28).roll).toBeCloseTo(0, 5);
-  // A pose leans the same way unless it says how its head is cocked.
-  expect(poseTarget(orb, { x: 1, y: 0 }).roll).toBeGreaterThan(4);
-  expect(poseTarget(orb, { x: 1, y: 0, roll: -12 }).roll).toBe(-12);
+  // A pose to the right rolls it back the other way, as the reference's looks do, unless it says how.
+  expect(poseTarget(orb, { x: 1, y: 0 }).roll).toBeLessThan(-8);
+  expect(poseTarget(orb, { x: -1, y: 0 }).roll).toBeGreaterThan(8);
+  expect(poseTarget(orb, { x: 1, y: 0, roll: 12 }).roll).toBe(12);
 });
 
-test("the head locks on quickly, easing in from rest, with only a hint of overshoot", () => {
-  const yaws = run(newRig(), to(YAW), "track", (r) => r.yaw.x);
-  // Eased in: the first frame moves less than the next.
-  expect(yaws[0]!).toBeLessThan(yaws[1]! - yaws[0]!);
-  // Most of the way there within ~150ms.
-  expect(yaws[8]!).toBeGreaterThan(YAW * 0.8);
-  const peak = Math.max(...yaws);
-  expect(peak).toBeGreaterThan(YAW);
-  expect(peak).toBeLessThan(YAW * 1.08);
-  expect(yaws.at(-1)).toBe(YAW);
+test("it moves smoothly: easing in from rest, most of the way there in a third of a second, and never swinging past", () => {
+  for (const [mode, within] of [["track", 15], ["pose", 18]] as const) {
+    const yaws = run(newRig(), to(YAW, PITCH / 2, 10, 0.05), mode, (r) => r.yaw.x);
+    // Eased in: the first frame moves less than the next.
+    expect(yaws[0]!).toBeLessThan(yaws[1]! - yaws[0]!);
+    expect(yaws[within]!).toBeGreaterThan(YAW * 0.8);
+    // Always on its way, and never past where it's going.
+    for (let i = 1; i < yaws.length; i++) expect(yaws[i]!).toBeGreaterThanOrEqual(yaws[i - 1]!);
+    expect(Math.max(...yaws)).toBeLessThanOrEqual(YAW);
+    expect(yaws.at(-1)).toBe(YAW);
+    // Settled within the best part of a second.
+    expect(yaws.length).toBeLessThan(55);
+  }
 });
 
-test("the eyes dart ahead of the head, and are back on it by the time it arrives", () => {
+test("eyes, head and body move as one: the face is never ahead of the body, nor the body behind it", () => {
   const rig = newRig();
-  const frames = run(rig, to(YAW, -PITCH / 2), "pose", (r) => ({ lead: r.leadX.x, up: r.leadY.x, yaw: r.yaw.x }));
-  // Out in front within a few frames, the way it's turning, while the head has barely started.
-  const first = frames.findIndex((f) => f.lead > 2);
-  expect(first).toBeGreaterThanOrEqual(0);
-  expect(first).toBeLessThan(6);
-  expect(frames[first]!.yaw).toBeLessThan(YAW * 0.6);
-  expect(Math.min(...frames.map((f) => f.up))).toBeLessThan(-1);
-  // Never far: a few units of the 100-unit box. And home again at the end.
-  expect(Math.max(...frames.map((f) => Math.abs(f.lead)))).toBeLessThan(5);
-  expect(frames.at(-1)!.lead).toBe(0);
-  expect(rig.leadY.x).toBe(0);
-});
-
-test("the body turns after the head: behind it, swaying a little past, and settled within a second", () => {
-  const frames = run(newRig(), to(YAW, 0, 10), "track", (r) => ({ head: r.yaw.x, body: r.bodyYaw.x, roll: r.roll.x }));
-  for (let i = 1; i < 8; i++) expect(frames[i]!.body).toBeLessThan(frames[i]!.head);
-  const peak = Math.max(...frames.map((f) => f.body));
-  expect(peak).toBeGreaterThan(YAW * 1.03);
-  expect(peak).toBeLessThan(YAW * 1.18);
-  expect(Math.max(...frames.map((f) => f.roll))).toBeGreaterThan(10.2);
-  expect(frames.length).toBeLessThan(70);
+  const target = to(YAW, -PITCH / 2, 12, 0.04);
+  run(rig, target, "pose", (r) => {
+    const f = frame(r, orb, 100);
+    // The body takes its share of the head's turn at every moment, not a moment later.
+    expect(f.body).toContain(`rotateY(${(r.yaw.x * BODY_TURN).toFixed(2)}deg)`);
+    // And the face is just where the head's turn puts it, nothing ahead: between the eyes is where `project` says.
+    const [l, rr] = [f.left, f.right].map((t) => Number(t.slice(7, -1).split(", ")[4]));
+    const [px] = project(orb.face.x, orb.face.y, r.yaw.x, r.pitch.x);
+    expect(orb.face.x + (l! + rr!) / 2).toBeCloseTo(px, 0);
+    // Roll and zoom come with it, at the same pace.
+    expect(r.roll.x / 12).toBeCloseTo(r.yaw.x / YAW, 6);
+    expect(r.zoom.x / 0.04).toBeCloseTo(r.yaw.x / YAW, 6);
+    return 0;
+  });
 });
 
 test("let go, it eases back to rest, slower and without swinging past", () => {
   const rest = restOf(orb);
   const rig = newRig(to(-YAW, PITCH / 2, 12));
-  const frames = run(rig, rest, "rest", (r) => ({ head: r.yaw.x, body: r.bodyYaw.x, roll: r.roll.x }));
+  const frames = run(rig, rest, "rest", (r) => ({ head: r.yaw.x, roll: r.roll.x }));
   // Eased out of where it was held, and never past where it rests.
   expect(frames[0]!.head + YAW).toBeLessThan(frames[1]!.head - frames[0]!.head);
   for (const f of frames) {
     expect(f.head).toBeLessThanOrEqual(rest.yaw);
-    expect(f.body).toBeLessThanOrEqual(rest.yaw + 0.3);
     expect(f.roll).toBeGreaterThanOrEqual(rest.roll - 0.3);
   }
   expect(frames.length).toBeGreaterThan(run(newRig(), to(YAW), "track", (r) => r.yaw.x).length * 0.8);
@@ -126,7 +123,7 @@ test("a long frame doesn't throw it off", () => {
 test("facing straight out a bot is drawn as its shape is, and turned, the body and each eye have their own transforms", () => {
   const rig = newRig();
   // Nothing on the body or the eyes; the whole bot only leans back a hair from where it rests.
-  expect(frame(rig, orb, 100)).toEqual({ whole: `translate(${((-restOf(orb).yaw / YAW) * 2.6).toFixed(2)}px, 0px) rotate(0deg) scale(1.0000)`, body: "none", left: "none", right: "none", back: false });
+  expect(frame(rig, orb, 100)).toEqual({ whole: `translate(${((-restOf(orb).yaw / YAW) * TRAVEL).toFixed(2)}px, 0px) rotate(0deg) scale(1.0000)`, body: "none", left: "none", right: "none", back: false });
   snap(rig, to(30, 10, 8, 0.05));
   const f = frame(rig, orb, 100);
   // The body takes part of the head's turn, in perspective, and the whole bot rolls and swells.
@@ -175,18 +172,31 @@ test("at rest a bot is turned up and away and rolled over, the same for every sh
   expect(SHAPES.filter((s) => Math.abs(restOf(s).yaw - RESTING.x * YAW) < 1e-9).length).toBeGreaterThanOrEqual(9);
 });
 
-test("an eye is drawn where the turn puts it on the body: the same place `project` says", () => {
+test("the face is drawn where the turn puts it on the body, its eyes coming only a little nearer each other turned away", () => {
   for (const shape of SHAPES.slice(0, 6)) {
     const rig = newRig();
     snap(rig, to(-25, -18));
     const f = frame(rig, shape, 100);
     const { gap } = eyesOf(shape);
+    const at: [number, number][] = [];
     for (const [side, t] of [[-1, f.left], [1, f.right]] as const) {
       const [, , , , x, y] = t.slice(7, -1).split(", ").map(Number);
-      const [px, py] = project(shape.face.x + (side * gap) / 2, shape.face.y, -25, -18);
-      expect(shape.face.x + (side * gap) / 2 + x!).toBeCloseTo(px, 1);
-      expect(shape.face.y + y!).toBeCloseTo(py, 1);
+      at.push([shape.face.x + (side * gap) / 2 + x!, shape.face.y + y!]);
+      // Where eyeAt puts it, as the guard and the turn limits work it out.
+      const e = eyeAt(shape, side, -25, -18);
+      expect(at.at(-1)![0]).toBeCloseTo(e.px, 1);
+      expect(at.at(-1)![1]).toBeCloseTo(e.py, 1);
     }
+    // Between them, where `project` puts the middle of the face.
+    const [mx, my] = project(shape.face.x, shape.face.y, -25, -18);
+    expect((at[0]![0] + at[1]![0]) / 2).toBeCloseTo(mx, 0);
+    expect((at[0]![1] + at[1]![1]) / 2).toBeCloseTo(my, 0);
+    // Nearer each other than straight ahead, but by far less than a true turn would bring them.
+    const apart = at[1]![0] - at[0]![0];
+    const [l, r] = [project(shape.face.x - gap / 2, shape.face.y, -25, -18), project(shape.face.x + gap / 2, shape.face.y, -25, -18)];
+    expect(apart).toBeLessThan(gap);
+    expect(apart).toBeGreaterThan(r[0] - l[0]);
+    expect(gap - apart).toBeLessThan((gap - (r[0] - l[0])) * 0.4);
   }
 });
 
@@ -203,16 +213,15 @@ test("whatever it does, the body never lifts: it leans sideways and settles down
   }
 });
 
-test("a nod dips the head and the body after it, and brings them back: down, never up", () => {
+test("a nod dips the head and brings it back without bobbing past: down, never up", () => {
   const rig = newRig();
   nod(rig);
-  const frames = run(rig, AHEAD, "rest", (r) => ({ head: r.pitch.x, body: r.bodyPitch.x, y: Number(/translate\([^,]+, (-?[\d.]+)px\)/.exec(frame(r, orb, 100).whole)?.[1] ?? 0) }));
-  // A real dip of the head, the body going less far; over within a second.
+  const frames = run(rig, AHEAD, "track", (r) => ({ head: r.pitch.x, y: Number(/translate\([^,]+, (-?[\d.]+)px\)/.exec(frame(r, orb, 100).whole)?.[1] ?? 0) }));
+  // A real dip of the head; over within a second.
   const deepest = Math.max(...frames.map((f) => f.head));
   expect(deepest).toBeGreaterThan(14);
   expect(deepest).toBeLessThan(30);
-  expect(Math.max(...frames.map((f) => f.body))).toBeLessThan(deepest);
-  expect(frames.length).toBeLessThan(70);
+  expect(frames.length).toBeLessThan(60);
   for (const f of frames) {
     expect(f.head).toBeGreaterThanOrEqual(0);
     expect(f.y).toBeGreaterThanOrEqual(0);
@@ -220,14 +229,39 @@ test("a nod dips the head and the body after it, and brings them back: down, nev
   expect(frame(rig, orb, 100)).toEqual(frame(newRig(), orb, 100));
 });
 
-test("turned right round, the body shows its back and the face is out of sight", () => {
-  const rig = newRig();
-  for (const [spin, back] of [[0, false], [60, false], [120, true], [180, true], [250, true], [300, false]] as const) {
-    rig.spin = spin;
-    expect(frame(rig, orb, 96).back).toBe(back);
+test("in a spin or a flip the face goes right round a puffy body: over its edge, out of sight, and in from the other side", () => {
+  const parse = (t: string) => t.slice(7, -1).split(", ").map(Number) as [number, number, number, number, number, number];
+  const [hw, hh] = (() => { const pts = outline(orb.path).flat(); return [Math.max(...pts.map((p) => Math.abs(p[0] - 50))), Math.max(...pts.map((p) => Math.abs(p[1] - 50)))]; })();
+  for (const turn of ["spin", "flip"] as const) {
+    const rig = newRig();
+    const axis = turn === "spin" ? 0 : 1;
+    for (const [deg, back] of [[0, false], [60, false], [120, true], [180, true], [250, true], [300, false]] as const) {
+      rig[turn] = deg;
+      expect(frame(rig, orb, 100).back).toBe(back);
+    }
+    // Edge-on, it's a thick thing (THICK of itself), not a card seen side-on; and the face is right at its edge.
+    rig[turn] = 90;
+    const f = frame(rig, orb, 100);
+    expect(f.body).toBe(turn === "spin" ? `scale(${THICK.toFixed(4)}, 1.0000)` : `scale(1.0000, ${THICK.toFixed(4)})`);
+    for (const t of [f.left, f.right]) {
+      const m = parse(t);
+      // Narrowed to nothing the way it's turning, and slid to the edge it's going over (left, or the top).
+      expect(Math.abs(m[axis === 0 ? 0 : 3])).toBeLessThan(0.001);
+      const at = axis === 0 ? orb.face.x + m[4] : orb.face.y + m[5];
+      expect(Math.abs(at - (50 - (axis === 0 ? hw : hh)))).toBeLessThan(axis === 0 ? eyesOf(orb).gap : 3);
+    }
+    // Coming back round, the face is in from the other side, below or on the right.
+    rig[turn] = 300;
+    const back = parse(frame(rig, orb, 100).left);
+    expect(axis === 0 ? orb.face.x + back[4] : orb.face.y + back[5]).toBeGreaterThan(50);
   }
-  rig.spin = 180;
-  expect(frame(rig, orb, 96).body).toContain("rotateY(180.00deg)");
+  // It's off at once and comes back round easing all the way: over the edge in a twentieth of it,
+  // out of sight for under a fifth, and most of the way home by half way.
+  expect(turnAt(0.06)).toBeGreaterThan(90);
+  const hidden = Array.from({ length: 1000 }, (_, i) => turnAt(i / 1000)).filter((d) => d > 90 && d < 270).length;
+  expect(hidden).toBeLessThan(200);
+  expect(turnAt(0.5)).toBeGreaterThan(340);
+  for (let t = 0.01; t <= 1; t += 0.01) expect(turnAt(t)).toBeGreaterThanOrEqual(turnAt(t - 0.01));
 });
 
 test("an outline follows its shape's path: closed parts, inside where the body is", () => {
@@ -319,13 +353,27 @@ test("a shape's turn limits are worked out ahead of its first look, a form at a 
   expect(waiting.length).toBe(0);
 });
 
-test("the eyes are tall pills, and at work they're big: a quarter of the face between them", () => {
+test("the eyes are tall pills, at work they're big, curious they're round dots, and reading wide ovals", () => {
   expect(EYE_H / EYE_W).toBeGreaterThan(2.1);
   // An open eye stands about a quarter of the body's height (the disc is 72 across).
   for (const shape of SHAPES) expect(eyesOf(shape).h).toBeGreaterThan(17);
   // At work both are much bigger, and a squint is a slit: well under half an open eye.
   expect(FORMS.big[0] * FORMS.big[1]).toBeGreaterThan(2.2);
   expect(FORMS.squint[1]).toBeLessThan(0.3);
+  // Round dots are as wide as they're tall; reading ovals a fifth wider than tall, and both bigger than an open eye.
+  expect(FORMS.dot[0] * EYE_W).toBeCloseTo(FORMS.dot[1] * EYE_H, 1);
+  expect((FORMS.read[0] * EYE_W) / (FORMS.read[1] * EYE_H)).toBeGreaterThan(1.05);
+  expect((FORMS.read[0] * EYE_W) / (FORMS.read[1] * EYE_H)).toBeLessThan(1.25);
+  for (const form of ["dot", "read"] as const) expect(FORMS[form][0] * FORMS[form][1]).toBeGreaterThan(1.2);
+  // The bigger forms stand a little wider apart; on the reference's cloud, the reading ovals all but touch.
+  expect(spreadOf("open")).toBe(1);
+  for (const form of ["big", "dot", "read"]) expect(spreadOf(form)).toBeGreaterThan(1.05);
+  const { w, gap } = eyesOf(SHAPES.find((s) => s.id === "cloud")!);
+  expect(gap * spreadOf("read") - w * FORMS.read[0]).toBeGreaterThan(0);
+  expect(gap * spreadOf("read") - w * FORMS.read[0]).toBeLessThan(w * 0.4);
+  // Small eyes at work, when a pose asks for them.
+  expect(eyesFor({ x: 0, y: 0, eyes: "open" }, true)).toBeUndefined();
+  expect(eyesFor({ x: 0, y: 0, eyes: "dot" }, true)).toBe("dot");
   // A bot at work has them big whenever a pose would leave them open or staring, and only then.
   expect(eyesFor(undefined, true)).toBe("big");
   expect(eyesFor({ x: 0, y: 0 }, true)).toBe("big");
@@ -347,8 +395,8 @@ test("turned away, the eyes are a little smaller all round, and keep most of the
   };
   const [w, h] = size(YAW, 0);
   // A full turn to the side: shorter by FAR, and narrower still, but by far less than a true turn would.
-  expect(h).toBeGreaterThan(0.85);
-  expect(h).toBeLessThan(0.92);
+  expect(h).toBeGreaterThan(0.9);
+  expect(h).toBeLessThan(0.98);
   expect(w).toBeLessThan(h);
   expect(w).toBeGreaterThan(0.75);
   expect(w).toBeGreaterThan(Math.cos((YAW * Math.PI) / 180) * (1 - FAR));
@@ -380,8 +428,10 @@ test("a full turn takes the eyes well over, but keeps them off the body's edge",
  * its corners), put through the eye's matrix, and the body's own polygon there and further out. What's
  * returned is what's too near.
  */
+const bodies = new Map<string, ReturnType<typeof outline>>();
 function tooNear(shape: (typeof SHAPES)[number], f: ReturnType<typeof frame>, look: EyeLook, need: number): string[] {
-  const body = outline(shape.path);
+  let body = bodies.get(shape.id);
+  if (!body) bodies.set(shape.id, (body = outline(shape.path)));
   const { w: ew, h: eh, gap } = eyesOf(shape);
   const d: Drawn = DRAWN[look];
   const [w, h, drop] = [ew * d.w, eh * d.h, eh * (d.drop ?? 0)];
@@ -431,7 +481,7 @@ test("the guard only steps in where an eye would come near the rim: elsewhere a 
   const untouched = SHAPES.filter((s) => {
     const f = restFrame(s, 100);
     const [, , , , x] = f.left.slice(7, -1).split(", ").map(Number);
-    return Math.abs(x! - (project(s.face.x - eyesOf(s).gap / 2, s.face.y, restOf(s).yaw, restOf(s).pitch)[0] - (s.face.x - eyesOf(s).gap / 2))) < 0.01;
+    return Math.abs(x! - (eyeAt(s, -1, restOf(s).yaw, restOf(s).pitch).px - (s.face.x - eyesOf(s).gap / 2))) < 0.01;
   });
   expect(untouched.length).toBeGreaterThanOrEqual(11);
   // And a turn only part of the way, nowhere near the edge, is the same with any face.
@@ -439,32 +489,30 @@ test("the guard only steps in where an eye would come near the rim: elsewhere a 
   for (const shape of SHAPES) expect(frame(rig, shape, 100, "happy")).toEqual(frame(rig, shape, 100, "open"));
 });
 
-test("however it turns, swings past, nods or darts its eyes, no eye ever comes near the rim", () => {
+test("however it turns, nods or looks quizzical, no eye ever comes near the rim", () => {
   const near = new Set<string>();
   const check = (shape: (typeof SHAPES)[number], rig: Rig, look: EyeLook, what: string) => {
     if (tooNear(shape, frame(rig, shape, 100, look), look, MARGIN).length) near.add(`${shape.id} ${look} ${what}`);
   };
   for (const shape of SHAPES)
     for (const look of LOOKS) {
-      // Held anywhere, a fifth past a full turn each way, the eyes leading as far as they can either way.
+      // Held anywhere, a fifth past a full turn each way, its eyes spaced and sized for the form, and
+      // round-eyed, quizzical too (one eye a fifth bigger).
       for (let i = 0; i < 16; i++) {
         const a = (i / 16) * Math.PI * 2;
-        for (const lead of [0, 1]) {
-          const rig = newRig(to(Math.cos(a) * YAW * 1.2, Math.sin(a) * PITCH * 1.2));
-          rig.leadX.x = Math.cos(a) * 4.5 * lead;
-          rig.leadY.x = Math.sin(a) * 4.5 * lead;
-          check(shape, rig, look, `held ${i} lead ${lead}`);
+        for (const near of look === "dot" ? [0, 0.2] : [0]) {
+          const rig = newRig({ ...to(Math.cos(a) * YAW * 1.2, Math.sin(a) * PITCH * 1.2), spread: spreadOf(look), size: sizeOf(shape, look), near });
+          check(shape, rig, look, `held ${i} near ${near}`);
         }
       }
     }
-  // On the move, frame by frame: looking hard over every way (springs swinging past, the eyes ahead),
-  // and a nod on top of it.
+  // On the move, frame by frame: looking hard over every way, and a nod on top of it.
   for (const shape of SHAPES)
-    for (const look of ["open", "big", "happy", "love"] as const)
+    for (const look of ["open", "big", "dot", "happy", "love"] as const)
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * Math.PI * 2;
         const rig = newRig(restOf(shape));
-        const target = poseTarget(shape, { x: Math.cos(a), y: Math.sin(a) }, look === "big");
+        const target = { ...poseTarget(shape, { x: Math.cos(a), y: Math.sin(a), ...(look === "dot" && { eyes: "dot" as const, near: 0.18 }) }, look === "big"), spread: spreadOf(look), size: sizeOf(shape, look) };
         for (let f = 0; f < 80; f++) {
           if (f === 20) nod(rig);
           step(rig, target, 1000 / 60, "pose");
@@ -476,13 +524,11 @@ test("however it turns, swings past, nods or darts its eyes, no eye ever comes n
 
 test("reading, line after line, no shape's eyes ever come near the rim", () => {
   const near = new Set<string>();
-  const line = READING.settle + READING.sweep;
   for (const shape of SHAPES) {
-    // From rest into a page and a bit of reading, frame by frame: the snap back to each line's start
-    // swings past and the eyes dart ahead of the head.
+    // From rest into a page and a half of reading, frame by frame, the ovals spaced as they're drawn.
     const rig = newRig(restOf(shape));
-    for (let f = 0; f * (1000 / 60) < line * (READING.lines + 1); f++) {
-      step(rig, poseTarget(shape, readingAt(f * (1000 / 60)), true), 1000 / 60, "pose");
+    for (let f = 0; f * (1000 / 60) < READING_MS * 1.5; f++) {
+      step(rig, { ...poseTarget(shape, readingAt(f * (1000 / 60)), true), spread: spreadOf("read"), size: sizeOf(shape, "read") }, 1000 / 60, "pose");
       if (f % 3 === 0 && tooNear(shape, frame(rig, shape, 100, "read"), "read", MARGIN).length) near.add(`${shape.id} frame ${f}`);
     }
   }

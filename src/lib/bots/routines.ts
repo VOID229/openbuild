@@ -1,93 +1,145 @@
-// OpenBots: what a bot does of its own accord. A routine is a few steps one after another: a pose
-// held for a while, straight ahead again, a blink, a move or a face. Idle, a bot mostly stares and
-// looks around; at work it's brisk, turning, rolling and peering at things. Everything is a turn or a
-// lean of the whole body: nothing hops, and nothing spins of its own accord.
+// OpenBots: what a bot does of its own accord. At work it plays clips: short choreographed runs of
+// looks, each pose held a moment, as the reference recording of Grok Bot's mascots does: a look
+// round that ends in a backflip, a sway from side to side looking down, a curious spell with round
+// eyes, and a breather back at rest. Every clip is the same each time it plays, as the reference's
+// are; which one comes next is chosen at random, never the same twice running. Idle, a bot mostly rests,
+// with a blink or a calm look about now and then. Nothing hops: a bot moves by turning, rolling and
+// leaning, and at work, now and then, by going right round (a flip or a spin).
 import type { Action, Mood } from "./looks";
-import type { Pose } from "./rig";
+import { RESTING, type Pose } from "./rig";
 
-/** One step of a routine, held for its ms: a pose, straight ahead again (null), a blink, a move or a face. */
-export type Step = [Pose | null | "blink" | "blink2" | Action | { flash: Mood }, number];
+/**
+ * One step of a routine, held for its ms: a pose, back to rest (null), a blink, a move, a face, or a
+ * sweep (the pose it looks toward moving steadily there over the ms, from wherever it was). A step of
+ * 0 ms happens with the next one.
+ */
+export type Step = [Pose | null | "blink" | "blink2" | Action | { flash: Mood } | { sweep: Pose }, number];
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const side = () => (Math.random() < 0.5 ? -1 : 1);
 const pick = <T,>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;
-const AHEAD: Pose = { x: 0, y: 0 };
-
-/** A busy bot's routines. Brisk: each look is held just long enough to read as a thought. */
-const BEATS: { weight: number; steps: () => Step[] }[] = [
-  // A wide stare straight out, rocking from side to side as it works.
-  { weight: 4, steps: () => { const s = side(); return [[{ x: 0, y: -0.04, roll: s * 10, eyes: "wide" }, rand(520, 760)], [{ x: 0, y: -0.04, roll: -s * 10, eyes: "wide" }, rand(520, 760)], [{ x: 0, y: 0, roll: s * 5, eyes: "wide" }, 420], [AHEAD, 280]]; } },
-  // A hard look off to one side, the whole body rolling into it, and back.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * rand(0.8, 1), y: rand(-0.4, 0.35), roll: s * rand(12, 22) }, rand(700, 1200)], [AHEAD, rand(300, 520)]]; } },
-  // Up and away at something, wide-eyed, the head thrown right back over the other shoulder.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * rand(0.6, 0.8), y: rand(-0.9, -0.7), roll: -s * rand(22, 30), eyes: "wide" }, rand(800, 1300)], [AHEAD, rand(320, 480)]]; } },
-  // Following something along the bottom, eyes wide and low on the face, rolling over as it goes.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.75, y: 0.85, roll: -s * rand(16, 22), eyes: "wide" }, rand(600, 800)], [{ x: 0, y: 1, roll: -s * 4, eyes: "wide" }, rand(420, 560)], [{ x: s * 0.7, y: 0.85, roll: s * 6, eyes: "wide" }, rand(600, 800)], [AHEAD, 360]]; } },
-  // Working it out: eyes narrowed to dashes, looking up a little, swaying slowly from side to side.
-  { weight: 2, steps: () => { const s = side(); return [[{ x: -s * 0.1, y: -0.45, roll: -s * 12, eyes: "squint" }, rand(700, 900)], [{ x: s * 0.15, y: -0.4, roll: s * 14, eyes: "squint" }, rand(800, 1000)], [{ x: 0, y: -0.4, roll: 0, eyes: "squint" }, 420], [AHEAD, 320]]; } },
-  // Reading: eyes narrowed, scanning along a line and the next, the head going with them.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.9, y: 0.3, eyes: "squint" }, 400], [{ x: -s * 0.3, y: 0.32, eyes: "squint" }, 280], [{ x: s * 0.35, y: 0.32, eyes: "squint" }, 280], [{ x: s * 0.95, y: 0.36, eyes: "squint" }, 460], [AHEAD, 340]]; } },
-  // Pondering: up and away, head cocked the other way, eyes narrowed.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.7, y: -0.9, roll: -s * 13, eyes: "squint" }, rand(900, 1400)], ["blink", 260], [AHEAD, 340]]; } },
-  // Curious: rolled right over to one side, eyes wide.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.3, y: 0.05, roll: s * rand(26, 38), eyes: "wide" }, rand(800, 1300)], ["blink", 260], [AHEAD, 380]]; } },
-  // Leaning back from it a touch for a better look, eyes gone round.
-  { weight: 1, steps: () => { const s = side(); return [[{ x: s * 0.45, y: 0.3, roll: s * 6, zoom: -0.06, eyes: "round" }, rand(900, 1400)], [{ x: -s * 0.4, y: 0.25, roll: -s * 6, zoom: -0.06, eyes: "round" }, rand(500, 800)], [AHEAD, 380]]; } },
-  // Peering at something low, then eyes wide at what it found.
-  { weight: 2, steps: () => { const s = side(); return [[{ x: s * 0.4, y: 0.95, eyes: "squint" }, rand(800, 1200)], [{ x: s * 0.4, y: 0.9, zoom: 0.06, eyes: "wide" }, 460], [AHEAD, 340]]; } },
-  // Leaning right in, wide-eyed and close.
-  { weight: 2, steps: () => [[{ x: 0, y: 0.08, zoom: 0.1, eyes: "wide" }, rand(1000, 1700)], ["blink", 260], [AHEAD, 300]] },
-  // Mulling it over: a look down and a nod or two.
-  { weight: 2, steps: () => [[{ x: 0, y: 0.95 }, 300], [{ x: 0, y: 0.15 }, 240], [{ x: 0, y: 0.8 }, 260], [AHEAD, 340]] },
-  // A double take.
-  { weight: 2, steps: () => { const s = side(); return [[{ x: s * 0.85, y: 0 }, 260], [AHEAD, 220], [{ x: s, y: -0.1, roll: s * 16, eyes: "wide" }, 900], [AHEAD, 360]]; } },
-  // A bright idea: straight at you, eyes wide, with a little swell.
-  { weight: 1, steps: () => [[{ x: 0, y: -0.2, eyes: "wide" }, 260], ["pop", 520], [{ x: 0, y: 0, eyes: "wide" }, 420], [AHEAD, 260]] },
-  // Now and then, a little move.
-  { weight: 1, steps: () => [[AHEAD, 200], [pick(["wiggle", "nod"] as const), 700]] },
-];
-const beatTotal = BEATS.reduce((n, b) => n + b.weight, 0);
-export function nextBeat(): Step[] {
-  let r = Math.random() * beatTotal;
-  for (const b of BEATS) if ((r -= b.weight) < 0) return b.steps();
-  return BEATS[0]!.steps();
-}
+/** Straight ahead: at work, with the big eyes. (A getter, so that no two steps share a pose to be changed under them.) */
+const ahead = (): Pose => ({ x: 0, y: 0 });
 
 /**
- * An idle bot's routines, with a rest looking straight out between them: mostly staring and looking
- * around, the odd blink, and for lively ones a small move or a face. `looks` marks the ones that take
+ * The clips a bot at work plays, each the reference's own: its poses (where the eyes land, measured
+ * off the recording and fitted to our rig) and how long each is held, move included.
+ */
+export const CLIPS = {
+  /**
+   * A look round: left, up and left (blinking on the way), a long look over to the right, up, and down,
+   * then a backflip, the face going up over the top and coming back up from below.
+   */
+  lookFlip: (): Step[] => [
+    [{ x: -0.48, y: -0.28, roll: 11 }, 500],
+    ["blink", 0],
+    [{ x: -0.62, y: -0.57, roll: 14 }, 620],
+    [{ x: 0.27, y: -0.5, roll: -5 }, 1080],
+    [{ x: 0.03, y: -0.79, roll: 0 }, 420],
+    [{ x: 0, y: 0.72 }, 430],
+    [ahead(), 0],
+    ["flip", 700],
+    [ahead(), 900],
+  ],
+  /**
+   * Looking down, rolled right over to one side, then sweeping slowly across to the other, rolling
+   * over the other way, and quickly back: three times, a little slower each time.
+   */
+  sway: (): Step[] => {
+    const left: Pose = { x: -0.21, y: 0.82, roll: 33 };
+    const right: Pose = { x: 0.3, y: 0.95, roll: -30 };
+    return [[left, 850], [{ sweep: right }, 750], [right, 300], [left, 450], [{ sweep: right }, 900], [right, 250], [left, 650], [{ sweep: right }, 1000], [right, 300], [ahead(), 400]];
+  },
+  /**
+   * Curious: eyes gone to round dots, it leans right back away from something up and to the left, one
+   * eye bigger than the other, then looks over the other way, comes back in big-eyed, spins right round
+   * and settles small-eyed.
+   */
+  curious: (): Step[] => [
+    [ahead(), 500],
+    [{ x: 0, y: 0, eyes: "dot" }, 1000],
+    [{ x: -0.71, y: -0.2, roll: 20, zoom: -0.27, eyes: "dot", near: 0.17 }, 1250],
+    [{ x: 0.35, y: -0.16, roll: -20, zoom: -0.1, eyes: "dot", near: 0.15 }, 800],
+    [{ x: 0.43, y: -0.18, roll: -23 }, 1000],
+    ["spin", 450],
+    [{ x: 0.21, y: 0, eyes: "open" }, 900],
+    [ahead(), 800],
+  ],
+  /** Glancing off small-eyed, then at something to the left with round eyes, one bigger, and back. */
+  glance: (): Step[] => [
+    [{ x: 0.44, y: -0.1, eyes: "open" }, 700],
+    [{ x: -0.63, y: -0.3, roll: 10, eyes: "dot", near: 0.18 }, 1060],
+    [{ x: 0, y: 0, eyes: "open" }, 650],
+    [ahead(), 600],
+  ],
+  /**
+   * A breather: back at rest a moment, small-eyed, then a look to the left, up, and round about with
+   * the big eyes again, and straight ahead.
+   */
+  breather: (): Step[] => [
+    [{ ...RESTING, eyes: "open" }, 1200],
+    [{ x: -0.75, y: -0.13, roll: 3, eyes: "open" }, 770],
+    [{ x: -0.23, y: -1, roll: -20, zoom: 0.04, eyes: "open" }, 560],
+    [{ x: 0, y: -1, roll: -7, zoom: 0.02 }, 670],
+    [{ x: -0.5, y: -0.65, roll: 8 }, 500],
+    [{ x: 0.32, y: -0.39, roll: -18 }, 430],
+    [ahead(), 1170],
+  ],
+} satisfies Record<string, () => Step[]>;
+export type Clip = keyof typeof CLIPS;
+
+/** How often each clip comes up at work: the look round most, as in the reference. */
+const WEIGHTS: Record<Clip, number> = { lookFlip: 4, sway: 2, curious: 1, glance: 1, breather: 2 };
+
+/** A busy bot's next clip, never the one it just played. */
+export function nextClip(last?: Clip): Clip {
+  const open = (Object.keys(WEIGHTS) as Clip[]).filter((c) => c !== last);
+  let r = Math.random() * open.reduce((n, c) => n + WEIGHTS[c], 0);
+  for (const c of open) if ((r -= WEIGHTS[c]) < 0) return c;
+  return open[0]!;
+}
+
+/** A busy bot's routine, one clip after another: each call plays the next one (and remembers it). */
+export function beats() {
+  let last: Clip | undefined;
+  return (): Step[] => CLIPS[(last = nextClip(last))]();
+}
+/** One clip at random, for whoever doesn't keep track. */
+export const nextBeat = (): Step[] => CLIPS[nextClip()]();
+
+/**
+ * Coming back from three dots, as in the reference: round-eyed straight out, leaning right back for a
+ * look up and to the left, small-eyed for a moment, and big-eyed into the work.
+ */
+export const AFTER_DOTS: Step[] = [
+  [{ x: 0, y: 0, eyes: "dot" }, 750],
+  [{ x: -0.71, y: -0.2, roll: 20, zoom: -0.27, eyes: "dot", near: 0.17 }, 850],
+  [{ x: 0.05, y: -0.6, roll: -15, eyes: "open" }, 420],
+  [ahead(), 900],
+];
+
+/**
+ * An idle bot's routines, with a rest between them: mostly just resting, the odd blink, now and then
+ * a calm look about with its small eyes, and for lively ones a face. `looks` marks the ones that take
  * the eyes off ahead, which a bot following the pointer skips: it's looking at the pointer.
  */
 const IDLE: { weight: number; looks?: true; lively?: true; steps: () => Step[] }[] = [
   // A blink, now and then twice.
-  { weight: 3, steps: () => [[Math.random() < 0.15 ? "blink2" : "blink", 300]] },
-  // A stare: straight out, leaning in a touch, eyes wider, held without a blink.
-  { weight: 3, looks: true, steps: () => [[{ x: 0, y: -0.05, zoom: 0.035, eyes: "wide" }, rand(1600, 3000)], [AHEAD, 200]] },
-  // A look off somewhere, the whole body turning and leaning into it, and back.
-  { weight: 3, looks: true, steps: () => [[{ x: side() * rand(0.55, 1), y: rand(-0.6, 0.45) }, rand(800, 1600)], [AHEAD, 300]] },
-  // A long look up and away, the head rolled right back, held as if lost in it.
-  { weight: 2, looks: true, steps: () => { const s = side(); return [[{ x: s * rand(0.55, 0.8), y: rand(-0.85, -0.6), roll: -s * rand(18, 28) }, rand(1800, 3200)], [AHEAD, 340]]; } },
-  // Looking around: a few looks this way and that, then straight out again.
-  {
-    weight: 3,
-    looks: true,
-    steps: () => {
-      let s = side();
-      const looks = Array.from({ length: 2 + Math.floor(Math.random() * 3) }, (): Step => [{ x: (s = -s) * rand(0.5, 1), y: rand(-0.55, 0.4) }, rand(420, 950)]);
-      return [...looks, [AHEAD, 300]];
-    },
-  },
-  // Head cocked over to one side at something, and back.
-  { weight: 2, looks: true, steps: () => { const s = side(); return [[{ x: s * 0.25, y: -0.1, roll: s * rand(14, 22) }, rand(900, 1700)], [AHEAD, 320]]; } },
-  // A small move, or a face pulled.
-  { weight: 1, lively: true, steps: () => [[pick(["nod", "nod", "pop", "wiggle"] as const), 700]] },
-  { weight: 1, lively: true, steps: () => [[{ flash: pick(["happy", "wink", "surprised", "squint"] as const) }, 1200]] },
+  { weight: 4, steps: () => [[Math.random() < 0.15 ? "blink2" : "blink", 300]] },
+  // Turning to look straight out a while, and back to rest.
+  { weight: 2, looks: true, steps: () => [[{ x: 0, y: 0, eyes: "open" }, rand(1400, 2600)], [null, 300]] },
+  // A look off to one side, then the other, and back to rest.
+  { weight: 2, looks: true, steps: () => { const s = side(); return [[{ x: s * rand(0.5, 0.8), y: rand(-0.3, 0.1), eyes: "open" }, rand(700, 1200)], [{ x: -s * rand(0.4, 0.7), y: rand(-0.3, 0.1), eyes: "open" }, rand(700, 1100)], [null, 300]]; } },
+  // A look up and away, the head cocked, held as if lost in it.
+  { weight: 1, looks: true, steps: () => { const s = side(); return [[{ x: s * rand(0.3, 0.6), y: rand(-0.9, -0.6), roll: -s * rand(10, 20), eyes: "open" }, rand(1200, 2200)], [null, 300]]; } },
+  // A face pulled.
+  { weight: 1, lively: true, steps: () => [[{ flash: pick(["happy", "wink", "surprised"] as const) }, 1200]] },
 ];
 export function nextIdle(lively: boolean, tracking = false): Step[] {
   const open = IDLE.filter((b) => (lively || !b.lively) && (!tracking || !b.looks));
   let r = Math.random() * open.reduce((n, b) => n + b.weight, 0);
-  for (const b of open) if ((r -= b.weight) < 0) return b.steps();
-  return open[0]!.steps();
+  for (const b of open) if ((r -= b.weight) < 0) return [[null, rand(2400, 5200)], ...b.steps()];
+  return [[null, rand(2400, 5200)], ...open[0]!.steps()];
 }
 
 /**
@@ -102,23 +154,38 @@ export function nextBlink(): Step[] {
 export const THINKING: Pose = { x: 0.12, y: -0.5, roll: -10 };
 
 /**
- * Reading, as in a book: eyes lowered onto the page, sweeping slowly along a line from left to right,
- * then snapping back to the left and dropping a touch, onto the next line, and along that. A few lines
- * down it's back up at the top, as on a new page, and reads on. It leans into each line a little as it
- * goes, and in toward the page.
+ * Reading, as the reference reads: wide oval eyes darting about the page, a quick look down, up to
+ * the top left and across, then back to the left of a line and slowly along it to the right, and
+ * quickly back. Each `at` is when a look starts, in ms into the page; a sweep moves steadily from the
+ * look before it to its own over `sweep` ms. The page then starts again.
  */
-export const READING = { lines: 4, settle: 240, sweep: 1900, top: 0.4, drop: 0.12, from: -0.72, to: 0.72, roll: 5, zoom: 0.03 } as const;
+export const READING_PAGE: { at: number; pose: Pose; sweep?: number }[] = [
+  { at: 0, pose: { x: -0.8, y: -0.15 } },
+  { at: 450, pose: { x: -0.43, y: 0.89, roll: 2 } },
+  { at: 920, pose: { x: -0.36, y: -0.89, roll: -8 } },
+  { at: 1920, pose: { x: 0.24, y: -0.92, roll: 6 } },
+  { at: 2570, pose: { x: -0.86, y: 0.17 } },
+  { at: 4150, pose: { x: 0.68, y: 0.12 }, sweep: 1150 },
+  { at: 4590, pose: { x: -0.71, y: 0.14 } },
+];
+/** How long a page of reading takes, ms, before it starts again. */
+export const READING_MS = 5300;
 
-/** Where a reading bot looks `ms` into its reading. The snap back is the jump from one line's end to the next one's start: the springs make it quick. */
+/** Where a reading bot looks `ms` into its reading. */
 export function readingAt(ms: number): Pose {
-  const { lines, settle, sweep, top, drop, from, to, roll, zoom } = READING;
-  const line = settle + sweep;
-  const t = ((ms % (line * lines)) + line * lines) % (line * lines);
-  const n = Math.floor(t / line);
-  const along = Math.max(0, t - n * line - settle) / sweep;
-  const x = from + (to - from) * along;
-  return { x, y: top + n * drop, roll: x * roll, zoom, eyes: "read" };
+  const t = ((ms % READING_MS) + READING_MS) % READING_MS;
+  let i = 0;
+  while (i + 1 < READING_PAGE.length && READING_PAGE[i + 1]!.at <= t) i++;
+  const next = READING_PAGE[i + 1];
+  const here = READING_PAGE[i]!;
+  // On its way along a line: steadily from where it was to where the sweep ends.
+  if (next?.sweep && t > next.at - next.sweep) {
+    const k = (t - (next.at - next.sweep)) / next.sweep;
+    const [a, b] = [here.pose, next.pose];
+    return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, roll: (a.roll ?? 0) + ((b.roll ?? 0) - (a.roll ?? 0)) * k, eyes: "read" };
+  }
+  return { roll: 0, ...here.pose, eyes: "read" };
 }
 
-/** Reading with motion reduced: held still, eyes down on the middle of the first line. */
-export const READING_STILL: Pose = readingAt(READING.settle + READING.sweep / 2);
+/** Reading with motion reduced: held still, eyes on the line it starts along. */
+export const READING_STILL: Pose = { x: 0, y: 0.15, roll: 0, eyes: "read" };

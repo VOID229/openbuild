@@ -1,7 +1,7 @@
 // A bot reading something, as arithmetic: which tool calls are reading (a file, a page, messages,
-// memory, search results, a thread), where its mascot looks as it reads (down, slowly along a line
-// from left to right, quickly back to the start of the next one a touch lower, a few lines and back
-// to the top), and that every shape reads with its eyes on its body and well clear of the rim.
+// memory, search results, a thread), where its mascot looks as it reads (as the reference recording
+// does: its eyes wide ovals, darting down, up and across the top, then slowly along a line and quickly
+// back to its start), and that every shape reads with its eyes on its body and well clear of the rim.
 // tests/botLiveStatus.test.ts sends the status end to end, tests/botReadingUi.test.ts shows it in
 // the app, and tests/botAvatarLife.test.ts watches a reading mascot in a real Chrome.
 import { expect, test } from "bun:test";
@@ -12,8 +12,8 @@ import { BotAvatar, BotHuddle, BotLineup } from "../src/components/bots/BotAvata
 import { reads } from "../server/bots/steps";
 import { reading } from "../src/lib/bots/activity";
 import { SHAPES } from "../src/lib/bots/looks";
-import { DRAWN, eyeLook, eyesOf, FORMS, frame, newRig, poseTarget, restOf, step } from "../src/lib/bots/rig";
-import { READING, READING_STILL, readingAt } from "../src/lib/bots/routines";
+import { DRAWN, EYE_H, EYE_W, eyeLook, eyesOf, FORMS, frame, newRig, poseTarget, restOf, sizeOf, spreadOf, step } from "../src/lib/bots/rig";
+import { READING_MS, READING_PAGE, READING_STILL, readingAt } from "../src/lib/bots/routines";
 
 test("reading a file, a page, messages, memory, search results or a thread is reading; doing things isn't", () => {
   const yes: [string, Record<string, unknown>][] = [
@@ -76,70 +76,48 @@ test("a bot reads, as far as anyone can see, only while it's visibly at work on 
 });
 
 /** Every pose the reading takes, a frame (60 fps) at a time, over `pages` pages. */
-const frames = (pages = 2) => {
-  const page = (READING.settle + READING.sweep) * READING.lines;
-  return Array.from({ length: Math.round((page * pages) / (1000 / 60)) }, (_, i) => ({ ms: (i * 1000) / 60, ...readingAt((i * 1000) / 60) }));
-};
+const frames = (pages = 2) => Array.from({ length: Math.round((READING_MS * pages) / (1000 / 60)) }, (_, i) => ({ ms: (i * 1000) / 60, ...readingAt((i * 1000) / 60) }));
 
-test("reading, it looks down, along a line slowly from left to right, and quickly back to the left and a touch lower", () => {
+test("reading, its eyes dart about the page as the reference's do: down, up and across the top, then back to a line's start and slowly along it", () => {
   const all = frames();
-  // Always looking down at the page, its eyes lowered onto it, leaning in a little.
-  for (const p of all) {
-    expect(p.y).toBeGreaterThan(0.3);
-    expect(p.eyes).toBe("read");
-    expect(p.zoom).toBeGreaterThan(0);
-  }
-  // Along each line: steadily rightward, from well left to well right, taking a good while about it.
-  const line = READING.settle + READING.sweep;
-  for (let n = 0; n < READING.lines * 2; n++) {
-    const on = all.filter((p) => p.ms >= n * line && p.ms < (n + 1) * line);
-    for (let i = 1; i < on.length; i++) {
-      expect(on[i]!.x).toBeGreaterThanOrEqual(on[i - 1]!.x);
-      expect(on[i]!.y).toBe(on[0]!.y);
-      // Never faster than the whole line in 1.5 s.
-      expect(on[i]!.x - on[i - 1]!.x).toBeLessThan(((READING.to - READING.from) / 1500) * (1000 / 60) + 1e-9);
-    }
-    expect(on[0]!.x).toBeLessThan(-0.6);
-    expect(on.at(-1)!.x).toBeGreaterThan(0.6);
-  }
-  expect(READING.sweep).toBeGreaterThanOrEqual(1500);
-  // Then straight back to the left in one go, and down to the next line: a touch lower each time.
-  const jumps = all.slice(1).flatMap((p, i) => (p.x < all[i]!.x ? [[all[i]!, p] as const] : []));
-  expect(jumps.length).toBe(READING.lines * 2 - 1);
-  for (const [from, to] of jumps) {
-    expect(from.x - to.x).toBeGreaterThan(1.2);
-    const down = to.y - from.y;
-    // Down a little to the next line, or after the last one, back up to the top of the next page.
-    if (down > 0) expect(down).toBeCloseTo(READING.drop, 6);
-    else expect(to.y).toBe(READING.top);
-  }
-  const ys = [...new Set(all.map((p) => p.y))].sort();
-  expect(ys.length).toBe(READING.lines);
-  expect(ys.at(-1)! - ys[0]!).toBeLessThan(0.45);
-  // It leans into the line as it goes, and only a little.
-  expect(Math.max(...all.map((p) => Math.abs(p.roll ?? 0)))).toBeLessThan(6);
-  expect(Math.sign(readingAt(READING.settle + READING.sweep * 0.9).roll!)).toBe(1);
-  expect(Math.sign(readingAt(READING.settle + READING.sweep * 0.1).roll!)).toBe(-1);
-  // With motion reduced, it's simply looking down at the page.
-  expect(READING_STILL).toMatchObject({ x: 0, y: READING.top, eyes: "read" });
+  for (const p of all) expect(p.eyes).toBe("read");
+  // Every look is somewhere on the page: from well left to well right, and from the top to the bottom.
+  expect(Math.min(...all.map((p) => p.x))).toBeLessThan(-0.75);
+  expect(Math.max(...all.map((p) => p.x))).toBeGreaterThan(0.6);
+  expect(Math.min(...all.map((p) => p.y))).toBeLessThan(-0.8);
+  expect(Math.max(...all.map((p) => p.y))).toBeGreaterThan(0.8);
+  // Held at each look until the next, but along the line it reads: steadily rightward, taking a good
+  // second about it, from the line's start at the left.
+  const sweep = READING_PAGE.find((l) => l.sweep)!;
+  const along = all.filter((p) => p.ms % READING_MS > sweep.at - sweep.sweep! && p.ms % READING_MS < sweep.at);
+  expect(sweep.sweep!).toBeGreaterThanOrEqual(1000);
+  for (let i = 1; i < along.length; i++) if (along[i]!.ms - along[i - 1]!.ms < 20) expect(along[i]!.x).toBeGreaterThan(along[i - 1]!.x);
+  expect(along[0]!.x).toBeLessThan(-0.75);
+  expect(along.at(-1)!.x).toBeGreaterThan(0.6);
+  // Then quickly back to the left, on the same line, and round to the top of the page again.
+  const back = READING_PAGE.at(-1)!;
+  expect(readingAt(back.at + 1).x).toBeLessThan(-0.6);
+  expect(Math.abs(readingAt(back.at + 1).y - sweep.pose.y)).toBeLessThan(0.1);
+  expect(readingAt(READING_MS + 1)).toEqual(readingAt(1));
+  // Hardly rolled: it reads with its eyes.
+  expect(Math.max(...all.map((p) => Math.abs(p.roll ?? 0)))).toBeLessThan(10);
+  // With motion reduced, it's simply on the line, its eyes on the page.
+  expect(READING_STILL).toMatchObject({ x: 0, eyes: "read" });
 });
 
-test("its eyes, lowered to read, are the big eyes of work with the lids come down, mostly from the top, and bots.css draws them so", () => {
+test("its eyes, reading, are wide ovals all but touching, and bots.css draws them so", () => {
   const [w, h] = FORMS.read;
-  // Still big and deep: fatter and as tall as an open eye, and well short of a working one.
-  expect(w).toBeGreaterThan(1.3);
-  expect(h).toBeGreaterThanOrEqual(1);
-  expect(h).toBeLessThan(FORMS.big[1] * 0.75);
-  // Coming from a working eye, its top comes down a good deal further than its foot comes up.
-  const top = FORMS.big[1] / 2 - h / 2 + DRAWN.read.drop;
-  const foot = FORMS.big[1] / 2 - h / 2 - DRAWN.read.drop;
-  expect(top).toBeGreaterThan(foot * 2.5);
-  expect(foot).toBeGreaterThanOrEqual(0);
-  // The same numbers in the sheet (--lift is the other way up from drop).
+  // Wider than tall, bigger than an open eye, and short of a working one.
+  expect(w * EYE_W).toBeGreaterThan(h * EYE_H);
+  expect(w * h).toBeGreaterThan(1.5);
+  expect(w * h).toBeLessThan(FORMS.big[0] * FORMS.big[1]);
+  expect(DRAWN.read).toEqual({ w, h });
+  // The same numbers in the sheet, round all the way (an ellipse, not a pill).
   const css = readFileSync(`${import.meta.dir}/../src/bots.css`, "utf8");
   const rule = /\.bot\[data-eyes="read"\] \.bot-eye-fill \{([^}]*)\}/.exec(css)?.[1] ?? "";
   const value = (name: string) => Number(new RegExp(`${name}:\\s*(-?[\\d.]+)`).exec(rule)?.[1]);
-  expect([value("--fw"), value("--fh"), value("--lift")]).toEqual([w, h, -Number(DRAWN.read.drop.toFixed(2))]);
+  expect([value("--fw"), value("--fh")]).toEqual([w, h]);
+  expect(rule).toContain("border-radius: 50%");
   // A pleased or sleepy face wins over it, as later in the sheet; reading wins over the big eyes of work.
   expect(eyeLook("idle", "read")).toBe("read");
   expect(eyeLook("happy", "read")).toBe("happy");
@@ -148,24 +126,26 @@ test("its eyes, lowered to read, are the big eyes of work with the lids come dow
   expect(css.indexOf('[data-eyes="read"]')).toBeLessThan(css.indexOf('[data-mood="sleepy"] .bot-eye-fill'));
 });
 
-test("every shape's eyes visibly sweep each line, lower on the face than straight ahead (tests/botMascotRig.test.ts keeps them off the rim)", () => {
+test("every shape's eyes visibly sweep along the line it reads, and dart up and down the page (tests/botMascotRig.test.ts keeps them off the rim)", () => {
   const short: string[] = [];
   const parse = (t: string) => (t === "none" ? [1, 0, 0, 1, 0, 0] : t.slice(7, -1).split(", ").map(Number));
+  const sweep = READING_PAGE.find((l) => l.sweep)!;
   for (const shape of SHAPES) {
     // From where a working bot was, through a whole page frame by frame, as it's drawn.
     const rig = newRig(restOf(shape));
     const slid: number[] = [];
+    const ys: number[] = [];
     for (const p of frames(1)) {
-      step(rig, poseTarget(shape, p, true), 1000 / 60, "pose");
-      if (p.ms < 800) continue;
-      const [l, r] = [parse(frame(rig, shape, 100, "read").left), parse(frame(rig, shape, 100, "read").right)];
-      slid.push((l[4]! + r[4]!) / 2);
-      // Looking down: the eyes are lower on the face than they'd be straight ahead.
-      expect((l[5]! + r[5]!) / 2).toBeGreaterThan(0.5);
+      step(rig, { ...poseTarget(shape, p, true), spread: spreadOf("read"), size: sizeOf(shape, "read") }, 1000 / 60, "pose");
+      const f = frame(rig, shape, 100, "read");
+      const [l, r] = [parse(f.left), parse(f.right)];
+      ys.push((l[5]! + r[5]!) / 2);
+      if (p.ms > sweep.at - sweep.sweep! + 150 && p.ms <= sweep.at + 150) slid.push((l[4]! + r[4]!) / 2);
     }
-    // Along each line the eyes go a good way over: a reader, not a stare.
+    // Along the line the eyes go a good way over: a reader, not a stare; and up and down the page too.
     const span = Math.max(...slid) - Math.min(...slid);
-    if (span < eyesOf(shape).w * 0.6) short.push(`${shape.id} ${span.toFixed(1)}`);
+    if (span < eyesOf(shape).w * 0.6) short.push(`${shape.id} along ${span.toFixed(1)}`);
+    if (Math.max(...ys) - Math.min(...ys) < eyesOf(shape).h * 0.4) short.push(`${shape.id} up and down ${(Math.max(...ys) - Math.min(...ys)).toFixed(1)}`);
   }
   expect(short).toEqual([]);
 }, 60_000);

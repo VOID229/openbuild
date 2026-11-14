@@ -3,7 +3,7 @@
 // that every shape keeps its eyes on its body however far it turns, and that awake bots out of view
 // spend no frames.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { DEPTH } from "../src/lib/bots/rig";
+import { DEPTH, THICK } from "../src/lib/bots/rig";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
@@ -120,7 +120,7 @@ describe.skipIf(!browser)("a bot on its own", () => {
     expect(await page.eval<number>(`document.querySelectorAll('.bot linearGradient, .bot radialGradient, .bot filter').length`)).toBe(0);
   });
 
-  test("it stares and looks around, the whole body turning, rolling and leaning, and never hops", async () => {
+  test("it looks around, the whole body turning, rolling and leaning, and never hops", async () => {
     const page = await open();
     // Every 50ms for a few seconds, each awake bot: whether it's looking somewhere, how it stands, and
     // how far its body (the box it's drawn in, which rolls and turns about its middle) is above where
@@ -140,8 +140,10 @@ describe.skipIf(!browser)("a bot on its own", () => {
       }, 50);
     })`);
     const bots = samples[0]!.map((_, i) => samples.map((s) => s[i]!));
-    // Most of them look somewhere or stare within the few seconds.
-    expect(bots.filter((b) => b.some((s) => s.looking)).length).toBeGreaterThanOrEqual(9);
+    // Every busy one looks somewhere within the few seconds (each cell's second and fourth bot is busy),
+    // and of the idle ones, mostly resting, some.
+    expect(bots.filter((b, i) => i % 2 === 1 && b.some((s) => s.looking)).length).toBe(6);
+    expect(bots.filter((b) => b.some((s) => s.looking)).length).toBeGreaterThanOrEqual(7);
     // How far each swung, over the whole few seconds (not at one moment: the body is heavier, and can
     // still be coming round from the last look when the head is already on the next).
     const swing = (b: Sample[], of: (s: Sample) => number) => Math.max(...b.map(of)) - Math.min(...b.map(of));
@@ -157,9 +159,10 @@ describe.skipIf(!browser)("a bot on its own", () => {
     }
     // The busy ones have their eyes big among it all; the idle ones never do.
     expect(bots.filter((b) => b.some((s) => s.eyes === "big")).length).toBe(6);
-    // Whatever they did, nothing hopped or spun: the moves are the ones that stay in place, and no
-    // body's middle rose off where it rests (a hop used to lift one by a tenth of its size).
-    for (const b of bots) for (const s of b) expect(["", "nod", "pop", "wiggle", "stretch"]).toContain(s.action);
+    // Whatever they did, nothing hopped: the moves are the ones that stay in place (a flip or a spin
+    // goes right round where it is), and no body's middle rose off where it rests (a hop used to lift
+    // one by a tenth of its size).
+    for (const b of bots) for (const s of b) expect(["", "nod", "pop", "wiggle", "stretch", "flip", "spin"]).toContain(s.action);
     expect(Math.max(...bots.flat().map((s) => s.lift))).toBeLessThan(0.03);
   }, 20_000);
 
@@ -199,31 +202,39 @@ describe.skipIf(!browser)("a bot on its own", () => {
     const page = await open();
     const bot = "document.querySelector('#play .bot')";
     const [x, y] = await page.eval<[number, number]>(`(() => { const r = (${bot}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-    const resting = await page.eval<number>(`Number((/rotateY\\((-?[\\d.]+)deg\\)/.exec((${bot}).querySelector('.bot-body').style.transform) ?? [0, 0])[1])`);
+    const turned = `Number((/rotateY\\((-?[\\d.]+)deg\\)/.exec((${bot}).querySelector('.bot-body').style.transform) ?? [0, 0])[1])`;
+    const resting = await page.eval<number>(turned);
     await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
-    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
-    const turns = await page.eval<{ turn: number; hidden: boolean; lift: number }[]>(`new Promise((done) => {
+    // Each frame from before the press: how squeezed side to side the body is (seen edge-on in the
+    // turn), whether the face shows, where the left eye is, and how far the body has left where it sits.
+    await page.eval(`window.turning = new Promise((done) => {
       const b = ${bot}, shape = b.querySelector('.bot-shape'), out = [];
       const rest = b.getBoundingClientRect();
-      const turned = () => Number((/rotateY\\((-?[\\d.]+)deg\\)/.exec(b.querySelector('.bot-body').style.transform) ?? [0, 0])[1]);
-      const from = turned();
       const tick = () => {
-        const turn = turned();
+        const body = b.querySelector('.bot-body').style.transform;
         const r = shape.getBoundingClientRect();
-        out.push({ turn, hidden: b.querySelector('.bot-skin').style.visibility === 'hidden', lift: (rest.y + rest.height / 2 - (r.y + r.height / 2)) / rest.height });
-        if (out.length > 5 && turn === from || out.length > 200) done(out); else requestAnimationFrame(tick);
+        const e = b.querySelector('.bot-eye-left .bot-eye-fill').getBoundingClientRect();
+        out.push({ at: performance.now(), squeeze: Number((/scale\\((-?[\\d.]+),/.exec(body) ?? [0, 1])[1]), hidden: b.querySelector('.bot-skin').style.visibility === 'hidden', eye: (e.x + e.width / 2 - rest.x) / rest.width, lift: (rest.y + rest.height / 2 - (r.y + r.height / 2)) / rest.height, body });
+        const turning = out.findIndex((t) => t.body.includes('scale('));
+        if ((turning >= 0 && out.length > turning + 5 && !body.includes('scale(')) || out.length > 240) done(out.slice(Math.max(0, turning - 1))); else requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
-    })`);
+    }), 0`);
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    const turns = await page.eval<{ at: number; squeeze: number; hidden: boolean; eye: number; lift: number; body: string }[]>("window.turning");
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-    // All the way round from how it rests (a little turned already), and back to exactly that.
-    expect(Math.max(...turns.map((t) => t.turn))).toBeGreaterThan(300);
-    expect(turns.at(-1)!.turn).toBe(resting);
-    expect(resting).toBeLessThan(30);
-    // The face is out of sight exactly while the back shows.
-    for (const t of turns) expect(t.hidden).toBe(t.turn > 90 && t.turn < 270);
-    expect(turns.some((t) => t.hidden)).toBe(true);
-    // In place: it never leaves where it sits.
+    // Seen edge-on part of the way round: a puffy thing, squeezed, and never thinner than its thickness
+    // (exactly THICK edge-on: botMascotRig.test.ts; a frame here may fall either side of that moment).
+    expect(Math.min(...turns.map((t) => t.squeeze))).toBeLessThan(0.95);
+    expect(Math.min(...turns.map((t) => t.squeeze))).toBeGreaterThanOrEqual(THICK - 0.001);
+    // The face goes out of sight a while (the tenth of a second or so it's round the back: seen
+    // wherever frames came often enough to catch it, which a starved machine's may not), and is back
+    // for the end. Off to the left and in from the right, botMascotRig.test.ts has it.
+    const gaps = turns.slice(1, 12).map((t, i) => t.at - turns[i]!.at);
+    if (Math.max(...gaps) < 50) expect(turns.some((t) => t.hidden)).toBe(true);
+    expect(turns.at(-1)!.hidden).toBe(false);
+    // And back as it was (only nodding at the pointer), in place all along.
+    expect(await page.eval<number>(turned)).toBe(resting);
     expect(Math.max(...turns.map((t) => Math.abs(t.lift)))).toBeLessThan(0.06);
   }, 20_000);
 
@@ -367,7 +378,7 @@ describe.skipIf(!browser)("a bot on its own", () => {
     await page.until("getComputedStyle(document.querySelector('#held .bot-act')).opacity === '1' && !document.querySelector('#held .bot-dots')", 1000);
   }, 20_000);
 
-  test("reading, it looks down and reads line by line: slowly along to the right, quickly back to the left a touch lower, and stops when it's done", async () => {
+  test("reading, its eyes go to wide ovals and dart about the page: slowly along a line to the right, quickly back, and it stops when it's done", async () => {
     const page = await open();
     await page.eval("read(true)");
     type Sample = { t: number; yaw: number; pitch: number; reading: boolean; eyes: string };
@@ -380,38 +391,33 @@ describe.skipIf(!browser)("a bot on its own", () => {
         if (out.length >= 170) { clearInterval(timer); done(out); }
       }, 40);
     })`);
-    // Once it's got there: reading, eyes lowered onto the page, looking down all along.
+    // Once it's got there: reading, its eyes the reading ovals, and looking all about the page.
     const on = samples.filter((s) => s.t > 500);
     for (const s of on) expect([s.reading, s.eyes]).toEqual([true, "read"]);
-    expect(Math.min(...on.map((s) => s.pitch))).toBeGreaterThan(4);
-    // Each snap back to the left: a big turn back in a moment.
-    const snaps = on.slice(1).flatMap((s, i) => (on[i]!.yaw - s.yaw > 6 ? [i + 1] : []));
-    const backs = snaps.filter((i, n) => n === 0 || i - snaps[n - 1]! > 3);
-    expect(backs.length).toBeGreaterThanOrEqual(2);
-    // Between two of them, a line: it goes along it to the right steadily, taking well over a second,
-    // and the next line is a touch lower.
-    const lines = backs.slice(1).map((end, n) => on.slice(backs[n]! + 6, end));
-    for (const line of lines) {
-      expect(line.at(-1)!.t - line[0]!.t).toBeGreaterThan(1000);
-      expect(line.at(-1)!.yaw - line[0]!.yaw).toBeGreaterThan(18);
-      // No sudden move along the line: the sweep is slow all the way.
-      for (let i = 1; i < line.length; i++) expect(Math.abs(line[i]!.yaw - line[i - 1]!.yaw)).toBeLessThan(6);
+    expect(Math.max(...on.map((s) => s.yaw)) - Math.min(...on.map((s) => s.yaw))).toBeGreaterThan(30);
+    expect(Math.max(...on.map((s) => s.pitch)) - Math.min(...on.map((s) => s.pitch))).toBeGreaterThan(20);
+    // Along a line: to the right and never back, for over a second, a good way over and slowly (not
+    // a snap: well under a full turn in a second). The longest such stretch is the line it reads.
+    let best: Sample[] = [];
+    for (let i = 0, run: Sample[] = []; i < on.length; i++) {
+      if (run.length && on[i]!.yaw < run.at(-1)!.yaw - 0.5) run = [];
+      run.push(on[i]!);
+      if (run.at(-1)!.t - run[0]!.t > (best.at(-1)?.t ?? 0) - (best[0]?.t ?? 0)) best = [...run];
     }
-    // The snap back itself: from the end of one line to the start of the next in well under half a second.
-    for (const i of backs) {
-      const from = on.slice(Math.max(0, i - 3), i).reduce((m, s) => (s.yaw > m.yaw ? s : m));
-      const to = on.slice(i, i + 12).reduce((m, s) => (s.yaw < m.yaw ? s : m));
-      expect(from.yaw - to.yaw).toBeGreaterThan(25);
-      expect(to.t - from.t).toBeLessThan(450);
-    }
-    const mean = (line: Sample[]) => line.reduce((n, s) => n + s.pitch, 0) / line.length;
-    if (lines.length >= 2) expect(mean(lines[1]!)).toBeGreaterThan(mean(lines[0]!));
+    expect(best.at(-1)!.t - best[0]!.t).toBeGreaterThan(1000);
+    expect(best.at(-1)!.yaw - best[0]!.yaw).toBeGreaterThan(18);
+    expect((best.at(-1)!.yaw - best[0]!.yaw) / ((best.at(-1)!.t - best[0]!.t) / 1000)).toBeLessThan(45);
+    // And from the end of it, quickly back to the left: most of the way in well under half a second.
+    const end = on.indexOf(best.at(-1)!);
+    const to = on.slice(end, end + 12).reduce((m, s) => (s.yaw < m.yaw ? s : m));
+    expect(best.at(-1)!.yaw - to.yaw).toBeGreaterThan(20);
+    expect(to.t - best.at(-1)!.t).toBeLessThan(450);
     // Done reading: it's back to itself at once.
     await page.eval("read(false)");
     await page.until("!('reading' in document.querySelector('#reading .bot').dataset) && document.querySelector('#reading .bot').dataset.eyes !== 'read'", 500);
   }, 20_000);
 
-  test("with reduced motion, a reading bot is simply looking down at the page, holding still, and back after", async () => {
+  test("with reduced motion, a reading bot is simply on the page, holding still, and back after", async () => {
     const page = await Page.open(chrome!.ws, "about:blank", 1100, 900, "true");
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     await page.send("Page.navigate", { url: server!.url.href });
@@ -422,7 +428,6 @@ describe.skipIf(!browser)("a bot on its own", () => {
     await page.until("document.querySelector('#reading .bot').dataset.eyes === 'read'", 1000);
     const reading = await page.eval<string>(layers);
     expect(reading).not.toBe(rest);
-    expect(await page.eval<number>(`${STANCE}(document.querySelector('#reading .bot')).pitch`)).toBeGreaterThan(4);
     await Bun.sleep(1500);
     expect(await page.eval<string>(layers)).toBe(reading);
     expect(await page.eval<number>("document.getAnimations().filter((a) => a.playState === 'running').length")).toBe(0);
