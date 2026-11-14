@@ -20,7 +20,7 @@ import { BotsSidebar } from "./components/bots/BotsSidebar";
 import { BotsView } from "./components/bots/BotsView";
 import { MarketplacePage } from "./components/bots/BotApps";
 import { UsagePage } from "./components/UsagePage";
-import { adoptDiscoveredChats, adoptHistory, resumeReplies } from "./lib/chat";
+import { adoptDiscoveredChats, adoptHistory, adoptMergedThreads, resumeReplies } from "./lib/chat";
 import { preloadBots } from "./lib/bots/store";
 import { closeBotsThread, useBotsThreadEscape } from "./lib/botsThread";
 import { queuesReady } from "./lib/queue";
@@ -29,7 +29,8 @@ import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChatHistory, loadChats, prefetchHistory } from "./lib/db";
 import { watchDiscoveredTitles } from "./lib/naming";
-import { RELOAD_THREADS } from "./lib/pulls";
+import { RELOAD_THREADS, THREADS_MERGED } from "./lib/pulls";
+import type { PullMergedThread } from "../shared/types";
 import { SERVER_BACK } from "./lib/serverOutage";
 import { useHarnessSetupOpen } from "./lib/harnessSetup";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
@@ -298,6 +299,8 @@ function Main() {
       }
     };
     const timer = setInterval(() => void refresh(), 5000);
+    const merged = (e: Event) => adoptMergedThreads((e as CustomEvent<PullMergedThread[]>).detail);
+    window.addEventListener(THREADS_MERGED, merged);
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("online", refresh);
     window.addEventListener(SERVER_BACK, refresh);
@@ -309,6 +312,7 @@ function Main() {
       window.removeEventListener("online", refresh);
       window.removeEventListener(SERVER_BACK, refresh);
       window.removeEventListener(RELOAD_THREADS, refresh);
+      window.removeEventListener(THREADS_MERGED, merged);
     };
   }, [chatsLoaded]);
 

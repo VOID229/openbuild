@@ -5,7 +5,8 @@
 // one, or a pull request's checks are running), once a minute otherwise. The pull requests tab's
 // reads count too (`heardPullRequests`): what it shows, the sidebar shows, without waiting for a sweep. A thread is matched to the one from its worktree's branch, or to one its agent opened
 // wherever it worked (a thread in the project's own checkout, say). The chat keeps what was found
-// (`pullRequest`), so the sidebar and thread header can show it.
+// (`pullRequest`), so the sidebar and thread header can show it. A merge from the pull requests tab
+// doesn't wait for a sweep: the threads following that pull request hear of it at once (`mergedHere`).
 //
 // A merge closes the thread only when it came after the thread's last user message (so a thread that
 // kept going after the merge stays open), and never while it's working, pinned, snoozed or was
@@ -13,7 +14,7 @@
 // nothing would be lost: no uncommitted changes, HEAD is the commit GitHub merged, and no other open thread works there.
 // Only OpenBuild's own worktrees are ever removed.
 import { existsSync } from "node:fs";
-import type { ThreadPullRequest } from "../shared/types";
+import type { PullMergedThread, ThreadPullRequest } from "../shared/types";
 import type { Chat } from "../src/lib/types";
 import { managedSessionBoundary } from "./pi/projection";
 import { findProject } from "./projects";
@@ -217,6 +218,45 @@ function save(id: string, next: (before: ThreadPullRequest | undefined) => Threa
   // Its worktree goes a day later, if nothing in it would be lost (closedWorktrees.ts).
   if (close) console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} merged`);
   return true;
+}
+
+const sameUrl = (a: string | undefined, b: string) => !!a && a.toLowerCase() === b.toLowerCase();
+
+/**
+ * The pull requests tab merged `url` (its head `head`) at `mergedAt`, from folder `cwd`, and GitHub
+ * says it's merged: the threads following it take that at once, closing as a sweep would have them
+ * close, instead of waiting on a sweep that asks GitHub about every repository's pull requests. A
+ * thread follows it if it already does, opened it, or works in `cwd` with that commit checked out
+ * (a branch whose pull request no sweep has seen yet). A thread following another pull request
+ * that's still open stays with that one. Returns what changed in each thread.
+ */
+export async function mergedHere(url: string, cwd: string, head: string, mergedAt: number): Promise<PullMergedThread[]> {
+  const number = Number(/\/pull\/(\d+)\/?$/.exec(url)?.[1]);
+  if (!Number.isSafeInteger(number)) return [];
+  const candidates: Chat[] = [];
+  for (const summary of storage.pullRequestChatSummaries()) {
+    if (summary.archived || summary.workspace?.deviceId) continue;
+    const before = summary.pullRequest;
+    if (before && !sameUrl(before.url, url) && before.state === "open") continue;
+    if (sameUrl(before?.url, url) || summary.openedPullRequests?.some((u) => sameUrl(u, url))) candidates.push(summary);
+    else if (summary.workspace?.worktree && summary.workspace.cwd === cwd && existsSync(cwd)) {
+      const at = await run(["git", "rev-parse", "HEAD"], cwd, 10_000);
+      if (at.code === 0 && at.out === head) candidates.push(summary);
+    }
+  }
+  const closeMerged = closeMergedEnabled();
+  const changed: PullMergedThread[] = [];
+  for (const summary of candidates) {
+    const checkedAt = Date.now();
+    save(summary.id, (before) => {
+      const { draft: _d, ...rest } = before && sameUrl(before.url, url) ? before : ({} as Partial<ThreadPullRequest>);
+      return { ...rest, number, url: rest.url ?? url, state: "merged", mergedAt, head, checkedAt };
+    }, closeMerged);
+    const stored = storage.getChat(summary.id) as Chat | undefined;
+    if (stored?.pullRequest?.checkedAt !== checkedAt) continue;
+    changed.push({ id: summary.id, pullRequest: stored.pullRequest, ...(stored.archived && stored.autoClosedAt ? { autoClosedAt: stored.autoClosedAt } : {}) });
+  }
+  return changed;
 }
 
 /** A pull request as the pull requests tab read it (server/pullRequestView.ts). */

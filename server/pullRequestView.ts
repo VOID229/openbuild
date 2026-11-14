@@ -8,8 +8,8 @@ import { existsSync } from "node:fs";
 import { findProject } from "./projects";
 import { pullRequestChatSummaries } from "./storage";
 import { mergeUnsettled } from "../shared/pullReadiness";
-import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../shared/types";
-import { checksOf, FAILED, heardPullRequests, sweep } from "./pullRequests";
+import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullMergeResult, PullPatch, PullSummary } from "../shared/types";
+import { checksOf, FAILED, heardPullRequests, mergedHere, sweep } from "./pullRequests";
 import { fail, gh, MAX_VIEW_DIFF, run } from "./workspaceGit";
 
 const READ_TIMEOUT = 45_000;
@@ -342,14 +342,33 @@ async function act(cwd: string, verb: string, number: unknown, args: string[] = 
 
 /**
  * Merge the pull request, as long as its head is still the commit the user was looking at (GitHub
- * refuses otherwise), then look at the threads' pull requests again before answering, so the thread
- * it merged is already closed when the browser next loads its threads.
+ * refuses otherwise). Then one small read says whether it's merged (a merge queue takes it without
+ * merging), and the threads following it hear straight away: the one it merged is closed before this
+ * answers, and the answer says so, for the browser to show without reloading its threads. A sweep of
+ * every followed pull request follows in the background, for anything else the merge changed.
  */
-export async function merge(cwd: string, number: unknown, method: unknown, headSha: unknown, deleteBranch: unknown) {
+export async function merge(cwd: string, number: unknown, method: unknown, headSha: unknown, deleteBranch: unknown): Promise<PullMergeResult> {
   if (method !== "squash" && method !== "merge" && method !== "rebase") throw new Error("Expected a merge method");
-  await act(cwd, "merge", number, [`--${method}`, "--match-head-commit", validSha(headSha), ...(deleteBranch === true ? ["--delete-branch"] : [])]);
-  await sweep(undefined, true);
-  return { ok: true };
+  const head = validSha(headSha);
+  const n = validNumber(number);
+  const started = Date.now();
+  await act(cwd, "merge", n, [`--${method}`, "--match-head-commit", head, ...(deleteBranch === true ? ["--delete-branch"] : [])]);
+  let result: PullMergeResult = { ok: true, state: "merged", threads: [] };
+  try {
+    const repo = await repoOf(cwd);
+    const r = await run([bin(), "pr", "view", String(n), "--repo", repoFlag(repo.url), "--json", "state,mergedAt"], cwd, READ_TIMEOUT);
+    const now = r.code === 0 ? parse<Pick<GhDetail, "state" | "mergedAt">>(r.out) : undefined;
+    // Unreadable just now: `gh pr merge` succeeding without a queue means it merged.
+    const state = now?.state === "OPEN" ? "open" : now?.state === "CLOSED" ? "closed" : "merged";
+    // GitHub keeps whole seconds: no earlier than the click, so a message sent just before it still counts as before the merge.
+    const mergedAt = Math.max(time(now?.mergedAt) ?? Date.now(), started);
+    result = { ...result, state, ...(state === "merged" ? { mergedAt, threads: await mergedHere(`${repo.url.replace(/\/+$/, "")}/pull/${n}`, cwd, head, mergedAt) } : {}) };
+  } catch (err) {
+    // The merge itself worked: the sweep below closes the thread instead.
+    console.warn(`[pull-requests] After merging #${n}: ${(err as Error).message}`);
+  }
+  void sweep(undefined, true);
+  return result;
 }
 
 export async function edit(cwd: string, number: unknown, title: unknown, body: unknown) {

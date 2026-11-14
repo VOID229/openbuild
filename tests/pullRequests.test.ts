@@ -200,3 +200,93 @@ test("worktree threads follow their pull request and close when it merges", asyn
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+// A merge from the pull requests tab (server/pullRequestView.ts merge): the threads following that
+// pull request hear at once and close, with no sweep asking GitHub about every repository first.
+const mergedHereScript = `
+  import { strict as assert } from "node:assert";
+  import { readFileSync } from "node:fs";
+  const root = process.env.TEST_ROOT;
+  const sh = (cwd, ...args) => {
+    const r = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd });
+    if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+    return r.stdout.toString().trim();
+  };
+  const repo = root + "/repo";
+  Bun.spawnSync(["mkdir", "-p", repo]);
+  sh(repo, "init", "-b", "main");
+  sh(repo, "commit", "--allow-empty", "-m", "first");
+  const storage = await import("./server/storage.ts");
+  const projects = await import("./server/projects.ts");
+  const pr = await import("./server/pullRequests.ts");
+  const project = await projects.addProject(repo);
+  const ws = () => projects.prepareWorkspace(project.id, "worktree");
+  const [mine, opener, unseen, elsewhere, busy, talked] = [await ws(), await ws(), await ws(), await ws(), await ws(), await ws()];
+  const head = sh(unseen.cwd, "rev-parse", "HEAD");
+  const url = "https://github.com/o/r/pull/7";
+  const now = Date.now();
+  const chat = (id, workspace, extra = {}) => ({ id, title: id, createdAt: now - 60_000, updatedAt: now - 60_000, workspace, messages: [
+    { id: id + "u", role: "user", content: "go", createdAt: now - 60_000 },
+    { id: id + "a", role: "assistant", content: "done", createdAt: now - 59_000, status: "done" },
+  ], ...extra });
+  const following = (extra = {}) => ({ pullRequest: { number: 7, url: "https://github.com/O/R/pull/7", state: "open", checks: "passing", draft: true, checkedAt: now - 10_000, ...extra } });
+  storage.putChat(chat("mine", mine, following()));
+  const created = { id: "made", role: "assistant", content: "", createdAt: now - 59_000, status: "done", parts: [{ type: "tool", id: "t", name: "bash", args: { command: "gh pr create --fill" }, status: "done", output: url + "\\n" }] };
+  // Its agent opened it from the project's own checkout.
+  storage.putChat(chat("opener", { cwd: repo, branch: "main", projectId: project.id }, { messages: [chat("opener").messages[0], created] }));
+  // Opened it, and then another one it follows now that's still open: it stays with that one.
+  storage.putChat(chat("moved", opener, { messages: [chat("moved").messages[0], created], pullRequest: { number: 8, url: "https://github.com/o/r/pull/8", state: "open", checkedAt: now - 10_000 } }));
+  // In the folder the merge came from, at the merged commit, before any sweep has seen its pull request.
+  storage.putChat(chat("unseen", unseen));
+  storage.putChat(chat("elsewhere", elsewhere));
+  storage.putChat(chat("busy", busy, { ...following(), messages: [chat("busy").messages[0], { ...chat("busy").messages[1], status: "streaming" }] }));
+  storage.putChat(chat("talked", talked, { ...following(), messages: [...chat("talked").messages, { id: "late", role: "user", content: "one more", createdAt: now + 5_000 }] }));
+  const mergedAt = now + 1_000;
+  const changed = await pr.mergedHere(url, unseen.cwd, head, mergedAt);
+  const byId = Object.fromEntries(changed.map((t) => [t.id, t]));
+  assert.deepEqual(Object.keys(byId).sort(), ["busy", "mine", "opener", "talked", "unseen"]);
+  for (const id of ["mine", "opener", "unseen"]) {
+    const stored = storage.getChat(id);
+    assert.equal(stored.archived, true, id + " closed");
+    assert.equal(byId[id].autoClosedAt, stored.autoClosedAt, "the answer says when, as saved");
+    assert.deepEqual(byId[id].pullRequest, stored.pullRequest);
+    assert.equal(stored.pullRequest.state, "merged");
+    assert.equal(stored.pullRequest.mergedAt, mergedAt);
+    assert.equal(stored.pullRequest.head, head, "what the worktree sweep checks before removing it");
+    assert.equal(stored.pullRequest.number, 7);
+  }
+  assert.equal(storage.getChat("mine").pullRequest.draft, undefined);
+  assert.equal(storage.getChat("mine").pullRequest.checks, "passing", "what else it knew stays");
+  assert.equal(storage.getChat("unseen").pullRequest.url, url);
+  // Following it, but working or written to since: they hear of the merge and stay open.
+  for (const id of ["busy", "talked"]) {
+    assert.equal(storage.getChat(id).archived, undefined, id + " stays open");
+    assert.equal(byId[id].autoClosedAt, undefined);
+    assert.equal(storage.getChat(id).pullRequest.state, "merged");
+  }
+  assert.equal(storage.getChat("moved").pullRequest.number, 8);
+  assert.equal(storage.getChat("moved").archived, undefined);
+  assert.equal(storage.getChat("elsewhere").pullRequest, undefined);
+  assert.deepEqual(await pr.mergedHere(url, unseen.cwd, head, mergedAt), [], "said once");
+  assert.deepEqual(await pr.mergedHere("https://github.com/o/r/issues/7", unseen.cwd, head, mergedAt), []);
+  let asked = "";
+  try { asked = readFileSync(process.env.FAKE_GH_LOG, "utf8"); } catch {}
+  assert.equal(asked, "", "GitHub wasn't asked");
+  console.log("ok");
+`;
+
+test("a merge from the pull requests tab closes the threads following it at once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-merged-here-"));
+  try {
+    const bin = join(root, "bin");
+    Bun.spawnSync(["mkdir", "-p", bin]);
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$*" >> "$FAKE_GH_LOG"\necho '[]'\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const { stdout: out, stderr: err, code } = await spawnScript(mergedHereScript, { OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root, FAKE_GH_LOG: join(root, "gh.log"), PATH: `${bin}:${process.env.PATH}` });
+    if (code !== 0) console.error(out, err);
+    expect(code).toBe(0);
+    expect(out).toContain("ok");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);

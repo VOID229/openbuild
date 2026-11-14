@@ -188,9 +188,12 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
       </div>
     );
 
-  const readiness: Readiness = error
-    ? { tone: "warn", text: `Couldn’t refresh pull request: ${error}`, canMerge: false }
-    : mergeReadiness(pr);
+  // Said at once, while GitHub merges: the button alone is easy to miss.
+  const readiness: Readiness = busy === "merge"
+    ? { tone: "wait", text: `Merging into ${pr.base}…`, canMerge: false }
+    : error
+      ? { tone: "warn", text: `Couldn’t refresh pull request: ${error}`, canMerge: false }
+      : mergeReadiness(pr);
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "overview", label: "Overview" },
     { id: "commits", label: "Commits", count: pr.commits.length },

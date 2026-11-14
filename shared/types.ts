@@ -373,6 +373,24 @@ export interface ThreadPullRequest {
   checkedAt: number;
 }
 
+/** What a merge from the pull requests tab changed in a thread following it, for the browser to show at once. */
+export interface PullMergedThread {
+  id: string;
+  pullRequest: ThreadPullRequest;
+  /** Set when the merge closed the thread. */
+  autoClosedAt?: number;
+}
+
+/** What a merge from the pull requests tab answers (server/pullRequestView.ts). */
+export interface PullMergeResult {
+  ok: true;
+  /** "open" when GitHub took the merge but hasn't done it yet (a merge queue). */
+  state: ThreadPullRequest["state"];
+  mergedAt?: number;
+  /** Absent from a server older than this answer. */
+  threads?: PullMergedThread[];
+}
+
 /** A pull request in the side panel's list (server/pullRequestView.ts). */
 export interface PullSummary {
   number: number;

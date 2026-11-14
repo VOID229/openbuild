@@ -154,7 +154,7 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
         setDone({ text: sha ? `Committed ${sha} and pushed to ${r.upstream}` : `Pushed to ${r.upstream}`, short: "Pushed" });
       } else if (action === "merge") {
         if (!current || !method) return;
-        await actOnPull(ws, current.number, "merge", () => mergePull(ws, current.number, method, current.headSha, localStorage.getItem(DELETE_KEY) === "1"));
+        await actOnPull(ws, current.number, "merge", () => mergePull({ ...ws, thread: chat.id }, current.number, method, current.headSha, localStorage.getItem(DELETE_KEY) === "1"));
         setDone({ text: `Merged #${current.number} into ${current.base}`, short: "Merged", url: current.url });
         setOpen(true);
       } else if (action === "pr") {
