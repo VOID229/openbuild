@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { launchChrome, Page } from "../../tests/chromePage";
 import { GRADIENT } from "./geometry";
-import { GRAIN, SMALL_SHADE, TILES, full, markSvg, small, tileSvg } from "./svg";
+import { GRAIN, SMALL_SHADE, TILES, faviconSvg, full, markSvg, outlinedSvg, small, tileSvg } from "./svg";
 
 const here = import.meta.dir;
 const root = join(here, "../..");
@@ -18,7 +18,10 @@ const designs: Record<string, string> = {
   "mark-full-black": markSvg("full", "#000"),
   "mark-small-white": markSvg("small", "#fff"),
   "mark-small-black": markSvg("small", "#000"),
-  favicon: tile("favicon"),
+  favicon: faviconSvg(),
+  "favicon-ico-16": outlinedSvg("small", 16),
+  "favicon-ico-32": outlinedSvg("small", 32),
+  "favicon-ico-48": outlinedSvg("full", 48),
   "app-icon": tile("app"),
   "apple-touch-icon": tile("appleTouch"),
   "maskable-icon": tile("maskable"),
@@ -87,9 +90,9 @@ try {
   };
 
   writeFileSync(join(icons, "favicon.ico"), ico([
-    { size: 16, png: await render(designs.favicon!, 16) },
-    { size: 32, png: await render(designs.favicon!, 32) },
-    { size: 48, png: await render(tileSvg("full", { radius: TILES.favicon.radius, scale: TILES.favicon.scale }), 48) },
+    { size: 16, png: await render(designs["favicon-ico-16"]!, 16) },
+    { size: 32, png: await render(designs["favicon-ico-32"]!, 32) },
+    { size: 48, png: await render(designs["favicon-ico-48"]!, 48) },
   ]));
   writeFileSync(join(icons, "apple-touch-icon.png"), await render(designs["apple-touch-icon"]!, 180));
   writeFileSync(join(icons, "icon-192.png"), await render(designs["app-icon"]!, 192));

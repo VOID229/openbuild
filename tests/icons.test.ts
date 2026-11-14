@@ -54,3 +54,12 @@ test("the in-app mark draws the design's current shapes", () => {
   expect<object>(MARK.full).toEqual(full);
   expect<object>(MARK.small).toEqual(small);
 });
+
+test("the tab's icon is the mark alone, in the browser's colour scheme's ink", () => {
+  // Rebuilt by design/ring-slash/build.ts. No tile behind it: it sits on the tab's own colour.
+  const svg = readFileSync(join(src, "icons/favicon.svg"), "utf8");
+  expect(svg).not.toContain("<rect");
+  expect(svg).toContain('viewBox="-100 -100 200 200"');
+  expect(svg).toMatch(/\.ink\{fill:#171717\}@media \(prefers-color-scheme:dark\)\{\.ink\{fill:#fff\}\}/);
+  expect(svg).toContain('<g class="ink">');
+});
