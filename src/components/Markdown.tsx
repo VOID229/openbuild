@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { linkHref, onLinkClick } from "../lib/links";
 import { copyText, cx } from "../lib/ui";
+import { LinkText } from "./Linkify";
 
 // Only ~~double~~ tildes strike through: models write a lone "~" to mean "about" ("~10 GB"), and
 // GFM's default would strike everything between two of them.
@@ -52,8 +53,11 @@ function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
 const components: Components = {
   pre: ({ node: _node, ...props }) => <CodeBlock {...props} />,
   // localhost links open in the side panel's browser; ⌘-click for a real tab (lib/links.ts).
-  a: ({ node: _node, className, href, ...props }) => (
-    <a {...props} href={linkHref(href)} className={cx("link", className)} target="_blank" rel="noopener noreferrer" onClick={(e) => onLinkClick(e, href)} />
+  // A GitHub link shows GitHub's mark before its text.
+  a: ({ node: _node, className, href, children, ...props }) => (
+    <a {...props} href={linkHref(href)} className={cx("link", className)} target="_blank" rel="noopener noreferrer" onClick={(e) => onLinkClick(e, href)}>
+      <LinkText href={href}>{children}</LinkText>
+    </a>
   ),
   table: ({ node: _node, ...props }) => (
     <div className="table-wrap">

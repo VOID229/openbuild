@@ -3668,6 +3668,20 @@ select.input {
   }
 }
 
+/* GitHub's mark before a link to GitHub (LinkText), in the link's colour and sized to its text. It
+   shares an unbreakable span with the text's first character, so it never ends a line alone. */
+.gh-lead {
+  white-space: nowrap;
+}
+
+.gh-mark {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.25em;
+  vertical-align: -0.1em;
+}
+
 .markdown strong {
   font-weight: 600;
 }
