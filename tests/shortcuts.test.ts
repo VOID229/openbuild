@@ -133,5 +133,8 @@ describe("shortcut bindings", () => {
     expect(bindingNote(parseBinding("mod+KeyS")!, true)).toContain("saves");
     expect(bindingNote(parseBinding("mod+KeyB")!, true)).toBeUndefined();
     expect(bindingNote(parseBinding("alt+KeyM")!, true)).toBeUndefined();
+    // Shifted browser keys are recognised too (reopen a closed tab, a private window).
+    expect(bindingNote(parseBinding("mod+shift+KeyT")!, true)).toContain("⌘⇧T");
+    expect(bindingNote(parseBinding("mod+shift+KeyN")!, false)).toContain("Ctrl+Shift+N");
   });
 });
