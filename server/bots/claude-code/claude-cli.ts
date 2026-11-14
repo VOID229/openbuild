@@ -6,6 +6,8 @@ import { delimiter, extname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { spawn, type ChildProcess } from "node:child_process";
+// OpenBuild: each step's time, written down when PI_CLAUDE_CODE_TRACE asks for it (trace.ts).
+import { trace } from "./trace.ts";
 import { registerSessionResourceCleanup } from "@earendil-works/pi-ai";
 import { TurnRelay } from "./turn-relay.ts";
 import { usageCreditsAllowed, usageCreditsChargeError, type RateLimitInfo } from "./billing.ts";
@@ -1063,9 +1065,10 @@ class ClaudeProcess {
     child.stderr?.on("data", (chunk: string) => (this.stderr = (this.stderr + chunk).slice(-65_536)));
   }
 
-  static async create(input: RunClaudeInput, plan: ClaudeLaunchPlan): Promise<ClaudeProcess> {
+  static async create(input: RunClaudeInput, plan: ClaudeLaunchPlan, standby = false): Promise<ClaudeProcess> {
     input.signal?.throwIfAborted();
     const command = await readyClaudeCommand({ ...process.env, ...input.env }, input.signal);
+    trace(standby ? "standby-ready" : "ready");
 
     const root = await mkdtemp(join(tmpdir(), "pi-claude-code-"));
     const toolsPath = join(root, "tools.json");
@@ -1130,6 +1133,7 @@ class ClaudeProcess {
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
+      trace(standby ? "standby-spawned" : "spawned");
       const queue = new AsyncQueue<NativeOutputEvent>();
       const reader = createInterface({ input: child.stdout!, crlfDelay: Infinity });
       const readTask = (async () => {
@@ -1216,6 +1220,7 @@ class ClaudeProcess {
     let sawMessageStop = false;
     this.delivered = false;
     const deliver = (event: AnthropicStreamEvent) => {
+      if (!this.delivered) trace("first-event", { type: event.type });
       this.delivered = true;
       if (event.type === "message_stop") sawMessageStop = true;
       input.onEvent?.(event);
@@ -1256,6 +1261,7 @@ class ClaudeProcess {
           turnUuid = uuid;
         }
       }
+      trace("frames", { frames: frames.length });
 
       for (;;) {
         const event = await this.queue.next(input.signal, this.timeoutMs);
@@ -1381,11 +1387,84 @@ interface AcquiredProcess {
   worker: ClaudeProcess;
   retained: boolean;
   continuation: boolean;
+  /** OpenBuild: the worker was the session's standby, started ahead of this request. */
+  standby?: boolean;
   sessionId?: string;
 }
 
 const processCache = new Map<string, ClaudeProcess>();
 let managerTail: Promise<void> = Promise.resolve();
+
+// OpenBuild: a request that follows a tool call can't carry on in the process that made the call
+// (see commit()), so each one started a new `claude` and waited for it to come up: most of a
+// second, more on a slow machine, at every step of every turn. One process per session is now
+// kept started and unused beside the one in use. A request that needs a new process takes it,
+// and its replacement starts while that request is at the API. A standby holds no conversation,
+// so it is exactly a process started on the spot, only earlier. It is closed when a response ends
+// the run (no tool call: the next request carries on in the retained process), when the launch it
+// was started for no longer matches, with its session, or after STANDBY_IDLE_MS unused: as long as
+// a retained process is kept, so a run that ended on a tool call (a turn can end on its last
+// message) leaves the next one a started process either way. PI_CLAUDE_CODE_STANDBY=0 turns it off.
+export const STANDBY_IDLE_MS = CLAUDE_PROCESS_MAX_AGE_MS;
+
+interface Standby {
+  fingerprint: string;
+  /** Settles once `claude` has been started; undefined when it couldn't be. */
+  worker: Promise<ClaudeProcess | undefined>;
+  timer: NodeJS.Timeout;
+}
+
+const standbys = new Map<string, Standby>();
+
+function standbyEnabled(input: RunClaudeInput): boolean {
+  const value = input.env?.PI_CLAUDE_CODE_STANDBY ?? process.env.PI_CLAUDE_CODE_STANDBY;
+  return value === undefined || envFlagEnabled(value);
+}
+
+async function dropStandby(sessionId: string, entry: Standby | undefined = standbys.get(sessionId)): Promise<void> {
+  if (!entry) return;
+  if (standbys.get(sessionId) === entry) standbys.delete(sessionId);
+  clearTimeout(entry.timer);
+  await (await entry.worker)?.close();
+}
+
+/** Start the session's next process ahead of the request that will need it, unless one is already there for this launch. */
+function prepareStandby(input: RunClaudeInput, plan: ClaudeLaunchPlan): void {
+  const sessionId = input.sessionId;
+  // A request that declares no tools can't end in a tool call: the process it runs in is always kept.
+  if (!sessionId || !input.manifest.length || !standbyEnabled(input)) return;
+  const current = standbys.get(sessionId);
+  if (current?.fingerprint === plan.fingerprint) return;
+  if (current) void dropStandby(sessionId, current);
+  // As many as the warm cache holds: a Pi with more sessions than that keeps the newest ones'.
+  while (standbys.size >= MAX_CACHED_CLAUDE_PROCESSES) void dropStandby(standbys.keys().next().value!);
+  // Only what a launch needs: the request's own frames, signal and listener stay with the request.
+  const launch: RunClaudeInput = { ...input, frames: [], signal: undefined, onEvent: undefined };
+  const entry: Standby = {
+    fingerprint: plan.fingerprint,
+    worker: ClaudeProcess.create(launch, plan, true).catch(() => undefined),
+    timer: setTimeout(() => void dropStandby(sessionId, entry), STANDBY_IDLE_MS),
+  };
+  entry.timer.unref?.();
+  standbys.set(sessionId, entry);
+}
+
+/** The session's standby, if it was started for this launch and is still running. Any other is closed. */
+async function takeStandby(sessionId: string | undefined, plan: ClaudeLaunchPlan): Promise<ClaudeProcess | undefined> {
+  const entry = sessionId ? standbys.get(sessionId) : undefined;
+  if (!entry) return undefined;
+  standbys.delete(sessionId!);
+  clearTimeout(entry.timer);
+  const worker = await entry.worker;
+  if (worker && entry.fingerprint === plan.fingerprint && worker.isAlive() && !worker.isExpired()) return worker;
+  await worker?.close();
+  return undefined;
+}
+
+/** Test/debug visibility: sessions with a standby process started or starting. */
+export function standbyClaudeProcessCount(): number {
+  return standbys.size;
+}
 
 async function withManagerLock<T>(operation: () => Promise<T> | T): Promise<T> {
   const previous = managerTail;
@@ -1419,7 +1498,7 @@ async function discardProcess(acquired: AcquiredProcess): Promise<void> {
   await worker.close();
 }
 
-async function acquireProcess(input: RunClaudeInput, plan: ClaudeLaunchPlan): Promise<AcquiredProcess> {
+async function acquireProcess(input: RunClaudeInput, plan: ClaudeLaunchPlan, fresh = false): Promise<AcquiredProcess> {
   return withManagerLock(async () => {
     const sessionId = input.sessionId;
     const cached = sessionId ? processCache.get(sessionId) : undefined;
@@ -1452,16 +1531,21 @@ async function acquireProcess(input: RunClaudeInput, plan: ClaudeLaunchPlan): Pr
       }
     }
 
-    const worker = await ClaudeProcess.create(input, plan);
+    // OpenBuild: the process started ahead for this session, when there is one.
+    const standby = fresh || !retain ? undefined : await takeStandby(sessionId, plan);
+    const worker = standby ?? (await ClaudeProcess.create(input, plan));
     worker.busy = true;
     const retained = retain && processCache.size < MAX_CACHED_CLAUDE_PROCESSES;
     if (retained) processCache.set(sessionId!, worker);
-    return { worker, retained, continuation: false, sessionId };
+    return { worker, retained, continuation: false, standby: !!standby, sessionId };
   });
 }
 
 /** Close warm Claude processes for one Pi session, or all sessions. */
 export async function closeClaudeProcesses(sessionId?: string): Promise<void> {
+  // OpenBuild: the standbys go with their sessions.
+  const waiting = sessionId ? [sessionId] : [...standbys.keys()];
+  await Promise.allSettled(waiting.map((id) => dropStandby(id)));
   const workers = await withManagerLock(() => {
     if (sessionId) {
       const worker = processCache.get(sessionId);
@@ -1484,13 +1568,21 @@ registerSessionResourceCleanup((sessionId) => {
   void closeClaudeProcesses(sessionId);
 });
 
-export async function runClaudeRequest(input: RunClaudeInput): Promise<RunClaudeOutput> {
+export async function runClaudeRequest(input: RunClaudeInput, retry = false): Promise<RunClaudeOutput> {
   input.signal?.throwIfAborted();
   const plan = launchPlan(input);
-  const acquired = await acquireProcess(input, plan);
+  trace("request", { frames: input.frames.length, model: input.model });
+  // OpenBuild: a retry starts its own process, so a standby that failed isn't followed by another.
+  const acquired = await acquireProcess(input, plan, retry);
+  trace("acquired", { continuation: acquired.continuation, standby: !!acquired.standby });
+  // OpenBuild: while this request is at the API, the process the next one will need comes up.
+  if (!retry) prepareStandby(input, plan);
   try {
     const output = await acquired.worker.run(input, acquired.continuation);
+    trace("done", { continuation: acquired.continuation });
     const stable = acquired.worker.commit(input, output.message);
+    // OpenBuild: no tool call, so the run ends here and the next request carries on in this process.
+    if (stable && acquired.sessionId) void dropStandby(acquired.sessionId);
     if (
       stable &&
       acquired.retained &&
@@ -1509,8 +1601,9 @@ export async function runClaudeRequest(input: RunClaudeInput): Promise<RunClaude
     await discardProcess(acquired);
     // A warm process can hold stale hidden state. If it failed before streaming
     // or reaching the API, nothing was shown or charged, so replay once on a fresh process.
-    if (acquired.continuation && !acquired.worker.startedOutput && !input.signal?.aborted) {
-      return runClaudeRequest(input);
+    // OpenBuild: the same for a standby, which may have died while it waited. Once only.
+    if ((acquired.continuation || acquired.standby) && !retry && !acquired.worker.startedOutput && !input.signal?.aborted) {
+      return runClaudeRequest(input, true);
     }
     throw error;
   }

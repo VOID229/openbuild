@@ -628,3 +628,140 @@ test("status, discovery and requests for each login never see the server's Claud
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+// ------------------------------------------------------------------ a process on standby for the request after a tool call
+
+/** A Claude Code that answers "TOOL" with a tool call and anything else with text, and says which process answered. */
+const STANDBY_CLI = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const readline = require("node:readline");
+const args = process.argv.slice(2);
+if (args[0] === "auth") { console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", subscriptionType: "max" })); process.exit(0); }
+const note = (event) => appendFileSync(process.env.LAUNCH_LOG, JSON.stringify({ pid: process.pid, event }) + "\\n");
+note("start");
+const out = (v) => console.log(JSON.stringify(v));
+const usage = { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+(async () => {
+  for await (const line of readline.createInterface({ input: process.stdin })) {
+    const frame = JSON.parse(line);
+    const echo = frame.uuid ? { user_message_uuids: [frame.uuid] } : {};
+    if (frame.shouldQuery === false) { out({ type: "result", num_turns: 0, ...echo }); continue; }
+    if (frame.type !== "user") continue;
+    note("query");
+    const tool = JSON.stringify(frame.message.content).includes("TOOL");
+    const block = tool ? { type: "tool_use", id: "toolu_1", name: "mcp__pi__probe", input: {} } : { type: "text", text: "ok" };
+    const stop = tool ? "tool_use" : "end_turn";
+    for (const event of [
+      { type: "message_start", message: { id: "m1", role: "assistant", content: [], usage } },
+      { type: "content_block_start", index: 0, content_block: tool ? block : { type: "text", text: "" } },
+      ...(tool ? [] : [{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } }]),
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: stop }, usage },
+      { type: "message_stop" },
+    ]) out({ type: "stream_event", event });
+    out({ type: "assistant", message: { id: "m1", role: "assistant", content: [block], stop_reason: stop, usage } });
+    out({ type: "result", subtype: "success", is_error: false, usage, ...echo });
+  }
+})();
+`;
+
+test("the request after a tool call runs in a process started ahead of it, and nothing is left running", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-claude-standby-"));
+  try {
+    const cli = join(root, "claude");
+    writeFileSync(cli, STANDBY_CLI);
+    chmodSync(cli, 0o755);
+    const { code, stderr: err, stdout: out } = await spawnScript(`
+      import { strict as a } from "node:assert";
+      import { readFileSync } from "node:fs";
+      const bridge = await import("./server/bots/claude-code/claude-cli.ts");
+      const env = { PI_CLAUDE_CODE_COMMAND: ${JSON.stringify(cli)}, CLAUDE_CONFIG_DIR: ${JSON.stringify(root)} };
+      const manifest = [{ name: "probe", description: "A probe", inputSchema: { type: "object", properties: {} } }];
+      const past = (frame) => ({ ...frame, shouldQuery: false });
+      const user = (text) => ({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
+      const called = { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "mcp__pi__probe", input: {} }] } };
+      const said = { type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "ok" }] } };
+      const result = (text) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: text }] } });
+      const ask = (frames, extra = {}) => bridge.runClaudeRequest({ model: "sonnet", frames: [...frames.slice(0, -1).map(past), frames.at(-1)], systemPrompt: "system", manifest, extraBody: {}, env, sessionId: "one", ...extra });
+      const log = () => readFileSync(process.env.LAUNCH_LOG, "utf8").trim().split("\\n").filter(Boolean).map((l) => JSON.parse(l));
+      const started = () => log().filter((l) => l.event === "start").map((l) => l.pid);
+      const answered = () => log().filter((l) => l.event === "query").map((l) => l.pid);
+      const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      // Started, still running, and never asked anything: a standby. (One closed before it was up may never have logged its start.)
+      const waitingProcesses = () => started().filter((pid) => alive(pid) && !answered().includes(pid));
+      const until = async (check, what) => { for (let i = 0; i < 1500 && !check(); i++) await Bun.sleep(10); a.ok(check(), what); };
+      const steps = () => readFileSync(process.env.PI_CLAUDE_CODE_TRACE, "utf8").trim().split("\\n").map((l) => JSON.parse(l)).filter((s) => s.step === "acquired").map((s) => (s.continuation ? "same" : s.standby ? "standby" : "new"));
+
+      // The first request starts its own process, and one more for whatever comes next.
+      const history = [user("TOOL please")];
+      a.equal((await ask(history)).message.content[0].type, "tool_use");
+      await until(() => started().length === 2, "no standby was started");
+      a.equal(bridge.standbyClaudeProcessCount(), 1);
+      const [first, second] = started();
+      a.deepEqual(answered(), [first]);
+
+      // It ended in a tool call, so the next one can't carry on there: the standby answers, and is replaced.
+      history.push(called, result("TOOL again"));
+      a.equal((await ask(history)).message.content[0].type, "tool_use");
+      a.deepEqual(answered(), [first, second]);
+      await until(() => started().length === 3, "the standby wasn't replaced");
+      const third = started()[2];
+
+      // The run ends without a tool call: its process is kept for the next request, and no standby waits beside it.
+      history.push(called, result("finish"));
+      a.equal((await ask(history)).message.content[0].text, "ok");
+      a.deepEqual(answered(), [first, second, third]);
+      await until(() => bridge.standbyClaudeProcessCount() === 0, "a standby was left beside a retained process");
+      a.equal(bridge.cachedClaudeProcessCount(), 1);
+      history.push(said, user("TOOL once more"));
+      await ask(history);
+      a.deepEqual(answered(), [first, second, third, third]);
+      a.deepEqual(steps(), ["new", "standby", "standby", "same"]);
+
+      // A standby is for one launch: a request with another system prompt starts its own.
+      await until(() => bridge.standbyClaudeProcessCount() === 1 && waitingProcesses().length === 1, "no standby after the fourth request");
+      const [waiting] = waitingProcesses();
+      history.push(called, result("TOOL with new instructions"));
+      await ask(history, { systemPrompt: "other system" });
+      a.notEqual(answered().at(-1), waiting);
+      a.equal(steps().at(-1), "new");
+      await until(() => !alive(waiting), "the standby for the old launch was left running");
+
+      // One that died while it waited is passed over, and the request is still answered.
+      await until(() => bridge.standbyClaudeProcessCount() === 1 && waitingProcesses().length === 1, "no standby after the fifth request");
+      const [doomed] = waitingProcesses();
+      process.kill(doomed, "SIGKILL");
+      await until(() => !alive(doomed), "couldn't stop the standby");
+      history.push(called, result("TOOL after the standby died"));
+      a.equal((await ask(history, { systemPrompt: "other system" })).message.content[0].type, "tool_use");
+      a.notEqual(answered().at(-1), doomed);
+
+      // Switched off, every request after a tool call starts its own process, as it used to.
+      await bridge.closeClaudeProcesses();
+      a.equal(bridge.standbyClaudeProcessCount(), 0);
+      const off = { env: { ...env, PI_CLAUDE_CODE_STANDBY: "0" }, sessionId: "two" };
+      await until(() => !waitingProcesses().length, "a standby outlived its session");
+      const before = started().length;
+      await ask([user("TOOL please")], off);
+      await ask([user("TOOL please"), called, result("TOOL again")], off);
+      await Bun.sleep(300);
+      a.equal(started().length, before + 2);
+      a.equal(bridge.standbyClaudeProcessCount(), 0);
+      a.deepEqual(steps().slice(-2), ["new", "new"]);
+      // A request that declares no tools can't end in a tool call, so nothing is started ahead for it.
+      await ask([user("hello")], { manifest: [], sessionId: "three" });
+      await Bun.sleep(300);
+      a.equal(bridge.standbyClaudeProcessCount(), 0);
+
+      // With the sessions closed, no process is left.
+      await bridge.closeClaudeProcesses();
+      await until(() => started().every((pid) => !alive(pid)), "a claude process outlived its session: " + started().filter(alive));
+      a.equal(bridge.cachedClaudeProcessCount(), 0);
+      process.exit(0);
+    `, { HOME: root, LAUNCH_LOG: join(root, "launches.jsonl"), PI_CLAUDE_CODE_TRACE: join(root, "trace.jsonl") });
+    expect(err + out).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 90_000);
