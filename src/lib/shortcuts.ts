@@ -15,6 +15,7 @@ export type ShortcutId =
   | "toggleBots"
   | "openSettings"
   | "openUsage"
+  | "showShortcuts"
   | "focusSearch"
   | "toggleDictation"
   | "stashDraft"
@@ -92,6 +93,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Usage & limits",
     description: "Open usage and limits",
     default: "mod+KeyU",
+  },
+  {
+    id: "showShortcuts",
+    label: "Keyboard shortcuts",
+    description: "Show every keyboard shortcut",
+    default: "mod+KeyK",
   },
   {
     id: "focusSearch",
