@@ -171,6 +171,7 @@ test("the migration arms the look only for bots left with old memory in their jo
     a.deepEqual(db.memories('boss-0001').map((m) => [m.id, m.kind]), [['mem-2', 'profile'], ['mem-long', 'journal'], ['mem-1', 'profile']]);
     a.equal(svc.memoryReviewNote('quiet-0001'), '');
     a.equal(svc.memoryReviewNote('fits-0001'), '');
+    svc.retireBot('gone-0001');
     await svc.deleteBot('gone-0001');
     a.deepEqual(armed().map((r) => r.key), ['memory-review:boss-0001']);
     db.migrateMemories(db.db);

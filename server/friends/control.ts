@@ -35,7 +35,8 @@ function findFriend(spec: unknown): store.StoredFriend {
 
 function findBots(specs: unknown): string[] {
   const list = Array.isArray(specs) ? specs : String(specs ?? "").split(",");
-  const bots = db.listBots();
+  // A retired bot isn't one to bring into a chat.
+  const bots = db.listBots().filter((b) => !b.retiredAt);
   return list.map((raw) => {
     const text = String(raw).trim().toLowerCase();
     const hit = bots.filter((b) => b.id === text || (text.length >= 4 && b.id.startsWith(text)) || b.name.toLowerCase() === text || mentionName(b.name).toLowerCase() === text);
@@ -127,7 +128,7 @@ async function handle(method: string, p: Record<string, unknown>, signal: AbortS
       return { name: friend.name, allowTools: p.allow === true };
     }
     case "bots":
-      return { bots: db.listBots().map((b) => ({ id: b.id, name: b.name, primary: !!b.primary })) };
+      return { bots: db.listBots().filter((b) => !b.retiredAt).map((b) => ({ id: b.id, name: b.name, primary: !!b.primary })) };
     case "chats":
       return { chats: chats.sharedChats().map(chatView) };
     case "chat": {

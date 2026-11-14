@@ -2,7 +2,7 @@
 // with its latest message, filed under the user's own sections. Closed on a desktop, it narrows to
 // a rail of avatars instead of going away; the chats between bots sit at its end, as in the list,
 // each marked as a DM between them.
-import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
+import { Archive, ArchiveRestore, Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
@@ -20,7 +20,7 @@ import { BotsToggle, ModeSwitch, ReleaseLabel, ScrollThumb } from "../Sidebar";
 import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
-import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
+import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
 import { betweenNames, ConversationAvatar, DmMark, previewOf, shortTime, useBusyBots } from "./common";
 
 type Dialog =
@@ -28,6 +28,9 @@ type Dialog =
   | { kind: "group"; preset?: string[] }
   | { kind: "rename"; id: string }
   | { kind: "section"; id: string }
+  /** Retire the bot whose chat this is. */
+  | { kind: "retire"; id: string }
+  /** Delete a group or side chat, or a retired bot for good. */
   | { kind: "delete"; id: string };
 
 interface MenuState {
@@ -133,13 +136,14 @@ function PeekCard({ peek }: { peek?: PeekState }) {
  * button makes its eyes follow the pointer, and nothing more: no hop or smile, no spin when pressed.
  * A group's huddle doesn't react at all.
  */
-function SidebarAvatar({ conversation, size }: { conversation: Conversation; size: number }) {
+function SidebarAvatar({ conversation, size, retired }: { conversation: Conversation; size: number; retired?: boolean }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const working = useBusyBots(conversation);
   const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);
-  const watches = conversation.kind === "direct";
+  // A retired bot's is a picture of it: nothing going on, and nothing follows the pointer.
+  const watches = conversation.kind === "direct" && !retired;
   useEffect(() => {
     const host = ref.current?.closest("button");
     if (!host || !watches) return setHover(false);
@@ -154,7 +158,7 @@ function SidebarAvatar({ conversation, size }: { conversation: Conversation; siz
   }, [watches]);
   return (
     <span ref={ref} className="bots-sidebar-avatar">
-      <ConversationAvatar conversation={conversation} size={size} alive={busy || !watches} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} zzz />
+      <ConversationAvatar conversation={conversation} size={size} alive={busy || !watches} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} zzz still={retired} />
     </span>
   );
 }
@@ -181,9 +185,10 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
   const longPress = useLongPress((x, y) => onMenu({ id: conversation.id, x, y }));
   const name = conversationName(conversation, bots);
   const [title, tag] = name.split(" · ");
+  const retired = conversation.kind === "direct" && !!bots.find((b) => b.id === conversation.botIds[0])?.retiredAt;
   return (
     <div
-      className={cx("bots-row", active && "bots-row-active", conversation.unread && "bots-row-unread")}
+      className={cx("bots-row", active && "bots-row-active", conversation.unread && "bots-row-unread", retired && "bots-row-retired")}
       {...longPress.handlers}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -192,7 +197,7 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
       }}
     >
       <button type="button" className="bots-row-main" {...peek(conversation.id, "right")} onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
-        <SidebarAvatar conversation={conversation} size={avatar} />
+        <SidebarAvatar conversation={conversation} size={avatar} retired={retired} />
         <span className="bots-row-text">
           <span className="bots-row-name">
             <span className="bots-row-title">{title}</span>
@@ -201,7 +206,7 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
           <span className={cx("bots-row-preview", typing && "bots-row-typing", !typing && waiting && "bots-row-waiting")}>{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
         </span>
         <span className="bots-row-side">
-          <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>
+          {retired ? <span className="bots-pill bots-retired-pill">Retired</span> : <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>}
           {conversation.unread && <span className="unread-dot" aria-label="Unread" />}
         </span>
       </button>
@@ -253,11 +258,14 @@ function FriendsLine({ friends }: { friends: FriendSummary[] }) {
   );
 }
 
-function Section({ name, label, count, children }: { name: string; label: string; count?: number; children: React.ReactNode }) {
-  const open = !useBots((s) => s.folded.includes(name));
+/** `closed`: folded until the user opens it, where the others are open until folded (the same list remembers both). */
+function Section({ name, label, count, closed, children }: { name: string; label: string; count?: number; closed?: boolean; children: React.ReactNode }) {
+  const key = closed ? `${name}:open` : name;
+  const marked = useBots((s) => s.folded.includes(key));
+  const open = closed ? marked : !marked;
   return (
-    <section className="history-group bots-section">
-      <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={() => useBots.getState().toggleFolded(name)}>
+    <section className="history-group bots-section" data-section={name}>
+      <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={() => useBots.getState().toggleFolded(key)}>
         {label}
         {count !== undefined && <span className="bots-section-count">{count}</span>}
         <ChevronDown size={14} className="history-heading-chevron" />
@@ -301,6 +309,7 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
     onClose();
   };
   const kind = conversation.kind === "direct" ? "bot" : conversation.kind === "group" ? "group" : "side chat";
+  const retired = !!bot?.retiredAt;
   return (
     <div
       ref={ref}
@@ -316,10 +325,16 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
         if (canHover() && item && !item.closest(".filter-row")) setSub(false);
       }}
     >
-      <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.togglePin(conversation.id))}>
+      {/* A retired bot's chat is filed under Retired until it's rehired: what's left is bringing it back, or deleting it. */}
+      {retired && bot && (
+        <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.rehireBot(bot.id))}>
+          <ArchiveRestore size={15} /> Rehire
+        </button>
+      )}
+      {!retired && <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.togglePin(conversation.id))}>
         {conversation.pinnedAt ? <PinOff size={15} /> : <Pin size={15} />} {conversation.pinnedAt ? "Unpin" : "Pin"}
-      </button>
-      <div className="filter-row" onMouseEnter={() => canHover() && setSub(true)}>
+      </button>}
+      {!retired && <div className="filter-row" onMouseEnter={() => canHover() && setSub(true)}>
         <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={sub} className={cx("menu-item", sub && "menu-item-active")} onClick={() => setSub(!sub)}>
           <FolderInput size={15} />
           <span className="menu-item-label">Move to section</span>
@@ -344,7 +359,7 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
             </button>
           </div>
         )}
-      </div>
+      </div>}
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.updateConversation(conversation.id, { unread: !conversation.unread }))}>
         {conversation.unread ? <Bell size={15} /> : <BellDot size={15} />} {conversation.unread ? "Mark as read" : "Mark as unread"}
       </button>
@@ -354,12 +369,12 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
           <Pencil size={15} /> Rename {kind}
         </button>
       )}
-      {bot && !bot.primary && (
+      {bot && !bot.primary && !retired && (
         <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.makePrimary(bot.id))}>
           <Star size={15} /> Make primary
         </button>
       )}
-      {conversation.kind === "direct" && (
+      {conversation.kind === "direct" && !retired && (
         <button type="button" role="menuitem" className="menu-item" onClick={act(() => onDialog({ kind: "group", preset: conversation.botIds }))}>
           <UsersRound size={15} /> New group with {bot?.name.split(" ·")[0] ?? "this bot"}
         </button>
@@ -368,19 +383,21 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
         <Copy size={15} /> Copy conversation ID
       </button>
       <div className="menu-sep" />
-      <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.updateConversation(conversation.id, { hidden: !conversation.hidden, pinnedAt: undefined }))}>
-        {conversation.hidden ? <Eye size={15} /> : <EyeOff size={15} />} {conversation.hidden ? "Show in sidebar" : "Hide from sidebar"}
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        className="menu-item menu-item-danger"
-        disabled={bot?.primary}
-        title={bot?.primary ? "Make another bot primary first" : undefined}
-        onClick={act(() => onDialog({ kind: "delete", id: conversation.id }))}
-      >
-        <Trash size={15} /> Delete {kind}
-      </button>
+      {!retired && (
+        <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.updateConversation(conversation.id, { hidden: !conversation.hidden, pinnedAt: undefined }))}>
+          {conversation.hidden ? <Eye size={15} /> : <EyeOff size={15} />} {conversation.hidden ? "Show in sidebar" : "Hide from sidebar"}
+        </button>
+      )}
+      {bot && !retired ? (
+        // A bot is retired first: deleting it for good is a second step, from Retired.
+        <button type="button" role="menuitem" className="menu-item" disabled={bot.primary} title={bot.primary ? "Make another bot primary first" : undefined} onClick={act(() => onDialog({ kind: "retire", id: conversation.id }))}>
+          <Archive size={15} /> Retire bot
+        </button>
+      ) : (
+        <button type="button" role="menuitem" className="menu-item menu-item-danger" onClick={act(() => onDialog({ kind: "delete", id: conversation.id }))}>
+          <Trash size={15} /> {retired ? "Delete permanently" : `Delete ${kind}`}
+        </button>
+      )}
     </div>
   );
 }
@@ -443,14 +460,25 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
         }}
       />
     );
+  const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
+  if (dialog.kind === "retire") return bot && !bot.retiredAt ? <RetireBotDialog bot={bot} onClose={onClose} /> : null;
+  if (bot)
+    return bot.retiredAt ? (
+      <DeleteBotDialog
+        bot={bot}
+        onClose={onClose}
+        onDone={() => {
+          if (isPhone()) backToBotsList();
+        }}
+      />
+    ) : (
+      // Only a retired bot is deleted: asked for one that isn't, this is the first step.
+      <RetireBotDialog bot={bot} onClose={onClose} />
+    );
   return (
     <ConfirmDeleteDialog
       title={`Delete “${name}”?`}
-      body={
-        conversation.kind === "direct"
-          ? "The bot, its memory, routines and conversation are deleted for good. Groups it's in carry on without it."
-          : "The conversation is deleted for good. The bots in it stay."
-      }
+      body="The conversation is deleted for good. The bots in it stay."
       onClose={onClose}
       onConfirm={() => {
         st.deleteConversation(conversation.id);
@@ -612,9 +640,13 @@ export function BotsSidebar() {
   }, []);
 
   const friends = useBots((s) => s.friends);
-  const { pinned, rest, filed, side, hidden, shared } = useMemo(() => {
+  const { pinned, rest, filed, side, hidden, shared, retired } = useMemo(() => {
     const byRecent = (a: Conversation, b: Conversation) => b.updatedAt - a.updatedAt;
-    const shown = conversations.filter((c) => !c.hidden);
+    // A retired bot's chat is under Retired and nowhere else, pinned, filed or hidden as it may be: it's back where it was when it's rehired.
+    const away = new Set(bots.filter((b) => b.retiredAt).map((b) => b.id));
+    const isRetired = (c: Conversation) => c.kind === "direct" && away.has(c.botIds[0]!);
+    const current = conversations.filter((c) => !isRetired(c));
+    const shown = current.filter((c) => !c.hidden);
     const listed = shown.filter((c) => !c.pinnedAt && c.kind !== "side").sort(byRecent);
     return {
       pinned: shown.filter((c) => c.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!),
@@ -623,9 +655,10 @@ export function BotsSidebar() {
       rest: listed.filter((c) => !c.friend && (!c.section || !sections.includes(c.section))),
       filed: sections.map((name) => [name, listed.filter((c) => c.section === name)] as const),
       side: shown.filter((c) => !c.pinnedAt && c.kind === "side").sort(byRecent),
-      hidden: conversations.filter((c) => c.hidden).sort(byRecent),
+      hidden: current.filter((c) => c.hidden).sort(byRecent),
+      retired: conversations.filter(isRetired).sort(byRecent),
     };
-  }, [conversations, sections]);
+  }, [conversations, sections, bots]);
 
   const q = query.trim().toLowerCase();
   // A reload keeps the list where it was (search results start at the top).
@@ -730,6 +763,12 @@ export function BotsSidebar() {
                     {hidden.length > 0 && (
                       <Section name="hidden" label="Hidden" count={hidden.length}>
                         {hidden.map(row)}
+                      </Section>
+                    )}
+                    {/* Last, and folded until it's opened: out of the way, and still a click from coming back. */}
+                    {retired.length > 0 && (
+                      <Section name="retired" label="Retired" count={retired.length} closed>
+                        {retired.map(row)}
                       </Section>
                     )}
                     {!conversations.length && !gone && (

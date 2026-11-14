@@ -397,14 +397,25 @@ interface SettledAsk {
 
 const FOLLOW_RETRIES = 5;
 
-async function tell(watch: Pick<Watch, "botId" | "conversationId">, text: string) {
+/** Wakes a thread's bot with what the thread has to say. Exported for tests. */
+export async function tell(watch: Pick<Watch, "botId" | "conversationId">, text: string) {
   const bot = db.getBot(watch.botId);
   if (!bot) return;
-  const conversationId = watch.conversationId && db.getConversation(watch.conversationId) ? watch.conversationId : svc.directId(bot.id);
   // Imported lazily: runner imports agent.ts, which imports this file.
   const { wake } = await import("./runner");
+  // A retired bot's threads keep running, and report to the primary in its own chat until the bot is rehired.
+  if (bot.retiredAt) {
+    const primary = db.listBots().find((b) => b.primary && !b.retiredAt);
+    if (primary) wake(primary.id, { kind: "note", conversationId: svc.directId(primary.id), text: retiredReport(bot, text) });
+    return;
+  }
+  const conversationId = watch.conversationId && db.getConversation(watch.conversationId) ? watch.conversationId : svc.directId(bot.id);
   wake(bot.id, { kind: "note", conversationId, text });
 }
+
+/** A thread's report as the primary reads it for a retired bot: whose thread it is, and that it's the primary's to handle now. */
+export const retiredReport = (bot: Pick<Bot, "id" | "name">, text: string) =>
+  `${bot.name} (${short(bot.id)}) is retired, so a coding thread it started or was following reports to you until it's rehired. What follows was written for ${firstName(bot.name)}: where it says you or yours, that was ${firstName(bot.name)}. Handle it yourself or hand it to another bot, and tell the user what they'd want to know.\n\n${text}`;
 
 function titleOf(threadId: string) {
   const chat = storage.getChat(threadId) as Chat | undefined;

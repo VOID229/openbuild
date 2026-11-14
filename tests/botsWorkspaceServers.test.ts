@@ -321,6 +321,8 @@ test("only the listed operations run; everything else refuses the device and cha
     ["DELETE", `/api/bots/conversations/${conversation}`],
     ["PATCH", `/api/bots/${before.bots[0]!.id}`, { name: "Renamed" }],
     ["DELETE", `/api/bots/${before.bots[0]!.id}`],
+    ["POST", `/api/bots/${before.bots[0]!.id}/retire`],
+    ["POST", `/api/bots/${before.bots[0]!.id}/rehire`],
   ];
   for (const [method, path, body] of refused) {
     const init = { method, ...(body ? json(body) : {}) };

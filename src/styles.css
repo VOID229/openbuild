@@ -6116,6 +6116,19 @@ p.key-status svg {
   }
 }
 
+/* What can be undone (retiring a bot): the danger button's outlined shape in plain ink, calm where a delete is red. */
+.btn-calm {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 42%, transparent);
+}
+
+@media (hover: hover) {
+  .btn-calm:hover:not(:disabled) {
+    background: var(--hover);
+    border-color: color-mix(in srgb, var(--text) 60%, transparent);
+  }
+}
+
 .account-faceid {
   margin-bottom: 18px;
 }

@@ -34,7 +34,7 @@ const membersOf = (c: db.StoredConversation): FriendMember[] =>
 export function start(friend: StoredFriend, name: string, botIds: string[]) {
   const clean = cleanName(name, 80);
   if (!clean) throw new svc.BotsError("A shared chat needs a name.");
-  const bots = [...new Set(botIds)].filter((id) => db.getBot(id));
+  const bots = [...new Set(botIds)].filter((id) => db.getBot(id) && !svc.retired(id));
   if (!bots.length) throw new svc.BotsError("Pick at least one of your bots to join it.");
   const id = crypto.randomUUID();
   const conversation = svc.createConversation({

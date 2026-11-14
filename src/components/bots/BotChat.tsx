@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
-// chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, Plus, SmilePlus, Square, TextSelect, X } from "lucide-react";
+// chats name each bot over its messages; side chats between bots are read-only, and so is a retired bot's.
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, Plus, SmilePlus, Square, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
@@ -1048,7 +1048,8 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
                 <RichText text={m.text} bots={bots} everyone={everyone} botId={m.author === "me" ? undefined : m.author} />
               </div>
             )}
-            {m.question && <QuestionCard conversation={conversation} message={m} />}
+            {/* In a chat that's only there to read, a card shows what was asked and takes no answer. */}
+            {m.question && (readonly ? <div className="bm-card-frozen" inert><QuestionCard conversation={conversation} message={m} /></div> : <QuestionCard conversation={conversation} message={m} />)}
             {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
             {m.plan && <PlanCard message={m} bots={bots} />}
             {m.html && <PageCard message={m} old={!!oldPage} />}
@@ -1584,7 +1585,9 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
   }, []);
   const sending = useBots((s) => s.sending);
   const touchY = useRef(0);
-  const readonly = conversation.kind === "side";
+  // A side chat is the bots' own, and a retired bot's chat is there to read until it's rehired.
+  const retired = useBots((s) => conversation.kind === "direct" && !!s.bots.find((b) => b.id === conversation.botIds[0])?.retiredAt);
+  const readonly = conversation.kind === "side" || retired;
   const group = conversation.kind !== "direct";
   // A bot's error ("couldn't reply") is news, not history: it shows for a minute, then goes.
   const [now, setNow] = useState(Date.now);
@@ -2746,7 +2749,9 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
   const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
-  const sub = activity ?? away ?? members;
+  // Retired: its chat stays to read, marked so in the header, with the way back where the composer was.
+  const retired = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0] && b.retiredAt) : undefined;
+  const sub = retired ? "Retired" : (activity ?? away ?? members);
   const repo = useStore((s) => conversationRepo(conversation, s.chats));
   return (
     <div className="bots-chat">
@@ -2771,16 +2776,18 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                     <i />
                   </span>
                 ) : (
-                  sub && <span className={cx("bots-head-sub", activity && "bots-head-sub-live")}>{linePhase === "settling" ? "" : sub}</span>
+                  sub && <span className={cx("bots-head-sub", activity && !retired && "bots-head-sub-live")}>{linePhase === "settling" && !retired ? "" : sub}</span>
                 )}
               </span>
-              {!remote && <HeadTasks conversation={conversation} mobile />}
+              {!remote && !retired && <HeadTasks conversation={conversation} mobile />}
             </>
           ) : (
             <>
               {/* The bots one by one; their name and a chevron to the details open out from them on hover
                   (bots.css, .bots-head-reveal), and stay while the details are open. */}
-              <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
+              <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup still={!!retired} />
+              {/* Always there, unlike the name: nobody should have to hover to learn why the chat takes no message. */}
+              {retired && <span className="bots-pill bots-retired-pill bots-head-retired">Retired</span>}
               <span className="bots-head-reveal">
                 <span>
                   <span>
@@ -2789,7 +2796,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                   </span>
                 </span>
               </span>
-              {!remote && <HeadTasks conversation={conversation} mobile={false} />}
+              {!remote && !retired && <HeadTasks conversation={conversation} mobile={false} />}
               {!remote && (
                 <span className="bots-head-reveal bots-head-reveal-chevron">
                   <span>
@@ -2806,7 +2813,21 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
       <PullRepo.Provider value={repo}>
         <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />
       </PullRepo.Provider>
-      {conversation.kind === "side" ? (
+      {retired ? (
+        <div className="bots-dock">
+          <div className="bots-side-note bots-retired-note" role="status">
+            <span className="bots-retired-note-text">
+              <Archive size={15} aria-hidden />
+              <span>{firstName(retired)} is retired. This chat is read-only until you rehire it.</span>
+            </span>
+            {!remote && (
+              <button type="button" className="btn btn-sm" onClick={() => useBots.getState().rehireBot(retired.id)}>
+                <ArchiveRestore size={14} /> Rehire
+              </button>
+            )}
+          </div>
+        </div>
+      ) : conversation.kind === "side" ? (
         <div className="bots-dock">
           <div className="bots-side-note">
             {conversation.huddle?.closedAt

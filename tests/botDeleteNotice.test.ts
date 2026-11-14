@@ -28,9 +28,11 @@ test("a deleted bot's app use is forgotten with it; other bots' stays", () => ru
   const gone = svc.createBot({ name: 'Gone' }).bot;
   const stays = svc.createBot({ name: 'Stays' }).bot;
   db.setValue(db.APP_USERS, { linear: { [gone.id]: 1, [stays.id]: 2 }, vercel: { [gone.id]: 3 } });
+  svc.retireBot(gone.id);
   await svc.deleteBot(gone.id, { by: 'me' });
   // Its entries go, and an app nobody else used goes with them.
   a.deepEqual(db.getValue(db.APP_USERS), { linear: { [stays.id]: 2 } });
+  svc.retireBot(stays.id);
   await svc.deleteBot(stays.id);
   a.deepEqual(db.getValue(db.APP_USERS), {});
   process.exit(0);
@@ -99,6 +101,17 @@ test("the user deleting a bot tells the primary who it was and what it left; the
     req.params = { id };
     return routes['/api/bots/:id'].DELETE(req);
   };
+  const retire = async (id) => {
+    const req = new Request('http://x/api/bots/' + id + '/retire', { method: 'POST' });
+    req.params = { id };
+    return routes['/api/bots/:id/retire'].POST(req);
+  };
+  // Deleting is a second step: a bot that isn't retired is refused, and stays as it was.
+  const refused = await del(beta.id);
+  a.equal(refused.status, 400);
+  a.match((await refused.json()).error, /Beta isn't retired\. Retire it first/);
+  a.ok(db.getBot(beta.id));
+  a.equal((await retire(beta.id)).status, 200);
   wakes.length = 0;
   a.equal((await del(beta.id)).status, 200);
   a.equal(db.getBot(beta.id), undefined);
@@ -139,6 +152,7 @@ test("the user deleting a bot tells the primary who it was and what it left; the
   a.ok(order.every((i) => i > 0));
 
   // A bot with nothing open: the primary still hears it's gone.
+  a.equal((await retire(delta.id)).status, 200);
   wakes.length = 0;
   assigned = [];
   a.equal((await del(delta.id)).status, 200);
@@ -149,6 +163,10 @@ test("the user deleting a bot tells the primary who it was and what it left; the
 
   // The primary deleting a bot itself knows already: nothing is sent.
   wakes.length = 0;
+  // It has to retire it first too.
+  a.throws(() => manage(boss.id, { action: 'delete', bot: 'Gamma' }), /Gamma isn't retired\. Retire it first with manage_bot retire/);
+  a.ok(db.getBot(gamma.id));
+  manage(boss.id, { action: 'retire', bot: 'Gamma' });
   await manage(boss.id, { action: 'delete', bot: 'Gamma' });
   a.equal(db.getBot(gamma.id), undefined);
   a.deepEqual(wakes, []);
@@ -190,6 +208,7 @@ test("the notice wakes an idle primary for a turn of its own, in its own chat", 
   a.equal(runner.busy(boss.bot.id), false);
   a.equal(prompts.length, 0);
 
+  svc.retireBot(beta.bot.id);
   await svc.deleteBot(beta.bot.id, { by: 'me' });
   await until(() => prompts.length === 1);
   const [turn] = prompts;

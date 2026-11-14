@@ -1263,6 +1263,7 @@ test("the primary adds a project and starts a thread in it; other bots and stray
     await expect(handle(other.id, { action: "add_project", path: folder })).rejects.toThrow(/Only the primary/);
     svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
     await expect(call("add_project", { path: folder })).rejects.toThrow(/hasn't given you access/);
+    svc.retireBot(other.id);
     await svc.deleteBot(other.id);
     expect(guide({ threads: { enabled: true, scope: "all", projects: [] }, primary: true })).toContain("add_project");
     expect(guide({ threads: { enabled: true, scope: "all", projects: [] } })).not.toContain("add_project");
@@ -1443,6 +1444,9 @@ test("a bot the user deletes leaves its open threads, what they wait on and its 
   const told: any[] = [];
   svc.setHooks({ wake: (id, w) => told.push({ id, ...w }), stop() {}, leftThreads: threads.leftBy });
   try {
+    // Retired first, as the app does: only a retired bot is deleted. Its threads are still its own until then.
+    svc.retireBot(helper.id);
+    told.length = 0;
     await svc.deleteBot(helper.id, { by: "me" });
   } finally {
     svc.setHooks({ wake() {}, stop() {} });

@@ -2,7 +2,7 @@
 // model, computer and OpenBuild permissions under Advanced and its threads, both in the More menu; a
 // group's members, goal (with its tasks) and routines; the working threads either started from its chat; who's in a
 // side chat.
-import { Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Timer, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Timer, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { runningThreads, threadActivity, threadBrands } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
@@ -312,7 +312,10 @@ function RoutineRow({ bot, routine: r, owner }: { bot: Bot; routine: Routine; ow
         {open && r.task && <span className="bots-routine-task">{r.task}</span>}
       </span>
       <span className="bots-routine-side">
-        <Toggle checked={r.enabled} label={r.enabled ? "Pause" : "Resume"} onChange={(on) => st.updateRoutine(bot.id, r.id, { enabled: on })} />
+        {/* A retired bot's routines stay paused: they turn on again here once it's rehired. */}
+        <span title={bot.retiredAt ? "Paused while it's retired. Rehire it to turn this on." : undefined}>
+          <Toggle checked={r.enabled} disabled={!!bot.retiredAt} label={r.enabled ? "Pause" : "Resume"} onChange={(on) => st.updateRoutine(bot.id, r.id, { enabled: on })} />
+        </span>
         <span className="bots-routine-actions">
           {r.task && (
             <button type="button" className="bots-routine-action" aria-expanded={open} onClick={() => setOpen(!open)}>
@@ -331,7 +334,9 @@ function RoutineRow({ bot, routine: r, owner }: { bot: Bot; routine: Routine; ow
 export function Members({ conversation, bots }: { conversation: Conversation; bots: Bot[] }) {
   const st = useBots.getState();
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
-  const others = bots.filter((b) => !conversation.botIds.includes(b.id));
+  // A retired bot can't be added: it comes back to the groups it left when it's rehired.
+  const others = bots.filter((b) => !conversation.botIds.includes(b.id) && !b.retiredAt);
+  const away = conversation.kind === "group" ? bots.filter((b) => b.retiredAt && b.retiredFrom?.includes(conversation.id)) : [];
   const shared = conversation.friend;
   // A shared chat that stopped syncing is there to read; its members don't change anymore.
   const editable = conversation.kind === "group" && !shared?.ended;
@@ -387,6 +392,15 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
                 <Minus size={14} />
               </IconButton>
             )}
+          </li>
+        ))}
+        {away.map((b) => (
+          <li key={b.id} className="bots-card-row bots-member bots-member-retired">
+            <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
+              <BotAvatar look={b.look} size={28} alive={false} />
+              <span className="bots-card-text">{b.name}</span>
+            </button>
+            <span className="bots-pill bots-retired-pill" title="It rejoins this group when it's rehired">Retired</span>
           </li>
         ))}
       </ul>
@@ -725,9 +739,10 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }, conversation.id) : st.updateConversation(conversation.id, { name: v }))} />
             )}
             {bot ? (
-              bot.primary && (
+              (bot.primary || bot.retiredAt) && (
                 <div className="bots-details-sub">
-                  <span className="bots-pill">Primary</span>
+                  {bot.primary && <span className="bots-pill">Primary</span>}
+                  {bot.retiredAt && <span className="bots-pill bots-retired-pill">Retired</span>}
                 </div>
               )
             ) : (
@@ -775,17 +790,29 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               )}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
               {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
-              <div className="bots-details-foot">
-                <button
-                  type="button"
-                  className="btn btn-sm bots-danger bots-delete"
-                  disabled={bot.primary}
-                  title={bot.primary ? "Make another bot primary first" : undefined}
-                  onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}
-                >
-                  <Trash size={14} /> Delete bot
-                </button>
-              </div>
+              {/* A bot is retired first; deleting it for good is only offered once it is. */}
+              {bot.retiredAt ? (
+                <div className="bots-details-foot bots-details-foot-retired">
+                  <button type="button" className="btn btn-sm" onClick={() => st.rehireBot(bot.id)}>
+                    <ArchiveRestore size={14} /> Rehire
+                  </button>
+                  <button type="button" className="btn btn-sm bots-danger bots-delete" onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}>
+                    <Trash size={14} /> Delete permanently
+                  </button>
+                </div>
+              ) : (
+                <div className="bots-details-foot">
+                  <button
+                    type="button"
+                    className="btn btn-sm bots-retire"
+                    disabled={bot.primary}
+                    title={bot.primary ? "Make another bot primary first" : undefined}
+                    onClick={() => openBotsDialog({ kind: "retire", id: conversation.id })}
+                  >
+                    <Archive size={14} /> Retire bot
+                  </button>
+                </div>
+              )}
             </>
           ) : conversation.kind === "group" ? (
             <>

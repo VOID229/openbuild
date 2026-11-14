@@ -142,6 +142,11 @@ interface BotsState {
   /** `conversationId`: the chat a rename was made in, which says so there. */
   updateBot: (id: string, patch: Partial<Omit<Bot, "id">>, conversationId?: string) => void;
   makePrimary: (id: string) => void;
+  /** Pause a bot: it keeps everything, leaves its groups, and its chat turns read-only until it's rehired. */
+  retireBot: (id: string) => void;
+  /** Bring a retired bot back, into the groups it left. Its routines stay paused. */
+  rehireBot: (id: string) => void;
+  /** For good. The workspace only deletes a bot that's retired. */
   deleteBot: (id: string) => void;
   createGroup: (group: { name: string; botIds: string[]; instructions?: string }) => string;
   updateConversation: (id: string, patch: Partial<Omit<Conversation, "id" | "messages">>) => void;
@@ -295,6 +300,30 @@ export const useBots = create<BotsState>()(
     makePrimary: (id) => {
       set((s) => ({ bots: s.bots.map((b) => ({ ...b, primary: b.id === id || undefined })) }));
       void send("PATCH", `/api/bots/${id}`, { primary: true });
+    },
+    retireBot: (id) => {
+      set((s) => {
+        const bot = s.bots.find((b) => b.id === id);
+        if (!bot || bot.primary || bot.retiredAt) return s;
+        const groups = s.conversations.filter((c) => c.kind === "group" && c.botIds.includes(id));
+        return {
+          bots: mapBot(s.bots, id, (b) => ({ ...b, retiredAt: Date.now(), retiredFrom: groups.map((c) => c.id), routines: b.routines.map((r) => ({ ...r, enabled: false, nextRunAt: undefined })) })),
+          conversations: s.conversations.map((c) => (groups.includes(c) ? { ...c, botIds: c.botIds.filter((b) => b !== id) } : c)),
+        };
+      });
+      void send("POST", `/api/bots/${id}/retire`);
+    },
+    rehireBot: (id) => {
+      set((s) => {
+        const bot = s.bots.find((b) => b.id === id);
+        if (!bot?.retiredAt) return s;
+        const back = new Set(bot.retiredFrom ?? []);
+        return {
+          bots: mapBot(s.bots, id, ({ retiredAt: _at, retiredFrom: _from, retiredRoutines: _routines, ...b }) => b),
+          conversations: s.conversations.map((c) => (c.kind === "group" && back.has(c.id) && !c.botIds.includes(id) && !c.friend?.ended ? { ...c, botIds: [...c.botIds, id] } : c)),
+        };
+      });
+      void send("POST", `/api/bots/${id}/rehire`);
     },
     deleteBot: (id) => {
       set((s) => {

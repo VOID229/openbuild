@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -231,7 +231,7 @@ export function friendNote(botId: string, friendId: string): string {
   const here = getFocus(botId);
   const c = here ? db.getConversation(here) : undefined;
   const allowed = allowsTools(friendId);
-  const ours = (c?.botIds ?? []).filter((id) => id !== botId).map((id) => db.getBot(id)?.name).filter(Boolean);
+  const ours = (c?.botIds ?? []).filter((id) => id !== botId && !svc.retired(id)).map((id) => db.getBot(id)?.name).filter(Boolean);
   const theirs = c?.friend?.members.map((m) => untrustedData(m.name)) ?? [];
   return [
     `You are ${bot.name}, one of ${user}'s bots in OpenBots.`,
@@ -286,12 +286,15 @@ export function contextSections(botId: string): Record<string, string> {
   const bot = requireBot(botId);
   const settings = svc.getSettings();
   const user = settings.user?.name || "the user";
-  const others = db.listBots().filter((b) => b.id !== botId);
+  const everyone = db.listBots().filter((b) => b.id !== botId);
+  const others = everyone.filter((b) => !b.retiredAt);
+  // Only the primary can rehire one, so only it carries who's retired.
+  const away = bot.primary ? everyone.filter((b) => b.retiredAt) : [];
   const convos = db.listConversations().filter((c) => c.botIds.includes(botId));
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update and delete bots, their instructions and roles included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run on the host (the default) or in a container is set per machine by the user, in Settings → Devices, not by you."
+      ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update, retire and rehire bots, their instructions and roles included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run on the host (the default) or in a container is set per machine by the user, in Settings → Devices, not by you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions and role; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions or role while you have none.`,
     "Talk like a person texting: short, warm, plain; no headings or bullet lists unless asked. One send_message call is one bubble, and several short bubbles beat one long one.",
     HEARING,
@@ -325,6 +328,7 @@ export function contextSections(botId: string): Record<string, string> {
     others.length
       ? `Other bots (manage_bot team gives one's full instructions):\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? ", primary" : ""}: ${roleOf(b)}`).join("\n")}`
       : "There are no other bots yet.",
+    away.length ? `Retired, off the team until rehired (manage_bot rehire): ${away.map((b) => `${b.name} (${b.id.slice(0, 8)})`).join(", ")}` : "",
     `You're in ${chats.length} ${chats.length === 1 ? "chat" : "chats"}; manage_bot conversations lists them with their short ids.${shared.length ? ` Shared with friends, where you answer separately and anything you write goes to them:\n${shared.map((c) => conversationLine(c, user)).join("\n")}` : ""}`,
     threads.brief(bot),
     plugins.guide(bot),
@@ -371,9 +375,10 @@ function conversationLine(c: db.StoredConversation, user: string): string {
 
 /** manage_bot team: the other bots' roles and full instructions, or one bot's. Read-only, for any bot: it's what their context used to carry. */
 function teamDetails(botId: string, which: unknown) {
-  const all = db.listBots();
-  const picked = typeof which === "string" && which.trim() ? [db.getBot(resolveBot(which.trim()))!] : all.filter((b) => b.id !== botId);
-  return picked.map((b) => ({ id: b.id.slice(0, 8), name: b.name, ...(b.primary ? { primary: true } : {}), ...(b.role ? { role: b.role } : {}), instructions: b.instructions || "no instructions yet" }));
+  // The team is who can be asked: a retired bot is listed only for the primary, which can rehire it, or when named.
+  const all = db.listBots().filter((b) => !b.retiredAt || db.getBot(botId)?.primary);
+  const picked = typeof which === "string" && which.trim() ? [db.getBot(resolveBot(which.trim(), true))!] : all.filter((b) => b.id !== botId);
+  return picked.map((b) => ({ id: b.id.slice(0, 8), name: b.name, ...(b.primary ? { primary: true } : {}), ...(b.retiredAt ? { retired: true } : {}), ...(b.role ? { role: b.role } : {}), instructions: b.instructions || "no instructions yet" }));
 }
 
 /** manage_bot conversations: every conversation the bot is in, as its context used to list them. Read-only. */
@@ -454,18 +459,27 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
  * A group message with its @tags made exact (shared/bots resolveMentions): "@Dr" or a bot's old name
  * becomes the bot's name, so it's a mention. What names nobody here comes back for the sender to hear.
  */
-function exactMentions(botId: string, conversationId: string, text: string): { text: string; missed: MissedMention[] } {
+export function exactMentions(botId: string, conversationId: string, text: string): { text: string; missed: MissedMention[] } {
   const c = db.getConversation(conversationId);
   if (!c || c.kind !== "group" || c.friend || !text.includes("@")) return { text, missed: [] };
-  const all = db.listBots();
+  const all = db.listBots().filter((b) => !b.retiredAt);
   const here = all.filter((b) => b.id !== botId && c.botIds.includes(b.id));
-  return resolveMentions(text, here, all.filter((b) => b.id !== botId && !c.botIds.includes(b.id)), [svc.getSettings().user?.name ?? "", mentionName(requireBot(botId).name)]);
+  const exact = resolveMentions(text, here, all.filter((b) => b.id !== botId && !c.botIds.includes(b.id)), [svc.getSettings().user?.name ?? "", mentionName(requireBot(botId).name)]);
+  // A tag that reached nobody may name a retired bot: the sender hears that, not that there's no such bot.
+  const gone = db.listBots().filter((b) => b.retiredAt);
+  const missed = exact.missed.map((m): MissedMention => {
+    if (m.could || m.absent || !gone.length) return m;
+    const hit = looseMention(m.tag, gone);
+    return hit.length === 1 ? { ...m, retired: mentionName(hit[0]!.name) } : m;
+  });
+  return { text: exact.text, missed };
 }
 
 /** What send_message says of the @tags that reached nobody, so a missed mention is never silent. */
 export function missedNote(missed: MissedMention[], here: string[]): string {
   const lines = missed.map((m) =>
     m.could ? `@${m.tag} could be ${m.could.join(" or ")}: name one.`
+    : m.retired ? `${m.retired} is retired, so @${m.tag} reached nobody: it can't be mentioned or asked until it's rehired.`
     : m.absent ? `${m.absent} isn't in this chat, so @${m.tag} reached nobody: ask_bot reaches them.`
     : `@${m.tag} isn't a bot in this chat, so it reached nobody.`);
   return `${lines.join(" ")}${missed.some((m) => !m.absent && !m.could) && here.length ? ` Bots here: ${here.join(", ")}.` : ""} Send again with their exact @Name if a bot was meant to read this.`;
@@ -879,6 +893,8 @@ export async function askBot(botId: string, p: Record<string, unknown>) {
           wake(`${other} answered what you asked (“${text.slice(0, 200)}”) in side conversation ${sideId.slice(0, 8)}:\n${reply.text.slice(0, 4000)}\nCarry on here with it. If nobody here needs to hear anything, stay [silent].`);
         } catch (err) {
           if (signal.aborted) throw new JobCancelled();
+          // Retired while the question waited: said at once, not after the wait runs out.
+          if (err instanceof svc.BotRetiredError) return wake(`${other} was retired before it answered what you asked (“${text.slice(0, 200)}”), so no answer is coming. It can't be asked until it's rehired: do it yourself, hand it to another bot, or tell the user if they're waiting on it. If it no longer matters, stay [silent].`);
           wake(`${other} hasn't answered what you asked (“${text.slice(0, 200)}”) after ${Math.round(ASK_WAIT_MS / 60_000)} minutes. Carry on without it, and tell the user if they're waiting on it; otherwise stay [silent].`);
         }
       }, { queue: false })
@@ -936,7 +952,7 @@ export function sideChat(botId: string, p: Record<string, unknown>) {
     return { ok: true, note: huddle.by === botId ? "Closed. You'll be asked to report back in the chat it came from." : `Closed. ${reporter} reports back.` };
   }
   if (action !== "start") throw new svc.BotsError("action is start or close.");
-  const bots = asStrings(p.bots).map(resolveBot);
+  const bots = asStrings(p.bots).map((name) => resolveBot(name));
   const from = conversationFor(botId, p.report_to);
   const side = svc.openHuddle(botId, from, bots, String(p.topic ?? ""));
   return {
@@ -946,11 +962,24 @@ export function sideChat(botId: string, p: Record<string, unknown>) {
   };
 }
 
-function resolveBot(prefix: string): string {
-  if (db.getBot(prefix)) return prefix;
+/**
+ * The bot a name or short id means. A retired bot can't be asked, messaged or added to anything, so
+ * naming one is refused unless `retired` is set: to rehire or delete it, read about it or change it.
+ * A name an active bot and a retired one share means the active one.
+ */
+function resolveBot(prefix: string, retired = false): string {
+  const refuse = (bot: db.StoredBot) => new svc.BotsError(`${bot.name} is retired: it can't be asked, messaged or added to a chat until it's rehired.`);
+  const exact = db.getBot(prefix);
+  if (exact) {
+    if (exact.retiredAt && !retired) throw refuse(exact);
+    return prefix;
+  }
   const hits = db.listBots().filter((b) => b.id === prefix || b.id.startsWith(prefix) || [firstName(b.name), mentionName(b.name)].some((n) => n.toLowerCase() === prefix.toLowerCase()));
-  if (hits.length === 1) return hits[0]!.id;
-  throw new svc.BotsError(hits.length ? "That bot name is ambiguous." : "No such bot.");
+  const working = hits.filter((b) => !b.retiredAt);
+  const pool = retired && working.length !== 1 ? hits : working;
+  if (pool.length === 1) return pool[0]!.id;
+  if (!pool.length && hits.length === 1) throw refuse(hits[0]!);
+  throw new svc.BotsError(pool.length || hits.length ? "That bot name is ambiguous." : "No such bot.");
 }
 
 export function manage(botId: string, p: Record<string, unknown>) {
@@ -995,9 +1024,24 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (!p.bot) throw new svc.BotsError("Say which bot.");
     return regroup(botId, action === "add_to_group", resolveBot(String(p.bot)), p.conversation);
   }
-  const target = p.bot ? resolveBot(String(p.bot)) : botId;
+  // These can name a retired bot: it's still there to rehire, delete, or change while it's away.
+  const target = p.bot ? resolveBot(String(p.bot), true) : botId;
+  if (action === "retire" || action === "rehire") {
+    if (!self.primary) throw new svc.BotsError(`Only the primary bot can ${action} bots.`);
+    if (!p.bot) throw new svc.BotsError("Say which bot.");
+    const before = db.getBot(target)!;
+    if (action === "retire") {
+      if (before.retiredAt) return { id: target, name: before.name, retired: true, note: `${before.name} was already retired. Nothing changed.` };
+      const bot = svc.retireBot(target, { by: botId });
+      return { id: bot.id, name: bot.name, retired: true, note: `${bot.name} is retired: it keeps its memory, instructions, settings and chats, its routines are paused, and it can't be mentioned, messaged, added to a group or woken until you rehire it (manage_bot rehire). What was waiting on it went back to whoever sent it, the other bots are told, and coding threads it started report to you. It can be deleted for good now with manage_bot delete, if the user wants that.` };
+    }
+    if (!before.retiredAt) return { id: target, name: before.name, retired: false, note: `${before.name} isn't retired. Nothing changed.` };
+    const bot = svc.rehireBot(target, { by: botId });
+    return { id: bot.id, name: bot.name, retired: false, note: `${bot.name} is back: in its own chat and the groups it was in, and the other bots are told. Its routines stay paused until the user turns them on in its settings.` };
+  }
   if (action === "delete") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can delete bots.");
+    if (!db.getBot(target)?.retiredAt) throw new svc.BotsError(`${db.getBot(target)?.name ?? "That bot"} isn't retired. Retire it first with manage_bot retire: only a retired bot can be deleted, and deleting is for good. Nothing changed.`);
     return svc.deleteBot(target, { by: botId }).then(() => ({ ok: true }));
   }
   if (action === "update") {
@@ -1026,7 +1070,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
     // The whole update is one write, after every model it names checks out.
     return checkModels(modelChange(p)).then((settings) => modelSummary(svc.updateBot(target, { ...patch, ...settings }, { conversationId: where })));
   }
-  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models, defaults, computers, team or conversations.");
+  throw new svc.BotsError("action is create, create_group, update, retire, rehire, delete, add_to_group, remove_from_group, models, defaults, computers, team or conversations.");
 }
 
 /**

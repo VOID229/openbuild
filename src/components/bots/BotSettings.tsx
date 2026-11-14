@@ -2,7 +2,7 @@
 // instructions, routines, model, how often it checks in; a group's members and goal), making and
 // deleting them, and pages for what they share: their models, the Claude logins they run on, web
 // search, the harnesses they may start threads on, extra Pi extensions, and friends.
-import { ChevronRight, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronRight, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
@@ -15,7 +15,7 @@ import { SettingsHeading } from "../primitives";
 import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
 import { BotMachines, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
-import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
+import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, LookPicker, RetireBotDialog } from "./BotDialogs";
 import { Instructions, Members, RoleField, Routines } from "./BotDetails";
 import { useBusyBots } from "./common";
 import { BotClaude } from "./BotClaude";
@@ -24,7 +24,7 @@ import { BotFriends } from "./BotFriends";
 import { BotHarnesses, BotThreads, useAllowedHarnesses } from "./BotThreads";
 import { BotWebSearch, useConfiguredProviders } from "./BotWebSearch";
 
-type Dialog = { kind: "bot" } | { kind: "group" } | { kind: "delete"; conversationId: string } | { kind: "reset" };
+type Dialog = { kind: "bot" } | { kind: "group" } | { kind: "delete"; conversationId: string } | { kind: "retire"; botId: string } | { kind: "reset" };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -51,7 +51,7 @@ const CHECK_INS: { value: Proactivity; label: string }[] = [
   { value: "high", label: "Every hour" },
 ];
 
-function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: string) => void }) {
+function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversationId: string) => void; onRetire: (botId: string) => void }) {
   const pulses = useBots((s) => s.pulses);
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
   const st = useBots.getState();
@@ -77,9 +77,10 @@ function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: str
             onBlur={saveName}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
-          {bot.primary && (
+          {(bot.primary || bot.retiredAt) && (
             <div className="bots-details-sub">
-              <span className="bots-pill">Primary</span>
+              {bot.primary && <span className="bots-pill">Primary</span>}
+              {bot.retiredAt && <span className="bots-pill bots-retired-pill">Retired</span>}
             </div>
           )}
           <div className="bots-set-hero-actions">
@@ -88,7 +89,7 @@ function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: str
                 <MessageCircle size={14} /> Open chat
               </button>
             )}
-            {!bot.primary && (
+            {!bot.primary && !bot.retiredAt && (
               <button type="button" className="btn btn-sm" onClick={() => st.makePrimary(bot.id)}>
                 <Star size={14} /> Make primary
               </button>
@@ -144,17 +145,42 @@ function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: str
         </div>
       </section>
 
-      <div className="setting-row bots-set-danger">
-        <div className="setting-text">
-          <div className="setting-label">Delete bot</div>
-          <p className="setting-desc">
-            {bot.primary ? "This is your primary bot. Make another bot primary to delete it." : "Its memory, routines and conversation go too. Groups it's in carry on without it."}
-          </p>
+      {bot.retiredAt ? (
+        <>
+          <div className="setting-row bots-set-danger">
+            <div className="setting-text">
+              <div className="setting-label">Rehire</div>
+              <p className="setting-desc">It comes back as it was, in the groups it left. Its routines stay paused until you turn them on, and your other bots are told it's back.</p>
+            </div>
+            <button type="button" className="btn btn-sm" onClick={() => st.rehireBot(bot.id)}>
+              <ArchiveRestore size={14} /> Rehire
+            </button>
+          </div>
+          <div className="setting-row">
+            <div className="setting-text">
+              <div className="setting-label">Delete permanently</div>
+              <p className="setting-desc">Its memory, instructions, routines and conversation are deleted for good. It can't be rehired after this.</p>
+            </div>
+            <button type="button" className="btn btn-sm btn-danger" disabled={!conversation} onClick={() => conversation && onDelete(conversation.id)}>
+              <Trash2 size={14} /> Delete permanently
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="setting-row bots-set-danger">
+          <div className="setting-text">
+            <div className="setting-label">Retire bot</div>
+            <p className="setting-desc">
+              {bot.primary
+                ? "This is your primary bot. Make another bot primary to retire it."
+                : "A pause you can undo. It keeps its memory, instructions and routines, but can't be mentioned or used until you rehire it. Only a retired bot can be deleted."}
+            </p>
+          </div>
+          <button type="button" className="btn btn-sm btn-calm" disabled={bot.primary} onClick={() => onRetire(bot.id)}>
+            <Archive size={14} /> Retire
+          </button>
         </div>
-        <button type="button" className="btn btn-sm btn-danger" disabled={bot.primary || !conversation} onClick={() => conversation && onDelete(conversation.id)}>
-          <Trash2 size={14} /> Delete
-        </button>
-      </div>
+      )}
     </SubPage>
   );
 }
@@ -222,6 +248,7 @@ function BotRow({ bot }: { bot: Bot }) {
           <span className="pi-row-name">
             {bot.name}
             {bot.primary && <span className="bots-pill">Primary</span>}
+            {bot.retiredAt && <span className="bots-pill bots-retired-pill">Retired</span>}
             {conversation?.hidden && <span className="badge">hidden</span>}
           </span>
           <span className="pi-row-desc bots-set-row-desc">{bot.role || bot.instructions || "No instructions yet"}</span>
@@ -302,14 +329,18 @@ export function BotsSettingsSection() {
   useEffect(() => st.ensureSeeded(), [st]);
 
   const groups = conversations.filter((c) => c.kind === "group").sort((a, b) => b.updatedAt - a.updatedAt);
-  // Primary first, then oldest first: the order they were made in.
-  const sorted = [...bots].sort((a, b) => Number(!!b.primary) - Number(!!a.primary) || a.createdAt - b.createdAt);
+  // Primary first, then oldest first: the order they were made in. Retired ones come last, marked.
+  const sorted = [...bots].sort((a, b) => Number(!!a.retiredAt) - Number(!!b.retiredAt) || Number(!!b.primary) - Number(!!a.primary) || a.createdAt - b.createdAt);
+  const working = bots.filter((b) => !b.retiredAt);
   // A bot's or a group's page: settings/bots/bot/<id>, settings/bots/group/<id>.
   const [kind, rawId] = page?.split("/") ?? [];
   const id = rawId && decodeURIComponent(rawId);
   const editingBot = kind === "bot" ? bots.find((b) => b.id === id) : undefined;
   const editingGroup = kind === "group" ? groups.find((g) => g.id === id) : undefined;
   const deleting = dialog?.kind === "delete" ? conversations.find((c) => c.id === dialog.conversationId) : undefined;
+  // A bot's page asks to delete its chat: that's the bot, for good, and only once it's retired.
+  const deletingBot = deleting?.kind === "direct" ? bots.find((b) => b.id === deleting.botIds[0]) : undefined;
+  const retiring = dialog?.kind === "retire" ? bots.find((b) => b.id === dialog.botId && !b.retiredAt) : undefined;
   const closeDialog = () => setDialog(undefined);
 
   // Something that was being edited went away (deleted here or from the sidebar).
@@ -329,10 +360,12 @@ export function BotsSettingsSection() {
         />
       )}
       {dialog?.kind === "group" && <CreateGroupDialog onClose={closeDialog} onCreated={(id) => openSettingsPage(`group/${encodeURIComponent(id)}`)} />}
-      {deleting && (
+      {retiring && <RetireBotDialog bot={retiring} onClose={closeDialog} />}
+      {deletingBot && (deletingBot.retiredAt ? <DeleteBotDialog bot={deletingBot} onClose={closeDialog} onDone={() => useStore.getState().settingsPage && settingsUp()} /> : <RetireBotDialog bot={deletingBot} onClose={closeDialog} />)}
+      {deleting && !deletingBot && (
         <ConfirmDeleteDialog
           title={`Delete “${conversationName(deleting, bots)}”?`}
-          body={deleting.kind === "direct" ? "The bot, its memory, routines and conversation are deleted for good. Groups it's in carry on without it." : "The group's conversation is deleted for good. The bots in it stay."}
+          body="The group's conversation is deleted for good. The bots in it stay."
           onClose={closeDialog}
           onConfirm={() => {
             st.deleteConversation(deleting.id);
@@ -354,6 +387,7 @@ export function BotsSettingsSection() {
     </>
   );
   const onDelete = (conversationId: string) => setDialog({ kind: "delete", conversationId });
+  const onRetire = (botId: string) => setDialog({ kind: "retire", botId });
 
   const shared: Record<string, [string, React.ReactNode]> = {
     models: ["Models", null],
@@ -364,7 +398,7 @@ export function BotsSettingsSection() {
     friends: ["Friends", <BotFriends />],
   };
   const body = editingBot ? (
-    <BotEditor key={editingBot.id} bot={editingBot} onDelete={onDelete} />
+    <BotEditor key={editingBot.id} bot={editingBot} onDelete={onDelete} onRetire={onRetire} />
   ) : editingGroup ? (
     <GroupEditor key={editingGroup.id} group={editingGroup} onDelete={onDelete} />
   ) : page === "models" ? (
@@ -406,7 +440,7 @@ export function BotsSettingsSection() {
       <SettingsGroup
         title="Groups"
         action={
-          <button type="button" className="btn btn-sm" disabled={bots.length < 2} title={bots.length < 2 ? "A group needs at least two bots" : undefined} onClick={() => setDialog({ kind: "group" })}>
+          <button type="button" className="btn btn-sm" disabled={working.length < 2} title={working.length < 2 ? "A group needs at least two bots" : undefined} onClick={() => setDialog({ kind: "group" })}>
             <UsersRound size={14} /> New group
           </button>
         }
