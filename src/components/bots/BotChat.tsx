@@ -31,7 +31,7 @@ import { AttachmentError, fitDataUrl, fitImage, fitsMessage, formatBytes } from 
 import { holdFile, uploadHeld } from "../../lib/localFiles";
 import { MAX_ATTACHMENT_BYTES } from "../../../shared/attachments";
 import { FileChip, SentFileChip } from "../FileChip";
-import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
+import { botStashOf, EMPTY_STASH_NOTICE, imageFiles, latestStash, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
@@ -2426,11 +2426,23 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
       input.current?.focus();
     }
   };
+  /** The "use last stash" shortcut, while OpenBots is showing: the newest stash, as if picked from the list. */
+  const onUseLastStash = () => {
+    const item = latestStash(stashed);
+    if (item) return pasteStashed(item);
+    setNotice(EMPTY_STASH_NOTICE);
+    input.current?.focus();
+  };
   const stashShortcut = useRef(onStashShortcut);
   stashShortcut.current = onStashShortcut;
+  const lastStashShortcut = useRef(onUseLastStash);
+  lastStashShortcut.current = onUseLastStash;
   useEffect(() => {
     const onShortcut = (e: Event) => {
-      if ((e as CustomEvent<ShortcutEventDetail>).detail?.action === "stashDraft" && useStore.getState().botsOpen) stashShortcut.current();
+      if (!useStore.getState().botsOpen) return;
+      const action = (e as CustomEvent<ShortcutEventDetail>).detail?.action;
+      if (action === "stashDraft") stashShortcut.current();
+      else if (action === "useLastStash") lastStashShortcut.current();
     };
     window.addEventListener(SHORTCUT_EVENT, onShortcut);
     return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);

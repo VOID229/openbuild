@@ -78,6 +78,14 @@ export function stashAction(hasContent: boolean, count: number): "stash" | "use"
   return count === 1 ? "use" : undefined;
 }
 
+/** What the "use last stash" shortcut pastes: the newest stash, or nothing when the stash is empty. */
+export function latestStash(items: readonly Stashed[]): Stashed | undefined {
+  return items.reduce<Stashed | undefined>((newest, item) => (!newest || item.createdAt > newest.createdAt ? item : newest), undefined);
+}
+
+/** What the composer says when the "use last stash" shortcut finds nothing to paste. */
+export const EMPTY_STASH_NOTICE = "Nothing in the stash yet.";
+
 /** The composer after pasting a stash into it. What was already written stays, ahead of it. */
 export function pasteStash(current: { text: string; files: Attachment[] }, item: Stashed) {
   const before = current.text.trim() ? `${current.text}${current.text.endsWith("\n") ? "" : "\n"}` : "";

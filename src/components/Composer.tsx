@@ -17,7 +17,7 @@ import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../li
 import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../lib/shortcuts";
-import { addStash, pasteStash, removeStash, stashAction, useStash, type Stashed } from "../lib/stash";
+import { addStash, EMPTY_STASH_NOTICE, latestStash, pasteStash, removeStash, stashAction, useStash, type Stashed } from "../lib/stash";
 import { StashTray } from "./StashTray";
 import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
@@ -704,12 +704,25 @@ export function Composer({ variant, chatId, streaming }: Props) {
       textarea.current?.focus();
     }
   };
+  /** The "use last stash" shortcut: the newest stash goes in as if it had been picked from the list. */
+  const onUseLastStash = () => {
+    if (editing) return;
+    const item = latestStash(stashed);
+    if (item) return pasteStashed(item);
+    setNotice(EMPTY_STASH_NOTICE);
+    textarea.current?.focus();
+  };
   const stashShortcut = useRef(onStashShortcut);
   stashShortcut.current = onStashShortcut;
+  const lastStashShortcut = useRef(onUseLastStash);
+  lastStashShortcut.current = onUseLastStash;
   useEffect(() => {
     const onShortcut = (e: Event) => {
-      // OpenBots, when it's showing, has the shortcut for its own composer.
-      if ((e as CustomEvent<ShortcutEventDetail>).detail?.action === "stashDraft" && !useStore.getState().botsOpen) stashShortcut.current();
+      // OpenBots, when it's showing, has the shortcuts for its own composer.
+      if (useStore.getState().botsOpen) return;
+      const action = (e as CustomEvent<ShortcutEventDetail>).detail?.action;
+      if (action === "stashDraft") stashShortcut.current();
+      else if (action === "useLastStash") lastStashShortcut.current();
     };
     window.addEventListener(SHORTCUT_EVENT, onShortcut);
     return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);

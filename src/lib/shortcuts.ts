@@ -17,7 +17,8 @@ export type ShortcutId =
   | "openUsage"
   | "focusSearch"
   | "toggleDictation"
-  | "stashDraft";
+  | "stashDraft"
+  | "useLastStash";
 
 export interface ShortcutDef {
   id: ShortcutId;
@@ -73,6 +74,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Stash draft",
     description: "Set the draft aside for later",
     default: "mod+KeyS",
+  },
+  {
+    id: "useLastStash",
+    label: "Use last stash",
+    description: "Paste the most recently stashed draft, without opening the stash",
+    default: "mod+shift+KeyS",
   },
   {
     id: "openSettings",
