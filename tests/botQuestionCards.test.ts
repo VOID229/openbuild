@@ -111,12 +111,12 @@ test("a card of several questions keeps answers as they're given and tells the b
       a.equal(stored(one.id).answer, 'A');
     }
 
-    // Five at most, each with a title, and the app's own cards stay single.
+    // Five at most, each with a title, and a passed-on thread question stays single.
     const count = db.messages(chat, 50).length;
     a.equal(stored(askUser(builder, { questions: Array.from({ length: 5 }, (_, i) => ({ title: 'Q' + i })) }).id).steps.length, 5);
     a.throws(() => askUser(builder, { questions: Array.from({ length: 6 }, (_, i) => ({ title: 'Q' + i })) }), /up to 5 questions/);
     a.throws(() => askUser(builder, { questions: [{ title: 'One?' }, { hint: 'no title' }] }), /Write the question/);
-    a.throws(() => askUser(builder, { offer: 'team', questions: [{ title: 'One?' }, { title: 'Two?' }] }), /go with one question/);
+    a.throws(() => askUser(builder, { thread: 'abc', questions: [{ title: 'One?' }, { title: 'Two?' }] }), /go with one question/);
     a.equal(db.messages(chat, 50).length, count + 1);
     process.exit(0);
   `);

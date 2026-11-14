@@ -340,7 +340,7 @@ test("web search uses the user's providers and keeps their keys from the bot", a
   }
 });
 
-test("Dr Eggbot introduces itself on first open, asks whether the user codes, and offers the starter team only to developers", async () => {
+test("Dr Eggbot introduces itself on first open and asks what the user would like to work on, with no developer question or starter team", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
   try {
     const { code, stderr: err, stdout: out } = await spawnScript(`
@@ -367,104 +367,41 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       a.equal(woken[0].botId, bot.id);
       a.equal(woken[0].wake.kind, 'note');
       a.equal(woken[0].wake.conversationId, conversationId);
-      a.match(woken[0].wake.text, /Introduce yourself/);
-      a.match(woken[0].wake.text, /offer "developer"/);
-      a.match(woken[0].wake.text, /If they say they do, offer them a starter team .*offer "team"/);
-      a.match(woken[0].wake.text, /If they say they don't: There's no developer starter team to offer them.*don't offer it or bring it up again/);
-      a.match(woken[0].wake.text, /they can still make their own bots and teams whenever they like, or ask you to make them/);
-      a.match(woken[0].wake.text, /Never say they have no team/);
+      const welcome = woken[0].wake.text;
+      a.match(welcome, /Introduce yourself in a couple of short messages/);
+      a.match(welcome, /their primary bot, who orchestrates the work and makes bots for them/);
+      a.match(welcome, /ask what they'd like to work on/);
+      a.doesNotMatch(welcome, /write code|developer|starter team|offer/);
       a.equal(svc.getSettings().onboarding, 'done');
 
       // Opening it again is just opening it.
       await svc.greetOnFirstOpen();
       a.equal(woken.length, 1);
-
-      // It asks whether the user codes first, with the app's choices, whatever it wrote.
       setFocus(bot.id, conversationId);
-      const ask = (id, chat, p) => { askUser(id, p); return db.messages(chat, 20).map(r => r.message).filter(m => m.question).at(-1); };
-      const dev = ask(bot.id, conversationId, { title: 'Do you write code?', options: ['Sure', 'Nope'], offer: 'developer' });
-      a.equal(dev.question.offer, 'developer');
-      a.deepEqual(dev.question.options.map(o => o.label), ['Yes, I write code', 'No, not really']);
-      a.doesNotMatch(contextFor(bot.id), /starter team/, 'no team before they answer');
+      a.doesNotMatch(contextFor(bot.id), /write code|starter team/);
 
-      // Yes: the bot is told to offer the team, with what each does.
-      svc.answerQuestion(conversationId, dev.id, 'A');
-      a.equal(db.listBots().length, 1, 'saying yes makes nothing by itself');
-      a.match(contextFor(bot.id), /they write code. Now offer them a starter team .*offer "team": Manager, Tracer, Researcher.*Tracer reviews and tests/);
-
-      // The bot's offer gets the app's choices, whatever it wrote.
-      const offer = ask(bot.id, conversationId, { title: 'Want a team?', options: ['Sure', 'Maybe', 'No'], offer: 'team' });
-      a.equal(offer.author, bot.id);
-      a.equal(offer.question.offer, 'team');
-      a.deepEqual(offer.question.options.map(o => o.label), ['Set up the team', 'Not now']);
-      a.match(contextFor(bot.id), /You offered the user a starter team/);
-      a.doesNotMatch(contextFor(bot.id), /Now offer them/, 'offered once');
-      woken.length = 0;
-
-      // Taking the offer makes the team, with a group, once.
-      svc.answerQuestion(conversationId, offer.id, 'A');
-      svc.answerQuestion(conversationId, offer.id, 'A');
-      const team = db.listBots().filter(b => !b.primary);
-      a.deepEqual(team.map(b => b.name).sort(), ['Manager', 'Researcher', 'Tracer']);
-      a.ok(team.every(b => b.by === bot.id && b.instructions));
-      const byName = Object.fromEntries(team.map(b => [b.name, b]));
-      a.equal(byName.Manager.threads.enabled, true);
-      a.equal(byName.Manager.threads.merge, true);
-      a.equal(byName.Tracer.threads.enabled, true);
-      a.equal(byName.Tracer.threads.merge, false);
-      a.equal(byName.Researcher.threads, undefined);
-      // The team's looks: Manager a yellow house, Tracer a blue tablet, Researcher a green blob.
-      a.deepEqual(byName.Manager.look, { shape: 'house', color: 'amber' });
-      a.deepEqual(byName.Tracer.look, { shape: 'tablet', color: 'blue' });
-      a.deepEqual(byName.Researcher.look, { shape: 'blob', color: 'green' });
-      a.deepEqual(db.listBots().find(b => b.primary).look, { shape: 'cloud', color: 'white' });
-      const group = db.listConversations().find(c => c.kind === 'group');
-      a.equal(group.name, 'Team');
-      a.deepEqual([...group.botIds].sort(), [bot.id, ...team.map(b => b.id)].sort());
-      a.equal(db.messages(conversationId, 20).filter(r => r.message.event?.kind === 'created').length, 3);
-      a.equal(woken.length, 0, 'the new bots wait to be spoken to');
-
-      // Saying no to the team makes nothing.
-      await svc.resetAll();
-      let again = db.listBots()[0];
-      let chat = svc.directId(again.id);
-      a.equal(woken.at(-1).botId, again.id, 'a reset welcomes again');
-      a.match(woken.at(-1).wake.text, /offer "developer"/);
-      setFocus(again.id, chat);
-      svc.answerQuestion(chat, ask(again.id, chat, { title: 'Code?', offer: 'developer' }).id, 'A');
-      svc.answerQuestion(chat, ask(again.id, chat, { title: 'Want a team?', offer: 'team' }).id, 'B');
-      a.equal(db.listBots().length, 1);
-
-      // Not a developer: no team offer, now or later, and no team.
-      await svc.resetAll();
-      again = db.listBots()[0];
-      chat = svc.directId(again.id);
-      setFocus(again.id, chat);
-      const no = ask(again.id, chat, { title: 'Do you write code?', offer: 'developer' });
-      svc.answerQuestion(chat, no.id, 'B');
-      svc.answerQuestion(chat, no.id, 'A');
-      const told = contextFor(again.id);
-      a.match(told, /don't really write code. There's no developer starter team to offer them.*don't offer it or bring it up again/);
-      a.match(told, /what you can still help with yourself/);
-      a.match(told, /they can still make their own bots and teams whenever they like, or ask you to make them, which you can do with manage_bot/);
-      a.match(told, /Never say they have no team, or suggest teams aren't available/);
-      a.doesNotMatch(told, /offer "team"/);
-      a.throws(() => askUser(again.id, { title: 'Want a team?', offer: 'team' }), /isn't for them/);
-      a.equal(db.messages(chat, 20).filter(r => r.message.question?.offer === 'team').length, 0);
-      a.equal(db.listBots().length, 1);
+      // What an older install kept is ignored: a stored answer to whether they code, and an old offer card.
+      db.setValue('developer', { kind: 'yes' });
+      a.doesNotMatch(contextFor(bot.id), /write code|starter team/);
+      const card = { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text: 'Want a team?', question: { title: 'Want a team?', options: [{ key: 'A', label: 'Set up the team' }, { key: 'B', label: 'Not now' }], offer: 'team' } };
+      svc.postMessage(conversationId, card);
+      a.doesNotMatch(contextFor(bot.id), /starter team/);
+      svc.answerQuestion(conversationId, card.id, 'A');
+      a.equal(db.getMessage(card.id).message.question.answer, 'A');
+      a.equal(db.listBots().length, 1, 'answering an old offer makes no team');
       a.equal(db.listConversations().filter(c => c.kind === 'group').length, 0);
 
-      // Their own words: the bot judges them, and may still offer the team.
+      // A bot that still passes offer gets the card it wrote.
+      askUser(bot.id, { title: 'Do you write code?', options: ['Sure', 'Nope'], offer: 'developer' });
+      const asked = db.messages(conversationId, 20).map(r => r.message).filter(m => m.question).at(-1);
+      a.deepEqual(asked.question.options.map(o => o.label), ['Sure', 'Nope']);
+      a.equal(asked.question.offer, undefined);
+
+      // A reset welcomes again, the same way.
       await svc.resetAll();
-      again = db.listBots()[0];
-      chat = svc.directId(again.id);
-      setFocus(again.id, chat);
-      svc.answerQuestion(chat, ask(again.id, chat, { title: 'Do you write code?', offer: 'developer' }).id, 'A bit of Python at work');
-      a.match(contextFor(again.id), /in their own words: “A bit of Python at work”. If that means they write code, offer them a starter team .*If it doesn't: There's no developer starter team to offer them.*make their own bots and teams whenever they like/);
-      const typed = ask(again.id, chat, { title: 'Want a team?', offer: 'team' });
-      a.equal(typed.question.offer, 'team');
-      svc.answerQuestion(chat, typed.id, 'A');
-      a.equal(db.listBots().length, 4);
+      const again = db.listBots()[0];
+      a.equal(woken.at(-1).botId, again.id);
+      a.match(woken.at(-1).wake.text, /ask what they'd like to work on/);
       process.exit(0);
     `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");

@@ -74,7 +74,7 @@ test("the welcome waits for Pi: installed first, then a provider, and says hello
     a.equal(woken[0].botId, bot.id);
     a.equal(woken[0].wake.conversationId, conversationId);
     a.match(woken[0].wake.text, /Introduce yourself/);
-    a.match(woken[0].wake.text, /offer "team"/);
+    a.match(woken[0].wake.text, /ask what they'd like to work on/);
     a.equal(svc.piSetup(), undefined);
     a.equal(svc.snapshot().setup, undefined);
     a.deepEqual(events.at(-1), { t: 'setup', setup: undefined });

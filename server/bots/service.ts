@@ -364,33 +364,6 @@ const PRIMARY = {
   role: "Runs the team: makes bots, hands out the work and does quick things itself.",
 };
 
-/** The starter team the primary bot offers on a new install. */
-export const TEAM: { name: string; look: Bot["look"]; instructions: string; role: string; threads?: Bot["threads"] }[] = [
-  {
-    name: "Manager",
-    look: { shape: "house", color: "amber" },
-    role: "Runs project threads in OpenBuild, follows them and merges them once they're green.",
-    instructions:
-      "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green, and close threads when they're done. Ask Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
-    threads: { enabled: true, scope: "all", projects: [], merge: true },
-  },
-  {
-    name: "Tracer",
-    look: { shape: "tablet", color: "blue" },
-    role: "Checks the work: reviews pull requests, hunts bugs and writes tests.",
-    instructions:
-      "You check the work. Review pull requests and point out real bugs first, style last. Spot bugs, write tests, try to reproduce a reported bug before anyone fixes it, and check a fix didn't break something else. In polls and brainstorms give your honest opinion, with your reasons.",
-    threads: { enabled: true, scope: "all", projects: [] },
-  },
-  {
-    name: "Researcher",
-    look: { shape: "blob", color: "green" },
-    role: "Looks things up: the web, repositories and GitHub.",
-    instructions:
-      "You find things out. Search the web, find things in repositories, and check GitHub and the status of the user's organisation: pull requests, issues, checks, releases. Say where each answer came from, and say so when you couldn't find something.",
-  },
-];
-
 export function ensureStarted() {
   // Sections left empty before chats took theirs along when they went; once per server is enough.
   if (!mem.openbotsSectionsSwept) {
@@ -415,17 +388,6 @@ export function ensureStarted() {
   updateSettings({ onboarding: "active" });
 }
 
-/** How the primary bot offers the starter team, in the first-run note and in its context once the user says they code. */
-export const TEAM_OFFER = `offer them a starter team with the question tool and offer "team": ${TEAM.map((m) => m.name).join(", ")}. In a few words, say what each does: Manager runs threads in their projects and merges their PRs, Tracer reviews and tests, Researcher looks things up, and they can change what each may do in its settings. The app makes the team itself if they take it.`;
-
-/** How the primary bot answers a user who doesn't code: only the developer starter team is skipped, never bots or teams in general. */
-export const NO_CODE_REPLY = `There's no developer starter team to offer them: it's for people who code, so don't offer it or bring it up again. Say briefly what you can still help with yourself, like looking things up, writing, planning and everyday tasks, and that they can still make their own bots and teams whenever they like, or ask you to make them, which you can do with manage_bot. Never say they have no team, or suggest teams aren't available to them.`;
-
-/** What the user said when the primary bot asked whether they write code: one of its two choices, or their own words. */
-export type DeveloperAnswer = { kind: "yes" | "no" } | { kind: "own"; text: string };
-const DEVELOPER = "developer";
-export const developerAnswer = () => db.getValue<DeveloperAnswer>(DEVELOPER);
-
 /** What the welcome is waiting on, shown in the primary bot's chat until Pi is ready. */
 const setup = (mem.openbotsSetup ??= {});
 export const piSetup = () => setup.value;
@@ -439,9 +401,8 @@ let checking: Promise<void> | undefined;
 let recheck = false;
 
 /**
- * The first time OpenBots is opened, the primary bot is asked to introduce itself and find out
- * whether the user codes, in its own words; only then is the starter team offered. Not before Pi can
- * run it: until then the chat says what's missing, and this is asked again (when Pi's models change,
+ * The first time OpenBots is opened, the primary bot is asked to introduce itself in its own words
+ * and ask what the user would like to work on. Not before Pi can run it: until then the chat says what's missing, and this is asked again (when Pi's models change,
  * every so often while a tab is open, or from the chat's own button) until it's there.
  */
 export function greetOnFirstOpen(fresh = false): Promise<void> {
@@ -479,23 +440,8 @@ function greet() {
   wakeUp(bot.id, {
     kind: "note",
     conversationId,
-    text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then ask whether they write code, with the question tool and offer "developer": the app sets its choices, and they can type their own answer. Stop there and wait for it. If they say they do, ${TEAM_OFFER} If they say they don't: ${NO_CODE_REPLY}`,
+    text: "The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are, and that you're their primary bot, who orchestrates the work and makes bots for them. Then ask what they'd like to work on, and stop there.",
   });
-}
-
-/** Makes the starter team, gives the primary a group with them, and notes each new bot in its chat. */
-export function createTeam(primaryId: string) {
-  const primaryChat = directId(primaryId);
-  const ids: string[] = [];
-  for (const member of TEAM) {
-    const { bot } = createBot({ name: member.name, look: member.look, instructions: member.instructions, role: member.role, by: primaryId });
-    if (member.threads) updateBot(bot.id, { threads: member.threads }, { quiet: true });
-    ids.push(bot.id);
-    if (primaryChat) postMessage(primaryChat, { id: crypto.randomUUID(), author: primaryId, at: Date.now(), text: "", event: { kind: "created", text: "New bot", detail: bot.name, bot: bot.id } });
-  }
-  const group = createConversation({ kind: "group", name: "Team", botIds: [primaryId, ...ids], instructions: "Work through the user's projects together. Manager runs the threads and merges, Tracer checks the work, Researcher looks things up." });
-  updateConversation(group.id, { pinnedAt: Date.now() });
-  return { botIds: ids, conversationId: group.id };
 }
 
 /** A bot's computers on every machine: this server's and each paired device's. One that can't be reached keeps its own. */
@@ -1909,10 +1855,6 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   if (question.steps) throw new BotsError("That card asks several questions: answer them together.");
   assertAnswerable(conversationId, row.message.author);
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
-  // The first-run offers are the app's, not the bot's: taking the team makes it here, once, and whether they code is kept for the bot's context.
-  const primary = !question.answer && !!db.getBot(row.message.author)?.primary;
-  if (primary && question.offer === "team" && key === "A") createTeam(row.message.author);
-  if (primary && question.offer === "developer") db.setValue(DEVELOPER, key === "A" ? { kind: "yes" } : key === "B" ? { kind: "no" } : { kind: "own", text: key.slice(0, 300) });
   return patched;
 }
 
