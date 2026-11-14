@@ -1,6 +1,6 @@
 import { warmStartup } from "./startupWarmup";
 import { startPullRequestSweep } from "./pullRequests";
-import { startClosedWorktreeSweep } from "./closedWorktrees";
+import { removeDeletedThreadWorktree, startClosedWorktreeSweep, type RemoteRemove } from "./closedWorktrees";
 import { writeChat as saveChat } from "./chatWrite";
 import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
@@ -176,6 +176,13 @@ const PROXY_UPLOAD_TIMEOUT_MS = 120_000;
  * make a worktree: longer than an ordinary answer, still inside the app's own wait (REQUEST_TIMEOUT_MS).
  */
 const PROXY_WORKSPACE_TIMEOUT_MS = 25_000;
+
+/** Remove a worktree on a paired device, keeping uncommitted work. */
+const removeRemoteWorktree: RemoteRemove = async (deviceId, cwd) => {
+  const path = `/api/devices/${encodeURIComponent(deviceId)}/api/workspaces/remove`;
+  const res = await proxyDevice(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd, force: false }) }), deviceId);
+  if (!res.ok) throw new Error((await res.json().catch(() => undefined))?.error ?? `HTTP ${res.status}`);
+};
 
 /**
  * Forward a request to a paired device's server. The browser never sees the device token: it is
@@ -657,6 +664,7 @@ function serve(port: number, hostname: string) {
         DELETE: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           if (threadRuntime(req.params.id) === "durable") await durable.stopThread(req.params.id);
           else await piWorker.deleteThread(req.params.id);
+          await removeDeletedThreadWorktree(req.params.id, removeRemoteWorktree);
           storage.deleteChat(req.params.id);
           return Response.json({ ok: true });
         }),
@@ -751,11 +759,7 @@ try {
 sessionImport.startDiscovery();
 startPullRequestSweep(() => refreshChats(15_000));
 // Closed threads' worktrees, a day after they closed (when the setting is on). A paired device's goes through its proxy.
-startClosedWorktreeSweep(async (deviceId, cwd) => {
-  const path = `/api/devices/${encodeURIComponent(deviceId)}/api/workspaces/remove`;
-  const res = await proxyDevice(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd, force: false }) }), deviceId);
-  if (!res.ok) throw new Error((await res.json().catch(() => undefined))?.error ?? `HTTP ${res.status}`);
-});
+startClosedWorktreeSweep(removeRemoteWorktree);
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 if (!localAuth.configured()) console.log("  No local password: anyone who can reach this server can use it. Set one with: openbuild set pass <password>\n");

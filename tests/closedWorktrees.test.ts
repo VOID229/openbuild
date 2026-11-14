@@ -1,6 +1,6 @@
 // "Delete worktrees of closed threads" (server/closedWorktrees.ts): a closed thread keeps its worktree
 // for a day, then the sweep removes it. Runs in its own process with its own data dir, so it never
-// touches the user's database or worktrees.
+// touches the user's database or worktrees. A thread deleted by hand takes its worktree at once.
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,6 +72,24 @@ const script = `
   // A day on, the recent one goes too.
   await cw.sweepClosedWorktrees(removeRemote, now + day);
   assert.equal(existsSync(recent.cwd), false);
+
+  // A thread deleted by hand takes its worktree at once, open or closed, setting on or off.
+  setting(false);
+  const deleted = await ws("deleted by hand");
+  const deletedDirty = await ws("deleted with work in it");
+  const deletedShared = await ws("deleted, but a fork is open");
+  writeFileSync(deletedDirty.cwd + "/wip.txt", "x");
+  storage.putChat(chat("deleted", deleted));
+  storage.putChat(chat("deletedDirty", deletedDirty));
+  storage.putChat(chat("deletedShared", deletedShared));
+  storage.putChat(chat("deletedFork", deletedShared));
+  storage.putChat(chat("deletedRemote", { ...deleted, cwd: "/elsewhere/wt3", deviceId: "dev1" }));
+  for (const id of ["deleted", "deletedDirty", "deletedShared", "deletedRemote"]) await cw.removeDeletedThreadWorktree(id, removeRemote);
+  assert.equal(existsSync(deleted.cwd), false, "a deleted thread's worktree goes right away");
+  assert.equal(existsSync(deletedDirty.cwd), true, "uncommitted work stays, even when deleting");
+  assert.equal(existsSync(deletedShared.cwd), true, "an open thread still works in it");
+  assert.equal(remote.at(-1), "dev1:/elsewhere/wt3", "a paired device's goes to the device");
+  await cw.removeDeletedThreadWorktree("no such thread", removeRemote);
   console.log("ok");
 `;
 

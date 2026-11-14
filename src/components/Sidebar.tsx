@@ -733,7 +733,9 @@ function DeleteThreadDialog({ chat, onClose }: { chat: Chat; onClose: () => void
       }}
     >
       <h2 id="thread-delete-title">Delete “{chat.title}”?</h2>
-      <p id="thread-delete-description">This permanently deletes the thread and its messages. It can't be undone.</p>
+      <p id="thread-delete-description">
+        This permanently deletes the thread and its messages{chat.workspace?.worktree ? ", and removes its worktree (uncommitted work is kept)" : ""}. It can't be undone.
+      </p>
       <label className="confirm-skip">
         <input type="checkbox" checked={skipNextTime} onChange={(e) => setSkipNextTime(e.target.checked)} />
         Don't ask again
