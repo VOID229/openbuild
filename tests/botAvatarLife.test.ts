@@ -216,7 +216,11 @@ describe.skipIf(!browser)("a bot on its own", () => {
         const e = b.querySelector('.bot-eye-left .bot-eye-fill').getBoundingClientRect();
         out.push({ at: performance.now(), squeeze: Number((/scale\\((-?[\\d.]+),/.exec(body) ?? [0, 1])[1]), hidden: b.querySelector('.bot-skin').style.visibility === 'hidden', eye: (e.x + e.width / 2 - rest.x) / rest.width, lift: (rest.y + rest.height / 2 - (r.y + r.height / 2)) / rest.height, body });
         const turning = out.findIndex((t) => t.body.includes('scale('));
-        if ((turning >= 0 && out.length > turning + 5 && !body.includes('scale(')) || out.length > 240) done(out.slice(Math.max(0, turning - 1))); else requestAnimationFrame(tick);
+        // Over once the body is no longer squeezed and the face shows again. Half way round, edge-on
+        // the other way, it isn't squeezed either (exactly 180° is 1.000 wide), but the face is round
+        // the back: that's mid-spin, not the end.
+        const over = !body.includes('scale(') && !out.at(-1).hidden;
+        if ((turning >= 0 && out.length > turning + 5 && over) || out.length > 240) done(out.slice(Math.max(0, turning - 1))); else requestAnimationFrame(tick);
       };
       requestAnimationFrame(tick);
     }), 0`);
