@@ -363,3 +363,21 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
 }
 
 export const localAuth = createLocalAuth();
+
+/** The command that sets the local password, at a hidden prompt, as the warnings suggest it. */
+export const SET_PASSWORD_COMMAND = "ob password";
+
+/**
+ * Whether a server listening on `hosts` (HOST's addresses) answers other devices on the LAN: a
+ * wildcard address, or any address that is neither loopback nor Tailscale's (100.64.0.0/10,
+ * fd7a:115c:a1e0::/48). Loopback and the tailnet are already gated, by this machine and by Tailscale
+ * accounts, so only LAN reach makes a missing password worth a warning.
+ */
+export function reachableOverLan(hosts: string[]): boolean {
+  return hosts.some((raw) => {
+    const host = raw.trim().toLowerCase().replace(/^\[|\]$/g, "").replace(/%.*$/, "");
+    if (!host || host === "localhost" || host === "::1" || host.startsWith("127.")) return false;
+    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host) || host.startsWith("fd7a:115c:a1e0:")) return false;
+    return true;
+  });
+}
