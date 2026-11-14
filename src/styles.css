@@ -7209,6 +7209,24 @@ p.key-status svg {
   color: var(--text-3);
 }
 
+/* Where a worktree starts: the branch's remote branch, or the local one. */
+.ws-remote {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  margin: 4px -4px -4px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.ws-remote label {
+  cursor: default;
+}
+
 /* Slash commands */
 
 .slash-menu {

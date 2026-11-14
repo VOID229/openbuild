@@ -435,7 +435,7 @@ export async function newWorkspace(chat: Chat, signal?: AbortSignal): Promise<Wo
   const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;
   try {
     if (!project) return await prepareWorkspace({ mode: "scratch", deviceId: pref.deviceId }, signal);
-    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch }, signal);
+    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch, remote: pref.fromRemote !== false }, signal);
   } catch (err) {
     throw new WorkspaceError((err as Error).message);
   }

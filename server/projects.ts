@@ -151,22 +151,51 @@ export function browse(rawDir: string | undefined, opts: { hidden?: boolean } = 
 }
 
 export async function gitInfo(cwd: string): Promise<GitInfo> {
-  const [branch, head, branches, status, counts] = await Promise.all([
+  const [branch, head, branches, status, counts, originHead, worktrees, top, remotes] = await Promise.all([
     git(cwd, ["branch", "--show-current"]),
     git(cwd, ["rev-parse", "--short", "HEAD"]),
     git(cwd, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"]),
     git(cwd, ["status", "--porcelain"]),
     git(cwd, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
+    git(cwd, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]),
+    git(cwd, ["worktree", "list", "--porcelain"]),
+    git(cwd, ["rev-parse", "--show-toplevel"]),
+    git(cwd, ["remote"]),
   ]);
   const [behind, ahead] = counts.code === 0 ? counts.out.split(/\s+/).map(Number) : [];
+  const names = branches.code === 0 ? branches.out.split("\n").filter(Boolean) : [];
+  // The default branch: what origin's HEAD points at, else main or master, when it's a branch here.
+  const fromOrigin = originHead.code === 0 ? originHead.out.replace(/^origin\//, "") : undefined;
+  const defaultBranch = [fromOrigin, "main", "master"].find((b) => b && names.includes(b));
   return {
     branch: branch.out || undefined,
     head: !branch.out && head.code === 0 ? head.out || undefined : undefined,
-    branches: branches.code === 0 ? branches.out.split("\n").filter(Boolean) : [],
+    branches: names,
+    defaultBranch,
+    worktrees: worktrees.code === 0 ? worktreeBranches(worktrees.out, top.code === 0 ? top.out : cwd) : [],
+    remote: remotes.code === 0 && !!remotes.out,
     dirty: status.code === 0 ? status.out.split("\n").filter(Boolean).length : 0,
     ahead,
     behind,
   };
+}
+
+const real = (p: string) => {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+};
+
+/** The branches `git worktree list --porcelain` shows checked out, but in the checkout at `own`. */
+function worktreeBranches(porcelain: string, own: string): string[] {
+  const mine = real(own);
+  return porcelain
+    .split("\n\n")
+    .map((entry) => ({ path: /^worktree (.+)$/m.exec(entry)?.[1], branch: /^branch refs\/heads\/(.+)$/m.exec(entry)?.[1] }))
+    .filter((w): w is { path: string; branch: string } => !!w.path && !!w.branch && real(w.path) !== mine)
+    .map((w) => w.branch);
 }
 
 /** Where OpenBuild keeps its worktrees. */
@@ -216,12 +245,44 @@ export function allowedCwd(cwd: string): boolean {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
+/** ssh fails instead of waiting for a prompt (git's own prompts are off for every command). */
+const NETWORK_ENV = () => ({ GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" });
+
+/**
+ * The remote-tracking ref a worktree starts from when it starts from the remote: the local branch's
+ * tracked remote branch, even under another name, else the same-named branch on origin. It's fetched
+ * first. Undefined, so the local branch is used, when there's no remote, the remote has no such
+ * branch, or the fetch fails. Only that remote-tracking ref is written: the local branch never moves.
+ */
+export async function remoteBase(repo: string, branch: string): Promise<string | undefined> {
+  const [refs, remotes] = await Promise.all([
+    git(repo, ["for-each-ref", "--format=%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:remoteref)", `refs/heads/${branch}`]),
+    git(repo, ["remote"]),
+  ]);
+  const known = new Set(remotes.code === 0 ? remotes.out.split("\n").filter(Boolean) : []);
+  const own = refs.code === 0 ? refs.out.split("\n").map((l) => l.split("\0")).find((f) => f[0] === `refs/heads/${branch}`) : undefined;
+  // Not a local branch (a commit, a tag): it is what it is.
+  if (!own) return undefined;
+  const [, tracking, remote, ref] = own;
+  // A branch tracking another local branch (remote ".") has no remote of its own: origin's then.
+  const target = remote && known.has(remote) && tracking?.startsWith("refs/remotes/") && ref?.startsWith("refs/heads/")
+    ? { remote, ref, tracking }
+    : known.has("origin") ? { remote: "origin", ref: `refs/heads/${branch}`, tracking: `refs/remotes/origin/${branch}` } : undefined;
+  if (!target) return undefined;
+  const fetched = await git(repo, ["fetch", "--quiet", "--no-tags", target.remote, `+${target.ref}:${target.tracking}`], 60_000, NETWORK_ENV());
+  if (fetched.code !== 0) return undefined;
+  const commit = await git(repo, ["rev-parse", "--verify", "--quiet", `${target.tracking}^{commit}`]);
+  return commit.code === 0 ? target.tracking : undefined;
+}
+
 /**
  * Prepare a new thread's workspace. "local" works in the project's checkout, switching it to
  * `branch` first if asked (only when there's nothing uncommitted to carry over). "worktree" makes a
- * worktree on a new branch started from `branch` (or the current one).
+ * worktree on a new branch started from `branch`, else the current one, else (a checkout detached at
+ * a commit) the default branch. With `remote`, a worktree starts from that branch's remote branch,
+ * fetched first (see remoteBase), and from the local branch when that can't be had.
  */
-export async function prepareWorkspace(projectId: string, mode: "local" | "worktree", branch?: string): Promise<Workspace> {
+export async function prepareWorkspace(projectId: string, mode: "local" | "worktree", branch?: string, opts: { remote?: boolean } = {}): Promise<Workspace> {
   const project = findProject(projectId);
   if (!project) throw new Error("That project isn't in OpenBuild anymore");
   if (project.missing) throw new Error(`${tilde(project.path)} doesn't exist anymore`);
@@ -240,13 +301,15 @@ export async function prepareWorkspace(projectId: string, mode: "local" | "workt
     }
     return { ...base, branch: info.branch };
   }
-  const from = branch || info.branch || "HEAD";
+  const from = branch || info.branch || info.defaultBranch || "HEAD";
+  const remote = opts.remote === true && from !== "HEAD" ? await remoteBase(project.path, from) : undefined;
   const newBranch = temporaryWorktreeBranch();
   const dir = join(worktreesDir(), slug(project.name) || project.id, newBranch.slice("openbuild/".length));
   mkdirSync(join(worktreesDir(), slug(project.name) || project.id), { recursive: true });
-  const r = await git(project.path, ["worktree", "add", "-b", newBranch, dir, from], 120_000);
+  // --no-track: started from a remote branch, the thread's branch would otherwise push to it.
+  const r = await git(project.path, ["worktree", "add", "--no-track", "-b", newBranch, dir, remote ?? from], 120_000);
   if (r.code !== 0) throw new Error(r.err || "Couldn't create the worktree");
-  return { ...base, cwd: dir, branch: newBranch, worktree: true, base: from };
+  return { ...base, cwd: dir, branch: newBranch, worktree: true, base: from, ...(remote ? { remoteBase: remote.replace(/^refs\/remotes\//, "") } : {}) };
 }
 
 /** Rename only a managed worktree's temporary branch, never its directory. */

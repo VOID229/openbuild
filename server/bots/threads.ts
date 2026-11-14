@@ -944,7 +944,7 @@ async function start(botId: string, p: Record<string, unknown>) {
   const speed = pickSpeed(model, p.speed);
   const remoteControl = pickRemoteControl(runtime, p.remote_control);
   const permission = await resolvePermission(runtime, p.permission, access, svc.getSettings().harnesses?.permissions, (r) => inAccount(runtime, account, () => permissionModes(r, project.path)));
-  const workspace = await projects.prepareWorkspace(project.id, p.mode === "local" || !project.git ? "local" : "worktree", typeof p.branch === "string" && p.branch ? p.branch : undefined).catch((err) => {
+  const workspace = await projects.prepareWorkspace(project.id, p.mode === "local" || !project.git ? "local" : "worktree", typeof p.branch === "string" && p.branch ? p.branch : undefined, { remote: p.remote !== false }).catch((err) => {
     throw refuse((err as Error).message);
   });
   if (workspace.worktree && workspace.branch && typeof p.branch_name === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(p.branch_name) && p.branch_name.length <= 48) {
@@ -963,6 +963,7 @@ async function start(botId: string, p: Record<string, unknown>) {
     thread: short(chat.id),
     title,
     branch: workspace.branch,
+    ...(workspace.worktree && workspace.base ? { from: workspace.remoteBase ?? workspace.base } : {}),
     harness: runtime,
     ...(account ? { account: account.id } : {}),
     model: model.id,

@@ -818,9 +818,9 @@ export function piRoutes(api: Api) {
       POST: api(async (req) => {
         const body = await readJson(req);
         if (body?.mode === "scratch") return Response.json({ workspace: projects.scratchWorkspace() });
-        if (!str(body?.projectId, 64) || (body.mode !== "local" && body.mode !== "worktree")) return bad("Expected { projectId, mode, branch? }");
+        if (!str(body?.projectId, 64) || (body.mode !== "local" && body.mode !== "worktree")) return bad("Expected { projectId, mode, branch?, remote? }");
         try {
-          return Response.json({ workspace: await projects.prepareWorkspace(body.projectId, body.mode, typeof body.branch === "string" ? body.branch : undefined) });
+          return Response.json({ workspace: await projects.prepareWorkspace(body.projectId, body.mode, typeof body.branch === "string" ? body.branch : undefined, { remote: body.remote === true }) });
         } catch (err) {
           return fail(err);
         }
