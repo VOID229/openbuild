@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -264,6 +264,15 @@ export function contextFor(botId: string): string {
 export const RESPONSIVE =
   "The user shouldn't wait in silence: before real work they asked for, and whenever they steer you mid-work, send one short ack with your first tool call, like \"Got it, switching to X\". At most one per user message, and none when the answer itself comes fast. When a reaction says enough (👍 to \"ok go\" or \"thanks\"), react instead of writing. When the user reacts to something of yours, react back so they know you saw it, most of all mid-work.";
 
+/**
+ * Who reads what a bot writes, and how a turn ends without writing. In a group a bot's message reaches
+ * only the bots it names or quotes (service.ts wakeTargets), which nothing used to tell them: they found
+ * out by not being answered. What they ask is followed for them (service.ts settleHandoffs), so they
+ * needn't ask to be @mentioned back or set a routine to check.
+ */
+export const HEARING =
+  "You can write to any conversation you're in at any time. In a group, another bot reads your message only if it @names them (@all for everyone) or quotes theirs with reply_to. Their answer wakes you whether or not it names you, and you're told if they never read it, so don't poll for it. To end a turn without a message, make [silent] your whole final reply.";
+
 /** Questions the user has to answer are cards, not messages: a tap answers one, and it stays visible as unanswered. */
 export const ASKING =
   "When you need the user to decide or tell you something before you can go on, ask with question, never in a message: its choices as options (a suggested answer counts; they can always type their own). Related questions go in one call as questions, up to 5: one card, answered together. Then stop until they're answered. A passing question, or one for another bot, stays a message.";
@@ -285,9 +294,9 @@ export function contextSections(botId: string): Record<string, string> {
       ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update and delete bots, their instructions and roles included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run on the host (the default) or in a container is set per machine by the user, in Settings → Devices, not by you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions and role; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions or role while you have none.`,
     "Talk like a person texting: short, warm, plain; no headings or bullet lists unless asked. One send_message call is one bubble, and several short bubbles beat one long one.",
-    "You can write to any conversation you're in at any time. You don't owe every message a reply: with nothing to add, end your turn with the plain reply [silent]. [silent] is only that final reply: never pass it to send_message, and it isn't needed after you've sent messages.",
+    HEARING,
     RESPONSIVE,
-    "A tool call that runs long doesn't hold you up: it carries on as a background job, you get its job number at once and its result wakes you later. Never wait on one or run it again; carry on, or end your turn. New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
+    "A tool call that runs long doesn't hold you up: it carries on as a background job, you get its job number at once and its result wakes you later. Never wait on one or run it again; carry on, or end your turn. New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
     "Every tool with a status parameter needs a short custom status (a few plain words, at most 50 characters) saying what you're doing for the user, like Checking why the build failed, not a generic Running a command. It's the live activity line, and it stays up while you work out your next step, so name the task, not the mechanics. Write status first in the call, so it shows while you're still writing the rest.",
     ASKING,
     "Messages show their short id in brackets, (replying to …) when they quote one, and the reactions on them numbered #1, #2… (→ #n answers another). To answer an older message, quote it with send_message reply_to; leave reply_to out for the newest. React with react; to react to a reaction, pass its number as to_reaction.",
@@ -416,7 +425,7 @@ function resolveConversation(botId: string, prefix: string): string {
 
 export async function sendMessage(botId: string, p: Record<string, unknown>) {
   const conversationId = conversationFor(botId, p.conversation);
-  const text = String(p.text ?? "").slice(0, 8000);
+  const { text, missed } = exactMentions(botId, conversationId, String(p.text ?? "").slice(0, 8000));
   if (!text.trim() && !p.attach_screenshot && !asStrings(p.images).length) throw new svc.BotsError("A message needs text.");
   const bare = !p.attach_screenshot && !asStrings(p.images).length;
   if (onlySilent(text) && bare) return { note: "Nothing was sent. [silent] is only for your final reply, never for send_message." };
@@ -437,9 +446,29 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
     const { api, id } = await computerOn(botId, p.machine);
     const shot = (await api.call(id, "browser", { action: "screenshot" })) as { data?: string; mimeType?: string };
     if (shot.data) images.push(`data:${shot.mimeType || "image/jpeg"};base64,${shot.data}`);
-    return deliver(botId, conversationId, text, images, p.reply_to);
   }
-  return deliver(botId, conversationId, text, images, p.reply_to);
+  return deliver(botId, conversationId, text, images, p.reply_to, missed);
+}
+
+/**
+ * A group message with its @tags made exact (shared/bots resolveMentions): "@Dr" or a bot's old name
+ * becomes the bot's name, so it's a mention. What names nobody here comes back for the sender to hear.
+ */
+function exactMentions(botId: string, conversationId: string, text: string): { text: string; missed: MissedMention[] } {
+  const c = db.getConversation(conversationId);
+  if (!c || c.kind !== "group" || c.friend || !text.includes("@")) return { text, missed: [] };
+  const all = db.listBots();
+  const here = all.filter((b) => b.id !== botId && c.botIds.includes(b.id));
+  return resolveMentions(text, here, all.filter((b) => b.id !== botId && !c.botIds.includes(b.id)), [svc.getSettings().user?.name ?? "", mentionName(requireBot(botId).name)]);
+}
+
+/** What send_message says of the @tags that reached nobody, so a missed mention is never silent. */
+export function missedNote(missed: MissedMention[], here: string[]): string {
+  const lines = missed.map((m) =>
+    m.could ? `@${m.tag} could be ${m.could.join(" or ")}: name one.`
+    : m.absent ? `${m.absent} isn't in this chat, so @${m.tag} reached nobody: ask_bot reaches them.`
+    : `@${m.tag} isn't a bot in this chat, so it reached nobody.`);
+  return `${lines.join(" ")}${missed.some((m) => !m.absent && !m.could) && here.length ? ` Bots here: ${here.join(", ")}.` : ""} Send again with their exact @Name if a bot was meant to read this.`;
 }
 
 /** What send_message answers to a message that lists questions for the user. */
@@ -486,7 +515,7 @@ export function bubbleHold(text: string, lastAt: number | undefined, now = Date.
   return lastAt === undefined ? 0 : Math.max(0, lastAt + typingTime(text) - now);
 }
 
-async function deliver(botId: string, conversationId: string, text: string, images: string[], replyTo: unknown) {
+async function deliver(botId: string, conversationId: string, text: string, images: string[], replyTo: unknown, missed: MissedMention[] = []) {
   if (svc.typingFor(conversationId, botId) !== undefined) {
     const last = db.messages(conversationId, 6).findLast((r) => r.message.author === botId && !r.message.event);
     const hold = bubbleHold(text, last?.message.at);
@@ -502,7 +531,12 @@ async function deliver(botId: string, conversationId: string, text: string, imag
   const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: text.trim(), images: images.length ? images : undefined, replyTo: reply };
   svc.postMessage(conversationId, message);
   svc.touchHeartbeat(botId);
-  return { id: message.id, conversation: conversationId.slice(0, 8) };
+  const c = db.getConversation(conversationId);
+  const name = (id: string) => mentionName(db.getBot(id)?.name ?? "a bot");
+  // In a group, who it reached is said with the result: a mention that worked, and one that didn't.
+  const reached = c?.kind === "group" && !c.friend ? svc.reaches(conversationId, message).map(name) : [];
+  const here = (c?.botIds ?? []).filter((id) => id !== botId).map(name);
+  return { id: message.id, conversation: conversationId.slice(0, 8), ...(reached.length ? { reached } : {}), ...(missed.length ? { note: missedNote(missed, here) } : {}) };
 }
 
 function react(botId: string, p: Record<string, unknown>) {

@@ -947,6 +947,8 @@ test("any number of routines stay active at once, each bot's separate, each in i
       wake(first.bot.id, { kind: 'messages', conversationId: first.conversationId });
       for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setTimeout(r, 5));
       wake(first.bot.id, { kind: 'messages', conversationId: first.conversationId });
+      // A group wake is for something said there that the bot hasn't read: with nothing new it's dropped unasked.
+      db.addMessage(group.id, { id: crypto.randomUUID(), author: second.bot.id, at: Date.now(), text: 'over here' });
       wake(first.bot.id, { kind: 'messages', conversationId: group.id });
       await new Promise((r) => setTimeout(r, 10));
       a.equal(steers.length, 1);

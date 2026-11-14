@@ -82,6 +82,10 @@ test('mixed group wakes preserve assigned delivery and never steer requests assi
         a.deepEqual(db.getMessage(pending.id).message.seenBy, [beta.bot.id]);
         a.deepEqual(db.getMessage(explicit.id).message.seenBy, [alpha.bot.id]);
         betaPrompt.finish('PENDING DONE');
+        // Alpha answered what Beta's mentions asked without naming Beta back: Beta reads it in a turn of its own.
+        await until(() => of(beta.bot).length === betaIndex + 2 && minds.get(beta.bot.id).steerable);
+        a.match(of(beta.bot)[betaIndex + 1].message, /Alpha \\[answers what you asked\\]: GROUP ONE/);
+        of(beta.bot)[betaIndex + 1].finish('');
         await until(() => !runner.busy(beta.bot.id));
       }
       a.equal(steers.length, 0);

@@ -22,10 +22,15 @@ from runner deliveries queued or in the current turn (including accepted scoped
 steers). They are delivery references, not proof that a request is unanswered:
 a bot can already have replied while finishing its turn. They disappear when
 the delivery completes, and are not a durable task ledger across restarts.
-Unscoped mentions, bot messages, conversational promises, and inferred handoffs
-are not classified. `handoffs: "not_tracked"` explicitly reports that no
-unanswered-handoff ledger exists. Empty pending assignments do not prove that
-all conversational obligations are resolved.
+`handoffs` lists what one bot has asked another in a group, by @mention or by
+quoting it, that isn't settled yet: `conversationId`, `from`, `to`, `messageId`
+and `at`. This ledger is kept in the database and survives restarts. An entry
+goes once the asked bot is done and the asker has its answer (it is woken to read
+what the other wrote there, named or not), once the asked bot has read the
+message and written nothing, or once the asker has been told it went unread for
+10 minutes. Conversational promises and handoffs made in plain words, with no
+mention, are not classified. Empty lists do not prove that all conversational
+obligations are resolved.
 
 The result excludes message bodies, prompts, activity text, error details,
 credentials, computer configuration and model calls. This action changes no

@@ -30,7 +30,7 @@ test("primary work status uses runner state and exact assignments, with authenti
       a.ok(row().lastActivityAt >= started);
       globalThis.openbotsQueue.set(b.bot.id, [{kind:'messages',conversationId:b.conversationId,messageIds:['exact-id'],text:'SECRET'}, {kind:'note',text:'SECRET handoff'}]);
       a.deepEqual(row().pendingAssignments, [{conversationId:b.conversationId,messageIds:['exact-id']}]);
-      a.equal(svc.botWorkStatus(p.bot.id).handoffs, 'not_tracked');
+      a.deepEqual(svc.botWorkStatus(p.bot.id).handoffs, []);
       a.ok(!JSON.stringify(svc.botWorkStatus(p.bot.id)).includes('SECRET'));
       globalThis.openbotsQueue.delete(b.bot.id);
       svc.setStatus(b.bot.id, {state:'idle'});

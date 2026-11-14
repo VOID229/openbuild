@@ -6,7 +6,7 @@ import { untrustedData } from "./transcriptData";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, betweenTurns, type BotMessage, type Question } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, findTags, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, betweenTurns, type BotMessage, type Question } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -356,6 +356,8 @@ async function pump(botId: string) {
       const turn = first.kind === "routine" ? [first] : jobs.filter((j: Wake) => j.kind !== "routine" && j.conversationId === first.conversationId && !!j.messageIds === !!first.messageIds);
       queue.set(botId, jobs.filter((j: Wake) => !turn.includes(j)));
       await run(botId, turn);
+      // What it wrote in that turn is whole: whoever asked it hears now, not once its queue is empty.
+      try { svc.settleHandoffs((id) => working(id, botId)); } catch (err) { console.error("[bots] couldn't settle handoffs:", err); }
     }
   } finally {
     pumping.delete(botId);
@@ -1027,6 +1029,7 @@ async function runTurn(botId: string, all: Wake[]) {
   const deciding = db.getConversation(conversationId ?? "")?.kind === "group" && jobs.every((j) => j.kind === "messages" || j.kind === "reaction");
   // A stop is for the turn it was said to: one left over from between turns isn't this one's.
   halted.delete(botId);
+  if (nothingNew(botId, jobs, conversationId)) return;
   setFocus(botId, conversationId);
   // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a
   // group that's this bot's to answer. The others asked with it are only deciding whether to add anything.
@@ -1264,6 +1267,23 @@ async function runTurn(botId: string, all: Wake[]) {
   }
 }
 
+/**
+ * A group wake for what another turn of the bot's has already read: two bubbles that both named it,
+ * or a mention it was shown while it answered something else. There's nothing to show it, so no model
+ * is asked. A turn that failed never moved the cursor, so its messages still get their turn.
+ */
+function nothingNew(botId: string, jobs: Wake[], conversationId?: string): boolean {
+  if (!conversationId || db.getConversation(conversationId)?.kind !== "group") return false;
+  if (!jobs.every((j) => j.kind === "messages" && !j.messageIds && !j.text)) return false;
+  return !db.messagesAfter(conversationId, db.cursor(botId, conversationId), 200).some((r) => r.message.author !== botId && !r.message.event);
+}
+
+/**
+ * In a turn, with one waiting, or with a background job running: what it has said isn't all it will
+ * say (see svc.settleHandoffs). `between` is a bot whose turn has just ended: only its jobs count.
+ */
+const working = (botId: string, between?: string) => (botId !== between && busy(botId)) || !!waitingLine(botId);
+
 function stillReacted({ messageId, emoji, by, to }: NonNullable<Wake["reaction"]>) {
   return !!db.getMessage(messageId)?.message.reactions?.some((r) => r.by === by && r.emoji === emoji && r.to === to);
 }
@@ -1418,7 +1438,8 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
       const scoped = jobs.filter(j => j.conversationId === job.conversationId);
       const assigned = scoped.every(j => j.messageIds) ? scoped.flatMap(j => j.messageIds!) : undefined;
       const leads = new Map(scoped.flatMap(j => (j.lead ? (j.messageIds ?? []).map(id => [id, j.lead!] as const) : [])));
-      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates, leads));
+      const replies = new Set(scoped.flatMap(j => j.replies ?? []));
+      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates, leads, replies));
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
@@ -1433,12 +1454,12 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
   return parts.filter(Boolean).join("\n\n");
 }
 
-export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>, leads?: Map<string, string>): string {
+export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>, leads?: Map<string, string>, replies?: Set<string>): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const rows = db.messages(conversationId, 16);
   // A wake that waited its turn can target a message older than the history window or cursor.
-  for (const id of assigned ?? []) {
+  for (const id of [...(assigned ?? []), ...(replies ?? [])]) {
     const row = db.getMessage(id);
     if (row?.conversationId === conversationId && !rows.some(r => r.message.id === id)) rows.push(row);
   }
@@ -1447,8 +1468,8 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   const lines = rows.filter(r => {
     const key = deliveryIdentity(conversationId, r.message);
     candidates?.add(key);
-    return assigned?.includes(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
-  }).map(line(c, bots, user, botId, assigned, undefined, leads));
+    return assigned?.includes(r.message.id) || replies?.has(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
+  }).map(line(c, bots, user, botId, assigned, undefined, leads, replies));
   const list = db.todos(conversationId);
   const todos = list.length ? `${c.friend ? untrustedData(todoText(list, botId)) : todoText(list, botId)}\n` : "";
   return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${membersNote(c, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${todos}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
@@ -1538,8 +1559,17 @@ export function steerNote(conversationId: string, botId: string, ids: string[], 
   return `New in conversation ${conversationId.slice(0, 8)} (“${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”) while you were working:\n${lines.join("\n")}\n${closing}`;
 }
 
-function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]", leads?: Map<string, string>) {
+function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]", leads?: Map<string, string>, replies?: Set<string>) {
   const cursor = db.cursor(botId, c.id);
+  const me = bots.filter((b) => b.id === botId);
+  // Another bot's line that names this one, quotes it, or answers what it asked is never just context.
+  const asked = c.kind === "group" ? svc.openHandoffs().filter((h) => h.conversationId === c.id && h.from === botId) : [];
+  const toMe = (m: BotMessage, seq: number) => {
+    if (m.author === "me" || m.author === botId || m.event || c.kind !== "group") return "";
+    if (replies?.has(m.id) || asked.some((h) => h.to === m.author && seq > h.seq)) return " [answers what you asked]";
+    const quoted = m.replyTo ? db.getMessage(m.replyTo)?.message.author === botId : false;
+    return quoted || findTags(m.text, me).length ? " [for you]" : "";
+  };
   const name = (author: string) => (author === botId ? "you" : authorLabel(c, author, bots, user));
   // Asked of several bots at once: one answers, the rest add only what's theirs alone.
   const shared = (lead: string) => lead === botId
@@ -1556,9 +1586,9 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     const body = (c.friend && m.event) || parseFriendAuthor(m.author) ? untrustedData(rawBody) : rawBody;
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
     const lead = leads?.get(m.id);
-    const mark = assigned ? (assigned.includes(m.id) ? (lead ? shared(lead) : forYou) : " [context only: do not answer]")
+    const mark = assigned ? (assigned.includes(m.id) ? (lead ? shared(lead) : forYou) : toMe(m, r.seq) || " [context only: do not answer]")
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
-      : r.seq > cursor ? "" : " [already seen]";
+      : r.seq > cursor ? toMe(m, r.seq) : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
     const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${c.friend || parseFriendAuthor(quoted.message.author) ? untrustedData(quoted.message.text.slice(0, 200)) : quoted.message.text.slice(0, 200)}”)` : "";
     const list = m.reactions ?? [];
@@ -1700,6 +1730,7 @@ export function startBots() {
   hot.openbotsTimer = setInterval(() => {
     try {
       svc.tick(busy);
+      svc.settleHandoffs((id) => working(id));
     } catch (err) {
       // A stale record or a failed wake must not escape the interval and crash the server.
       console.error("[bots] scheduler failed:", err);

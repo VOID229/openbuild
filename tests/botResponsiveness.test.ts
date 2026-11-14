@@ -106,7 +106,7 @@ test("the system prompt asks for one quick ack before real work, a reaction when
   a.ok(ack[0].length < 450, String(ack[0].length));
   // Nothing in the prompt says a reaction can be let be any more.
   a.doesNotMatch(agent.contextFor(alpha.bot.id), /owe a reply to every message or reaction|doesn't need an answer/);
-  a.match(agent.contextFor(alpha.bot.id), /You don't owe every message a reply: with nothing to add, end your turn with the plain reply \\[silent\\]\\./);
+  a.match(agent.contextFor(alpha.bot.id), /To end a turn without a message, make \\[silent\\] your whole final reply\\./);
 `), 30_000);
 
 test("the runner steers no late nudge of its own into a turn that keeps the user waiting", () => run("ack-no-nudge", `
