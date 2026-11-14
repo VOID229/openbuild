@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ending, sentBrief } from "../server/bots/extension";
 import { findMentions, looseMention, resolveMentions } from "../shared/bots";
 import { unexpectedStderr } from "./botStderr";
 import { spawnScript } from "./spawnScript";
@@ -43,6 +44,21 @@ test("a tag that reaches nobody is reported, not guessed", () => {
   // A whole name wins over a word of another's.
   expect(looseMention("tracer2", team).map((b) => b.name)).toEqual(["tracer2"]);
   expect(looseMention("x", team)).toEqual([]);
+});
+
+test("a sent message's result says who it reached, and a tag that reached nobody keeps the turn open", async () => {
+  const id = "2874dff8-e549-45d9-ac3b-614739a3bc01";
+  const note = "@tracr isn't a bot in this chat, so it reached nobody.";
+  // Short, like any sent message's result, with who read it and what the service had to say.
+  expect(sentBrief({ id, conversation: "f865f9a5", reached: ["tracer", "Dr Eggbot"] })).toBe("Sent as [2874dff8] in conversation f865f9a5. It reached tracer, Dr Eggbot.");
+  expect(sentBrief({ id, conversation: "f865f9a5", note })).toBe(`Sent as [2874dff8] in conversation f865f9a5. ${note}`);
+  // Anything it doesn't know how to say stays whole.
+  expect(sentBrief({ id, conversation: "f865f9a5", extra: 1 })).toBeUndefined();
+  // done ends the turn on a message that went out, but not past a note the bot hasn't read: it
+  // would never learn its mention missed.
+  const sent = (details: Record<string, unknown>) => ending({ name: "t", execute: async (_id: string, _params: Record<string, unknown>) => ({ content: [], details }) }, (p) => p.done === true).execute("1", { text: "x", done: true }) as Promise<{ terminate?: boolean }>;
+  expect((await sent({ id, conversation: "c1", reached: ["tracer"] })).terminate).toBe(true);
+  expect((await sent({ id, conversation: "c1", note })).terminate).toBeUndefined();
 });
 
 // Each scenario runs the real service and runner in a subprocess on its own data dir, with stand-in Pi
