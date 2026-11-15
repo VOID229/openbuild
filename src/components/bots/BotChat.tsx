@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only, and so is a retired bot's.
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, SmilePlus, Square, TextSelect, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleSlash, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, SmilePlus, Square, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { answerLabel, answersText, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, TYPING } from "../../../shared/bots";
+import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, TYPING } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -526,6 +526,34 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
     return typed ? { ...s, answer: typed } : s;
   });
   const card = useRef<HTMLDivElement>(null);
+  // Closed before it was submitted: the questions it asked, what its bot settled on, and why.
+  if (q.closed && !q.submitted) {
+    return (
+      <div className="bm-question bm-steps-closed">
+        <div className="bm-steps-head">
+          <span className="bm-steps-count">{q.steps!.length} questions</span>
+        </div>
+        <ol className="bm-answered" aria-label="Questions">
+          {q.steps!.map((s, i) => (
+            <li key={i} className="bm-answered-row">
+              <span className="bm-answered-title">{s.title}</span>
+            </li>
+          ))}
+        </ol>
+        {q.answer && (
+          <div className="bm-options">
+            <div className="bm-option bm-option-on">
+              <span className="bm-option-key">
+                <Check size={13} strokeWidth={3} />
+              </span>
+              <span className="bm-option-label">{q.answer}</span>
+            </div>
+          </div>
+        )}
+        <ClosedNote q={q} />
+      </div>
+    );
+  }
   if (q.submitted) {
     return (
       <ol className="bm-question bm-answered" aria-label="Your answers">
@@ -648,6 +676,20 @@ function AnswersEcho({ steps }: { steps: QuestionStep[] }) {
   );
 }
 
+/** Under a closed card, the same whoever closed it: that it's closed, and where it was settled or why. */
+function ClosedNote({ q }: { q: Question }) {
+  const why = closedReason(q);
+  return (
+    <div className="bm-question-closed">
+      <CircleSlash size={13} strokeWidth={2.25} aria-hidden />
+      <span>
+        <span className="bm-question-closed-label">Closed</span>
+        {why && ` · ${why}`}
+      </span>
+    </div>
+  );
+}
+
 function QuestionCard({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
   if (message.question!.steps) return <QuestionSteps conversation={conversation} message={message} />;
   return <SingleQuestion conversation={conversation} message={message} />;
@@ -656,7 +698,7 @@ function QuestionCard({ conversation, message }: { conversation: Conversation; m
 function SingleQuestion({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
   const q = message.question!;
   const [own, setOwn] = useState("");
-  // Answered here, or closed from the coding thread whose question it passed on.
+  // Answered here, or closed: by the bot that asked it, or from the coding thread whose question it passed on.
   const settled = q.answer !== undefined || !!q.closed;
   const answer = (key: string, text: string, label: string) => {
     if (settled) return;
@@ -691,7 +733,7 @@ function SingleQuestion({ conversation, message }: { conversation: Conversation;
           </div>
         )}
       </div>
-      {q.closed && <div className="bm-question-closed">{q.closed === "answered" ? "Answered in the thread" : "The thread stopped waiting on this"}</div>}
+      {q.closed && <ClosedNote q={q} />}
       {!settled && (
         <form
           className="bm-own"

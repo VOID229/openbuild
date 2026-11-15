@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1859,11 +1859,32 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   const row = db.getMessage(messageId);
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
-  if (question.closed) throw new BotsError("That question was settled in its thread.", 409);
+  // Not a 409: that tells the app its workspace is gone.
+  if (question.closed) throw new BotsError(question.closed === "bot" ? "That question was closed." : "That question was settled in its thread.");
   if (question.steps) throw new BotsError("That card asks several questions: answer them together.");
   assertAnswerable(conversationId, row.message.author);
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
   return patched;
+}
+
+/**
+ * The bot that asked a question card closing it, once it was answered some other way (the user said
+ * so in a message) or stopped mattering: it can't be answered anymore, and says why if the bot did,
+ * with the answer it settled on checked. Only patched, so nobody is woken. A card already answered,
+ * submitted or closed stays as it is: false then.
+ */
+export function closeQuestion(conversationId: string, messageId: string, by: string, { reason, answer }: { reason?: string; answer?: string } = {}): boolean {
+  const row = db.getMessage(messageId);
+  const question = row?.conversationId === conversationId ? row.message.question : undefined;
+  if (!row || !question) throw new BotsError("That message isn't a question card.", 404);
+  if (row.message.author !== by) throw new BotsError("Only the bot that asked a question can close it.", 403);
+  if (question.closed || question.submitted || (!question.steps && question.answer !== undefined)) return false;
+  const why = reason?.replace(/\s+/g, " ").trim().slice(0, QUESTION_REASON_MAX);
+  const settled = answer?.replace(/\s+/g, " ").trim().slice(0, 2000);
+  // One of the card's own choices is checked; anything else shows as words.
+  const key = settled && !question.steps ? (question.options.find((o) => o.label.toLowerCase() === settled.toLowerCase())?.key ?? settled) : settled;
+  patchMessage(conversationId, messageId, { question: { ...question, closed: "bot", ...(key ? { answer: key } : {}), ...(why ? { reason: why } : {}) } });
+  return true;
 }
 
 /** A retired bot's question can't be answered: nobody would hear the answer. */
@@ -1885,6 +1906,7 @@ export function answerSteps(conversationId: string, messageId: string, answers: 
   if (!row || !question?.steps) throw new BotsError("That message isn't a card of several questions.", 404);
   // Sent again after it landed (a retry): it stays as submitted.
   if (question.submitted) return row.message;
+  if (question.closed) throw new BotsError("That card was closed.");
   assertAnswerable(conversationId, row.message.author);
   const steps = question.steps.map(({ answer: _, ...step }, i): QuestionStep => {
     const answer = typeof answers[i] === "string" ? (answers[i] as string).trim().slice(0, 2000) : "";

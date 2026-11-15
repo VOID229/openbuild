@@ -150,3 +150,103 @@ test("a card keeps the whole hint a bot writes, and one past any sensible length
     process.exit(0);
   `);
 }, 30_000);
+
+test("question tells a bot it can close a card it asked, with a reason or the answer it settled on", () => {
+  const tools: any[] = [];
+  openbots({ on() {}, registerTool(t: any) { tools.push(t); } } as any);
+  const question = tools.find((t) => t.name === "question");
+  expect(Object.keys(question.parameters.properties)).toEqual(expect.arrayContaining(["close", "reason", "answer"]));
+  expect(question.description).toContain("close it: close with its id, and reason or answer");
+  expect(question.description).toContain("closing wakes nobody");
+});
+
+test("a bot closes a card it asked: it can't be answered anymore, shows why, and wakes nobody", async () => {
+  await isolated("close", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const runner = await import('./server/bots/runner.ts');
+    const routes = await import('./server/bots/routes.ts');
+    const { askUser, setFocus } = await import('./server/bots/agent.ts');
+    const builder = svc.createBot({ name: 'Builder' }).bot.id;
+    const other = svc.createBot({ name: 'Scout' }).bot.id;
+    const chat = svc.directId(builder);
+    const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [builder, other] }).id;
+    const wakes = [];
+    svc.setHooks({ wake: (id, w) => wakes.push([id, w]), stop() {}, pendingAssignments: () => [], unseen: runner.unseen });
+    setFocus(builder, chat);
+    const lines = (c = chat, bot = builder) => runner.render([{ kind: 'messages', conversationId: c }], bot);
+    const stored = id => db.getMessage(id).message.question;
+
+    // The user said "merge" in a message instead of tapping the card.
+    const merge = askUser(builder, { title: 'Merge #351 now?', options: ['Merge it', 'Wait for me'] });
+    svc.postMessage(chat, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'merge' });
+    wakes.length = 0;
+    const count = db.messages(chat, 50).length;
+
+    // Only the bot that asked can close it, and only a question card.
+    setFocus(other, group);
+    a.throws(() => askUser(other, { close: merge.id }), /no question card with that id/);
+    a.throws(() => svc.closeQuestion(chat, merge.id, other), /Only the bot that asked/);
+    const said = db.messages(chat, 50).find(r => r.message.text === 'merge').message.id;
+    a.throws(() => askUser(builder, { close: said }), /no question card with that id/);
+    a.throws(() => askUser(builder, { close: merge.id, title: 'Something else?' }), /close goes on its own/);
+    a.equal(stored(merge.id).closed, undefined);
+
+    // Closed by its short id from another chat, settling on one of its options: that one is checked.
+    setFocus(builder, group);
+    const closed = askUser(builder, { close: '[' + merge.id.slice(0, 8) + ']', answer: 'merge it', reason: '  You said merge\\n in the chat  ' });
+    a.match(closed.note, /^Closed: the user sees it can't be answered anymore/);
+    a.equal(closed.id, undefined);
+    a.deepEqual([stored(merge.id).closed, stored(merge.id).answer, stored(merge.id).reason], ['bot', 'A', 'You said merge in the chat']);
+    a.match(lines(), /\\(asked with question: “Merge #351 now\\?” \\[Merge it \\/ Wait for me\\], closed by you, settled: Merge it \\(You said merge in the chat\\)\\)/);
+    // Nothing posted, nobody woken.
+    a.equal(db.messages(chat, 50).length, count);
+    a.deepEqual(wakes, []);
+
+    // Closed, it can't be answered: refused as a plain 400 (a 409 would make the app drop the workspace).
+    a.throws(() => svc.answerQuestion(chat, merge.id, 'B'), /That question was closed/);
+    a.equal((await routes.patchMine(chat, merge.id, { question: { answer: 'B' } })).status, 400);
+    a.equal(stored(merge.id).answer, 'A');
+    // Closing it again changes nothing.
+    a.match(askUser(builder, { close: merge.id, reason: 'Again' }).note, /already closed\\. Nothing changed/);
+    a.equal(stored(merge.id).reason, 'You said merge in the chat');
+
+    // A card the user already answered stays as they answered it.
+    setFocus(builder, chat);
+    const answered = askUser(builder, { title: 'Deploy?', options: ['Yes', 'No'] });
+    svc.answerQuestion(chat, answered.id, 'B');
+    a.match(askUser(builder, { close: answered.id, answer: 'Yes', reason: 'Changed my mind' }).note, /already answered that card.*Nothing changed/);
+    a.deepEqual([stored(answered.id).closed, stored(answered.id).answer, stored(answered.id).reason], [undefined, 'B', undefined]);
+
+    // No longer relevant: no answer, and the reason alone. Words that aren't an option show as words.
+    const stale = askUser(builder, { title: 'Rotate the key?', options: ['Yes', 'No'] });
+    askUser(builder, { close: stale.id, reason: 'x'.repeat(500) });
+    a.equal(stored(stale.id).answer, undefined);
+    a.equal(stored(stale.id).reason.length, 200);
+    const typed = askUser(builder, { title: 'Which day?', options: ['Monday'] });
+    askUser(builder, { close: typed.id, answer: 'Friday' });
+    a.deepEqual([stored(typed.id).answer, stored(typed.id).reason], ['Friday', undefined]);
+    a.match(lines(), /“Which day\\?” \\[Monday\\], closed by you, settled: Friday\\)/);
+
+    // Another bot reads that its asker closed it.
+    const there = askUser(builder, { title: 'Ship it?', options: ['Yes'], conversation: group });
+    askUser(builder, { close: there.id, reason: 'Shipped' });
+    a.match(lines(group, other), /“Ship it\\?” \\[Yes\\], closed by its asker \\(Shipped\\)\\)/);
+
+    // A card of several questions closes too, before it's submitted, and can't be submitted after.
+    const many = askUser(builder, { questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }, { title: 'When?' }] });
+    svc.answerSteps(chat, many.id, ['B', null], false);
+    askUser(builder, { close: many.id, answer: 'SQLite, nightly', reason: 'Settled in the chat' });
+    a.deepEqual([stored(many.id).closed, stored(many.id).answer, stored(many.id).submitted], ['bot', 'SQLite, nightly', undefined]);
+    a.throws(() => svc.answerSteps(chat, many.id, ['B', 'Nightly'], true), /That card was closed/);
+    a.match(lines(), /2 in one card: 1\\. “Database\\?” \\[Postgres \\/ SQLite\\]; 2\\. “When\\?”, closed by you, settled: SQLite, nightly \\(Settled in the chat\\)\\)/);
+    // A submitted one stays as it is.
+    const done = askUser(builder, { questions: [{ title: 'One?' }, { title: 'Two?' }] });
+    svc.answerSteps(chat, done.id, ['1', '2'], true);
+    a.match(askUser(builder, { close: done.id }).note, /already answered/);
+    a.equal(stored(done.id).closed, undefined);
+    a.deepEqual(wakes, []);
+    process.exit(0);
+  `);
+}, 30_000);

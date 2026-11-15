@@ -337,7 +337,7 @@ export interface Question {
   title: string;
   hint?: string;
   options: { key: string; label: string }[];
-  /** The key of the option the user picked, or what they typed instead. */
+  /** The key of the option the user picked, or what they typed instead. On a closed card, what was settled. */
   answer?: string;
   /**
    * Every question of a card that asks several (two to {@link QUESTION_STEPS}), the first one
@@ -350,11 +350,22 @@ export interface Question {
   /** The coding thread's question this card passes on, so the card closes when it's settled in the thread. */
   thread?: { id: string; ask: string };
   /**
-   * Closed from its thread, where the question was settled first: "answered" there (answer holds what
-   * was answered), or "gone" when the thread stopped waiting on it without an answer.
+   * Closed, so it can't be answered anymore. From its thread, where the question was settled first:
+   * "answered" there (answer holds what was answered), or "gone" when the thread stopped waiting on
+   * it without an answer. Or "bot": the bot that asked closed it (answered some other way, or no
+   * longer relevant), with answer holding what it settled on, if it said.
    */
-  closed?: "answered" | "gone";
+  closed?: "answered" | "gone" | "bot";
+  /** Why its bot closed it, in a few of its words. */
+  reason?: string;
 }
+
+/** How long the reason a bot gives for closing its card may be. */
+export const QUESTION_REASON_MAX = 200;
+
+/** What a closed card says under it, after "Closed": where it was settled, or why its bot closed it. */
+export const closedReason = (q: Pick<Question, "closed" | "reason">): string | undefined =>
+  q.closed === "answered" ? "Answered in the thread" : q.closed === "gone" ? "The thread stopped waiting on this" : q.reason || undefined;
 
 /** An answer as the user reads it: the picked option's label, or what they typed. */
 export const answerLabel = (q: Pick<QuestionStep, "options" | "answer">): string | undefined => (q.answer === undefined ? undefined : (q.options.find((o) => o.key === q.answer)?.label ?? q.answer));

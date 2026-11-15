@@ -296,3 +296,67 @@ describe.skipIf(!browser)("a card of several questions", () => {
     expect(writes.filter((w) => w.method === "PATCH").map((w) => w.body)).toEqual([{ question: { answer: "B" } }]);
   }, 30_000);
 });
+
+describe.skipIf(!browser)("a closed card", () => {
+  /** What a card shows: its marker, whether anything on it can still be used, and what's checked. */
+  const shown = (page: Chat, id: string) =>
+    page.eval<{ closed: string | null; usable: number; own: boolean; on: string[]; off: number; steps: string[] }>(`(() => {
+      const c = document.querySelector('[data-id="${id}"] .bm-question');
+      return {
+        closed: c.querySelector('.bm-question-closed')?.textContent ?? null,
+        usable: [...c.querySelectorAll('button, input')].filter((b) => !b.disabled).length,
+        own: !!c.querySelector('.bm-own'),
+        on: [...c.querySelectorAll('.bm-option-on .bm-option-label')].map((o) => o.textContent),
+        off: c.querySelectorAll('.bm-option-off').length,
+        steps: [...c.querySelectorAll('.bm-answered-title')].map((t) => t.textContent),
+      };
+    })()`);
+
+  for (const [device, width] of [["desktop", 1000], ["phone", 390]] as const) {
+    test(`on a ${device}, can't be answered and says why, the same whoever closed it`, async () => {
+      const single = (closed: Partial<Question>): Question => ({ title: "Merge #351 now?", options: lettered(["Merge it", "Wait for me"]), ...closed });
+      stored = [
+        { id: "hello", author: "me", at: 1, text: "Set up the backups, please." },
+        { id: "settled", author: "builder", at: 2, text: "Merge #351 now?", question: single({ closed: "bot", answer: "A", reason: "You said merge in the chat" }) },
+        { id: "stale", author: "builder", at: 3, text: "Merge #351 now?", question: single({ closed: "bot", reason: "Not needed anymore" }) },
+        { id: "bare", author: "builder", at: 4, text: "Merge #351 now?", question: single({ closed: "bot" }) },
+        { id: "thread", author: "builder", at: 5, text: "Merge #351 now?", question: single({ thread: { id: "t", ask: "a" }, closed: "answered", answer: "B" }) },
+        { id: "gone", author: "builder", at: 6, text: "Merge #351 now?", question: single({ thread: { id: "t", ask: "b" }, closed: "gone" }) },
+        { id: "many", author: "builder", at: 7, text: STEPS[0]!.title, question: { ...STEPS[0]!, steps: STEPS.map((s) => ({ ...s })), closed: "bot", answer: "SQLite, nightly", reason: "Settled in the chat" } },
+      ];
+      const page = await Chat.open(chrome!.ws, server!.url.href, width, 900, `!!document.querySelector('[data-id="many"] .bm-question')`);
+      if (device === "phone") expect(await page.eval<boolean>(`matchMedia("(max-width: 768px)").matches`)).toBe(true);
+      const closed = { usable: 0, own: false };
+      expect(await shown(page, "settled")).toEqual({ ...closed, closed: "Closed · You said merge in the chat", on: ["Merge it"], off: 1, steps: [] });
+      expect(await shown(page, "stale")).toEqual({ ...closed, closed: "Closed · Not needed anymore", on: [], off: 2, steps: [] });
+      expect(await shown(page, "bare")).toEqual({ ...closed, closed: "Closed", on: [], off: 2, steps: [] });
+      // Closed from its thread, it reads the same way.
+      expect(await shown(page, "thread")).toEqual({ ...closed, closed: "Closed · Answered in the thread", on: ["Wait for me"], off: 1, steps: [] });
+      expect(await shown(page, "gone")).toEqual({ ...closed, closed: "Closed · The thread stopped waiting on this", on: [], off: 2, steps: [] });
+      // A card of several: the questions it asked, no stepping, and what its bot settled on.
+      expect(await shown(page, "many")).toEqual({ ...closed, closed: "Closed · Settled in the chat", on: ["SQLite, nightly"], off: 0, steps: STEPS.map((s) => s.title) });
+      expect(await page.eval<number>(`document.querySelectorAll('[data-id="many"] .bm-steps-arrow, [data-id="many"] .bm-steps-submit').length`)).toBe(0);
+      // The marker sits inside the card, under its choices.
+      const fits = await page.eval<{ inside: boolean; under: boolean }>(`(() => {
+        const card = document.querySelector('[data-id="settled"] .bm-bubble').getBoundingClientRect();
+        const note = document.querySelector('[data-id="settled"] .bm-question-closed').getBoundingClientRect();
+        const last = [...document.querySelectorAll('[data-id="settled"] .bm-option')].pop().getBoundingClientRect();
+        return { inside: note.left >= card.left && note.right <= card.right && note.bottom <= card.bottom, under: note.top >= last.bottom };
+      })()`);
+      expect(fits).toEqual({ inside: true, under: true });
+
+      // A tap on a closed card's option sends nothing.
+      await page.click('[data-id="stale"] button.bm-option');
+      await page.settle();
+      expect(writes).toEqual([]);
+    }, 30_000);
+  }
+
+  test("an open card closes on the next load, and its box goes", async () => {
+    let page = await open();
+    expect((await shown(page, "one")).own).toBe(true);
+    stored.find((m) => m.id === "one")!.question = { ...stored.find((m) => m.id === "one")!.question!, closed: "bot", reason: "You said yes in the chat" };
+    page = await open();
+    expect(await shown(page, "one")).toMatchObject({ closed: "Closed · You said yes in the chat", usable: 0, own: false });
+  }, 30_000);
+});
