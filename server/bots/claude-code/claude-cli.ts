@@ -21,7 +21,7 @@ import type {
   NativeResult,
   NativeUsage,
 } from "./native-types.ts";
-import type { NativeSystemInjection, ToolManifestEntry } from "./transcript.ts";
+import { hasVisibleOutput, type NativeSystemInjection, type ToolManifestEntry } from "./transcript.ts";
 
 export const INSTALL_HINT =
   "Claude Code is not installed. Install it with `npm install -g @anthropic-ai/claude-code` " +
@@ -828,45 +828,131 @@ function alignCanonicalContent(canonical: unknown[], wire: unknown[], where: str
   return output;
 }
 
-/** Replace every native user message's content with Pi's canonical content for it. */
-function restoreCanonicalUserContent(messages: NativeRequestMessage[], frames: NativeFrame[]): void {
+/** Whether Claude Code's block is this canonical one. Text is compared: Claude Code only ends it with a newline when it joins messages. */
+function isCanonicalBlock(block: unknown, native: unknown): boolean {
+  if (!isBlock(block) || !isBlock(native) || native.type !== block.type) return false;
+  if (block.type === "tool_result") return native.tool_use_id === block.tool_use_id;
+  if (block.type !== "text") return true;
+  return typeof block.text === "string" && typeof native.text === "string" && native.text.trimEnd() === block.text.trimEnd();
+}
+
+/** Where Claude Code's blocks, read from `start`, have held all of a canonical frame's in order: the position after the last, or -1. */
+function locateCanonicalFrame(canonical: unknown[], wire: unknown[], start: number): number {
+  let cursor = start;
+  for (const block of canonical) {
+    const index = wire.findIndex((native, position) => position >= cursor && isCanonicalBlock(block, native));
+    if (index < 0) return -1;
+    cursor = index + 1;
+  }
+  return cursor;
+}
+
+/**
+ * OpenBuild: which of Pi's user frames each native user message holds. One each, as a rule. Claude
+ * Code joins user messages when it leaves out the assistant message between them, and then one
+ * native message holds several frames in a row: its own reply with no visible output is the known
+ * case (it also adds a "[Your previous response had no visible output…]" line, which is dropped
+ * like anything else it adds). Counts that differ used to fail the request. Now a frame is only
+ * placed in a message that holds its blocks, in order, with the same text and tool-result ids, and
+ * a history that can't be placed that way still fails: content never lands in another message.
+ */
+function groupCanonicalFrames(canonical: NativeFrame[], native: unknown[][]): number[] {
+  if (native.length === canonical.length) return native.map(() => 1);
+  const mismatch = (detail: string) =>
+    new Error(
+      `Claude Code request has ${native.length} user messages where Pi's history has ${canonical.length} (${detail})`,
+    );
+  if (native.length > canonical.length) throw mismatch("Claude Code added a user message");
+
+  const sizes: number[] = [];
+  let next = 0;
+  native.forEach((wire, index) => {
+    // Every later native message needs a frame of its own.
+    const reserved = native.length - index - 1;
+    let cursor = locateCanonicalFrame(canonical[next]!.message.content, wire, 0);
+    if (cursor < 0) throw mismatch(`user message ${index} is not Pi's user message ${next}`);
+    let size = 1;
+    while (canonical.length - (next + size) > reserved) {
+      const end = locateCanonicalFrame(canonical[next + size]!.message.content, wire, cursor);
+      if (end < 0) break;
+      cursor = end;
+      size += 1;
+    }
+    sizes.push(size);
+    next += size;
+  });
+  if (next !== canonical.length) throw mismatch(`Pi's user message ${next} is in none of them`);
+  return sizes;
+}
+
+/**
+ * Replace every native user message's content with Pi's canonical content for it. Returns the
+ * canonical assistant messages (zero-based) the native request doesn't have: those between user
+ * frames that Claude Code joined into one message.
+ */
+function restoreCanonicalUserContent(messages: NativeRequestMessage[], frames: NativeFrame[]): number[] {
   const canonical = frames.filter((frame) => frame.type === "user");
   const native = messages.filter((message) => message.role === "user");
-  if (native.length !== canonical.length) {
-    throw new Error(
-      `Claude Code request has ${native.length} user messages where Pi's history has ${canonical.length}`,
-    );
-  }
-  native.forEach((message, index) => {
-    const wire = Array.isArray(message.content)
+  const wires = native.map((message) =>
+    Array.isArray(message.content)
       ? message.content
       : typeof message.content === "string"
         ? [{ type: "text", text: message.content }]
-        : [];
+        : [],
+  );
+  const sizes = groupCanonicalFrames(canonical, wires);
+
+  const absentAssistants: number[] = [];
+  let frameIndex = 0;
+  let assistantOrdinal = 0;
+  native.forEach((message, index) => {
+    const wire = wires[index]!;
+    const blocks: unknown[] = [];
+    for (let taken = 0; taken < sizes[index]!; frameIndex++) {
+      const frame = frames[frameIndex]!;
+      if (frame.type === "user") {
+        blocks.push(...frame.message.content);
+        taken += 1;
+      } else {
+        if (taken > 0) absentAssistants.push(assistantOrdinal);
+        assistantOrdinal += 1;
+      }
+    }
     // Keep Claude Code's breakpoint on this message even if it marked a dropped block.
     const marker = (wire.findLast((block) => isBlock(block) && block.cache_control) as ContentBlock | undefined)
       ?.cache_control;
-    const content = alignCanonicalContent(canonical[index]!.message.content, wire, `user message ${index}`);
+    const content = alignCanonicalContent(blocks, wire, `user message ${index}`);
     if (marker && content.length) {
       content[content.length - 1] = { ...(content.at(-1) as ContentBlock), cache_control: structuredClone(marker) };
     }
     message.content = content;
   });
+  return absentAssistants;
 }
 
 function injectNativeSystemMessages(
   messages: NativeRequestMessage[],
   injections: NativeSystemInjection[],
+  absentAssistants: number[] = [],
 ): NativeRequestMessage[] {
   const byAssistant = new Map<number, NativeRequestMessage[]>();
   const trailing: NativeRequestMessage[] = [];
+  // OpenBuild: injections count Pi's assistant messages. Where the native request has left some
+  // out, one goes before the next assistant message that is there, or at the tail after the last.
+  const present = messages.filter((message) => message.role === "assistant").length;
+  const nativeOrdinal = (ordinal: number): number | null => {
+    if (absentAssistants.length === 0) return ordinal;
+    const target = ordinal - absentAssistants.filter((absent) => absent < ordinal).length;
+    return target < present ? target : null;
+  };
   for (const injection of injections) {
     const message = { role: "system", content: structuredClone(injection.content) };
-    if (injection.beforeAssistant === null) trailing.push(message);
+    const before = injection.beforeAssistant === null ? null : nativeOrdinal(injection.beforeAssistant);
+    if (before === null) trailing.push(message);
     else {
-      const pending = byAssistant.get(injection.beforeAssistant) ?? [];
+      const pending = byAssistant.get(before) ?? [];
       pending.push(message);
-      byAssistant.set(injection.beforeAssistant, pending);
+      byAssistant.set(before, pending);
     }
   }
 
@@ -912,7 +998,7 @@ export function rewriteInitialRequest(
   if (first?.role !== "user" || !Array.isArray(first.content)) {
     throw new Error("Claude Code request is missing its initial user message");
   }
-  if (messages) restoreCanonicalUserContent(messages, frames);
+  const absentAssistants = messages ? restoreCanonicalUserContent(messages, frames) : [];
 
   // OpenBuild: only where Claude Code sent native system messages itself. A model without them
   // (Haiku 4.5) refuses the turn ("role 'system' is not supported on this model"), and the same Pi
@@ -933,7 +1019,7 @@ export function rewriteInitialRequest(
   }
 
   if (nativeSystemInjections) {
-    messages = injectNativeSystemMessages(messages!, nativeSystemInjections);
+    messages = injectNativeSystemMessages(messages!, nativeSystemInjections, absentAssistants);
     payload.messages = messages;
     normalizeLeadingSystemCache(payload.system);
   }
@@ -1197,7 +1283,10 @@ class ClaudeProcess {
     // result. Our inert MCP response is therefore part of its hidden history,
     // while Pi will append the real tool result. That state is not a faithful
     // continuation and must be discarded; the next request replays from Pi.
-    if (message.content.some((block) => block.type === "tool_use")) {
+    // OpenBuild: nor is a reply with no visible output. Claude Code drops it from its history and
+    // asks itself for a visible one ("[Your previous response had no visible output…]", a request
+    // the relay refuses), and the next message would be joined to that. The next request replays.
+    if (message.content.some((block) => block.type === "tool_use") || !hasVisibleOutput(message.content)) {
       this.tipHash = undefined;
       return false;
     }
@@ -1208,9 +1297,13 @@ class ClaudeProcess {
     return true;
   }
 
-  /** True once the current turn streamed output or reached the upstream API. */
+  /**
+   * True once the current turn streamed output or reached the upstream API. OpenBuild: a request
+   * the relay couldn't rewrite was never sent, so it doesn't count: in a process that was carried
+   * on in, that is hidden history Pi's doesn't match, and the replay in a new process is the cure.
+   */
   get startedOutput(): boolean {
-    return this.delivered || this.relay.used;
+    return this.delivered || this.relay.forwarded;
   }
 
   async run(input: RunClaudeInput, continuation: boolean): Promise<RunClaudeOutput> {

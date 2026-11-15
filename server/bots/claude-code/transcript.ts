@@ -194,7 +194,28 @@ function canonicalAssistantContent(message: AssistantMessage): NativeContentBloc
   return blocks;
 }
 
+/**
+ * OpenBuild: whether a reply holds anything besides thinking and blank text. Claude Code doesn't
+ * keep a reply of its own without it: the process that got one drops it and joins the user
+ * messages around it, so its next request had one user message fewer than Pi's history ("22 user
+ * messages where Pi's history has 23") and the turn failed over to another model. (Replayed into a
+ * new process, the same reply is sent as the text "(no content)".) Such a reply is left out of the
+ * replay here, with the user messages around it joined the same way, and the process that
+ * produced it is not carried on in (see `commit()` in claude-cli.ts).
+ */
+export function hasVisibleOutput(content: NativeContentBlock[]): boolean {
+  return content.some((block) => {
+    if (block.type === "thinking" || block.type === "redacted_thinking") return false;
+    return block.type !== "text" || block.text.trim() !== "";
+  });
+}
+
 function assistantContent(message: AssistantMessage): NativeContentBlock[] {
+  const blocks = replayedAssistantContent(message);
+  return hasVisibleOutput(blocks) ? blocks : [];
+}
+
+function replayedAssistantContent(message: AssistantMessage): NativeContentBlock[] {
   const carrier = replayCarrier(message);
   if (carrier && projectionsEqual(assistantProjection(message), carrier.projection)) {
     return clone(carrier.message.content);
@@ -252,11 +273,48 @@ export function prepareFrames(messages: Message[]): NativeFrame[] {
   if (!final || final.type !== "user" || final.message.content.length === 0) {
     throw new Error("Claude Code history must end in a non-empty user or tool-result message");
   }
+  answerOpenToolCalls(frames);
 
   for (let index = 0; index < frames.length - 1; index++) {
     if (frames[index]?.type === "user") frames[index]!.shouldQuery = false;
   }
   return frames;
+}
+
+/** What pi-ai's own providers send for a tool call that has no result. */
+export const MISSING_TOOL_RESULT = "No result provided";
+
+/**
+ * OpenBuild: a tool call whose result never reached the history (the run was stopped while the
+ * tool ran, and the next message came after) gets an error result, as pi-ai's own providers give
+ * it. Claude Code added one of its own, but the relay drops whatever Claude Code adds to a user
+ * message, and the API refused the turn: "`tool_use` ids were found without `tool_result` blocks
+ * immediately after". Results go before the other content of the message that follows the call.
+ */
+function answerOpenToolCalls(frames: NativeFrame[]): void {
+  const blockOf = (value: unknown) => (value && typeof value === "object" ? (value as Record<string, unknown>) : {});
+  for (let index = 0; index < frames.length; index++) {
+    const frame = frames[index]!;
+    if (frame.type !== "assistant") continue;
+    const calls = frame.message.content.map(blockOf).filter((block) => block.type === "tool_use");
+    if (calls.length === 0) continue;
+
+    let next = frames[index + 1];
+    if (next?.type !== "user") {
+      next = { type: "user", message: { role: "user", content: [] } };
+      frames.splice(index + 1, 0, next);
+    }
+    const content = next.message.content;
+    const answered = new Set(
+      content.map(blockOf).filter((block) => block.type === "tool_result").map((block) => block.tool_use_id),
+    );
+    const missing = calls
+      .filter((call) => !answered.has(call.id))
+      .map((call) => ({ type: "tool_result", tool_use_id: call.id, content: MISSING_TOOL_RESULT, is_error: true }));
+    let results = 0;
+    while (blockOf(content[results]).type === "tool_result") results += 1;
+    content.splice(results, 0, ...missing);
+  }
 }
 
 function withoutNullVariant(schema: unknown): unknown {
