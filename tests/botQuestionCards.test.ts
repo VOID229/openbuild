@@ -208,14 +208,27 @@ test("a bot closes a card it asked: it can't be answered anymore, shows why, and
     a.throws(() => svc.answerQuestion(chat, merge.id, 'B'), /That question was closed/);
     a.equal((await routes.patchMine(chat, merge.id, { question: { answer: 'B' } })).status, 400);
     a.equal(stored(merge.id).answer, 'A');
+    // Nor can the message an answer sends reach the bot, from a tab that posts it anyway: refused,
+    // not kept, nobody woken. Any other reply to the card is a message like any other.
+    const post = (text, replyTo = merge.id) => routes.postMine(chat, { id: crypto.randomUUID(), author: 'me', text, replyTo });
+    a.equal((await post('B: Wait for me')).status, 400);
+    a.match(await (await post('A: Merge it')).text(), /That question was closed/);
+    a.equal(db.messages(chat, 50).length, count);
+    a.deepEqual(wakes, []);
+    a.equal((await post('Why did you close it?')).status, 200);
+    a.equal(db.messages(chat, 50).length, count + 1);
+    a.ok(wakes.some(([id]) => id === builder));
+    wakes.length = 0;
     // Closing it again changes nothing.
     a.match(askUser(builder, { close: merge.id, reason: 'Again' }).note, /already closed\\. Nothing changed/);
     a.equal(stored(merge.id).reason, 'You said merge in the chat');
 
-    // A card the user already answered stays as they answered it.
+    // A card the user already answered stays as they answered it. Its answer's message goes, as ever.
     setFocus(builder, chat);
     const answered = askUser(builder, { title: 'Deploy?', options: ['Yes', 'No'] });
     svc.answerQuestion(chat, answered.id, 'B');
+    a.equal((await post('B: No', answered.id)).status, 200);
+    wakes.length = 0;
     a.match(askUser(builder, { close: answered.id, answer: 'Yes', reason: 'Changed my mind' }).note, /already answered that card.*Nothing changed/);
     a.deepEqual([stored(answered.id).closed, stored(answered.id).answer, stored(answered.id).reason], [undefined, 'B', undefined]);
 
@@ -240,10 +253,14 @@ test("a bot closes a card it asked: it can't be answered anymore, shows why, and
     askUser(builder, { close: many.id, answer: 'SQLite, nightly', reason: 'Settled in the chat' });
     a.deepEqual([stored(many.id).closed, stored(many.id).answer, stored(many.id).submitted], ['bot', 'SQLite, nightly', undefined]);
     a.throws(() => svc.answerSteps(chat, many.id, ['B', 'Nightly'], true), /That card was closed/);
+    a.equal((await post('1. Database? → SQLite\\n2. When? → Nightly', many.id)).status, 400);
+    a.deepEqual(wakes, []);
     a.match(lines(), /2 in one card: 1\\. “Database\\?” \\[Postgres \\/ SQLite\\]; 2\\. “When\\?”, closed by you, settled: SQLite, nightly \\(Settled in the chat\\)\\)/);
-    // A submitted one stays as it is.
+    // A submitted one stays as it is, and its answers' message goes as ever.
     const done = askUser(builder, { questions: [{ title: 'One?' }, { title: 'Two?' }] });
     svc.answerSteps(chat, done.id, ['1', '2'], true);
+    a.equal((await post('1. One? → 1\\n2. Two? → 2', done.id)).status, 200);
+    wakes.length = 0;
     a.match(askUser(builder, { close: done.id }).note, /already answered/);
     a.equal(stored(done.id).closed, undefined);
     a.deepEqual(wakes, []);

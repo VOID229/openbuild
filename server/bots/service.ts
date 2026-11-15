@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { answersCard, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1542,6 +1542,11 @@ export function postMessage(conversationId: string, message: BotMessage, { from 
     if (message.author === "me") throw new BotsError("Side chats are between bots. You can read along.");
     if (c.huddle.closedAt) throw new BotsError(`That side chat has closed.${message.author === c.huddle.by ? " Report back in the chat it came from." : ""}`);
   }
+  // An answer to a closed card, from a tab that hadn't heard it closed (or an older one that posts it
+  // even when the card refuses the answer): it would wake the bot as if the card had been answered.
+  const card = message.author === "me" && message.replyTo ? db.getMessage(message.replyTo) : undefined;
+  const asked = card?.conversationId === conversationId ? card.message.question : undefined;
+  if (asked?.closed && answersCard(asked, message.text)) throw new BotsError(asked.steps ? "That card was closed." : "That question was closed.");
   // The friend's side gets text: a photo or poll would be in this copy alone, so it isn't posted at all.
   if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.files?.length || message.poll || message.html)) throw new BotsError("Photos, files, polls and pages aren't shared with friends yet.");
   if (message.poll) {

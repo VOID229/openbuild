@@ -161,9 +161,16 @@ interface BotsState {
    */
   /** `prepare` runs once the message shows, before it's sent (its files going up); if it throws, the message is taken back and nothing is sent. */
   post: (conversationId: string, message: Omit<BotMessage, "id" | "at"> & { id?: string; at?: number }, prepare?: () => Promise<void>) => Promise<BotMessage | undefined>;
+  /** Changes a message here only: what goes to the workspace is sent by the action that changed it. */
   patchMessage: (conversationId: string, messageId: string, patch: (m: BotMessage) => Partial<BotMessage>) => void;
-  /** The answers so far to a card of several questions, one per question (null for none yet). `submit` makes them final. */
-  answerSteps: (conversationId: string, messageId: string, answers: (string | null)[], submit: boolean) => void;
+  /**
+   * Answers a card of one question. True once the workspace has the answer, so the message that
+   * delivers it can go; false when it doesn't (the card was closed meanwhile), and the card then
+   * shows as the workspace has it.
+   */
+  answerQuestion: (conversationId: string, messageId: string, key: string) => Promise<boolean>;
+  /** The answers so far to a card of several questions, one per question (null for none yet). `submit` makes them final. True once the workspace has them, as with answerQuestion. */
+  answerSteps: (conversationId: string, messageId: string, answers: (string | null)[], submit: boolean) => Promise<boolean>;
   deleteMessage: (conversationId: string, messageId: string) => void;
   /** Add or take back a reaction. */
   /** `to` answers that reaction (by id) instead of the message. */
@@ -419,22 +426,15 @@ export const useBots = create<BotsState>()(
       return acknowledged ? full : undefined;
     },
     patchMessage: (conversationId, messageId, patch) => {
-      let answer: string | undefined;
       set((s) => ({
-        conversations: mapConversation(s.conversations, conversationId, (c) => ({
-          ...c,
-          messages: c.messages.map((m) => {
-            if (m.id !== messageId) return m;
-            const next = { ...m, ...patch(m) };
-            answer = next.question?.answer;
-            return next;
-          }),
-        })),
+        conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch(m) } : m)) })),
       }));
-      if (answer)
-        void send("PATCH", messagePath(conversationId, messageId), { question: { answer } }, { label: "Answer", check: { kind: "answer", conversationId, messageId, answer } });
     },
-    answerSteps: (conversationId, messageId, answers, submit) => {
+    answerQuestion: async (conversationId, messageId, key) => {
+      get().patchMessage(conversationId, messageId, (m) => (m.question ? { question: { ...m.question, answer: key } } : {}));
+      return !!(await send("PATCH", messagePath(conversationId, messageId), { question: { answer: key } }, { label: "Answer", check: { kind: "answer", conversationId, messageId, answer: key } }));
+    },
+    answerSteps: async (conversationId, messageId, answers, submit) => {
       set((s) => ({
         conversations: mapConversation(s.conversations, conversationId, (c) => ({
           ...c,
@@ -446,7 +446,7 @@ export const useBots = create<BotsState>()(
           }),
         })),
       }));
-      void send("PATCH", messagePath(conversationId, messageId), { question: { answers, submit } }, { label: submit ? "Answers" : "Answer", check: { kind: "answers", conversationId, messageId, answers, submit } });
+      return !!(await send("PATCH", messagePath(conversationId, messageId), { question: { answers, submit } }, { label: submit ? "Answers" : "Answer", check: { kind: "answers", conversationId, messageId, answers, submit } }));
     },
     deleteMessage: (conversationId, messageId) => {
       set((s) => ({ conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== messageId) })) }));
@@ -625,6 +625,8 @@ function landed(check: WriteCheck, conversations: Conversation[]): boolean | und
   if (check.kind === "delete") return m ? false : c.more ? undefined : true;
   if (!m) return undefined;
   if (check.kind === "reaction") return !!m.reactions?.some((r) => r.by === "me" && r.emoji === check.emoji && r.to === check.to) === check.on;
+  // A card closed meanwhile takes no answer: there's nothing left to send.
+  if ((check.kind === "answer" || check.kind === "answers") && m.question?.closed) return true;
   if (check.kind === "answer") return m.question?.answer === check.answer;
   if (check.kind === "answers") return !!m.question?.steps && !!m.question.submitted === check.submit && m.question.steps.every((step, i) => (step.answer ?? null) === (check.answers[i] ?? null));
   const mine = m.poll?.votes.find((v) => v.by === "me")?.keys ?? [];

@@ -584,7 +584,7 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
   const keep = (key: string | null) => {
     const next = { ...picked, [at]: key };
     setPicked(next);
-    useBots.getState().answerSteps(conversation.id, message.id, steps.map((s, i) => (i === at ? key : (s.answer ?? null))), false);
+    void useBots.getState().answerSteps(conversation.id, message.id, steps.map((s, i) => (i === at ? key : (s.answer ?? null))), false);
   };
   const answer = (key: string) => {
     setOwn({ ...own, [at]: "" });
@@ -601,9 +601,14 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
     const final = answers.map((s) => s.answer ?? null);
     setPicked(Object.fromEntries(final.map((a, i) => [i, a])));
     setOwn({});
-    st.answerSteps(conversation.id, message.id, final, true);
-    st.post(conversation.id, { author: "me", text: answersText(answers), replyTo: message.id });
-    noticeAnswer(conversation.id, message.author, "");
+    const text = answersText(answers);
+    // The message that delivers the answers wakes the bot, so it goes only once the card has taken
+    // them: one closed meanwhile refuses them, and then shows as closed.
+    void st.answerSteps(conversation.id, message.id, final, true).then((taken) => {
+      if (!taken) return;
+      useBots.getState().post(conversation.id, { author: "me", text, replyTo: message.id });
+      noticeAnswer(conversation.id, message.author, "");
+    });
   };
   return (
     <div
@@ -702,10 +707,12 @@ function SingleQuestion({ conversation, message }: { conversation: Conversation;
   const settled = q.answer !== undefined || !!q.closed;
   const answer = (key: string, text: string, label: string) => {
     if (settled) return;
-    const st = useBots.getState();
-    st.patchMessage(conversation.id, message.id, (m) => ({ question: { ...m.question!, answer: key } }));
-    st.post(conversation.id, { author: "me", text, replyTo: message.id });
-    noticeAnswer(conversation.id, message.author, label);
+    // As with a card of several: the answer's message goes only once the card has taken it.
+    void useBots.getState().answerQuestion(conversation.id, message.id, key).then((taken) => {
+      if (!taken) return;
+      useBots.getState().post(conversation.id, { author: "me", text, replyTo: message.id });
+      noticeAnswer(conversation.id, message.author, label);
+    });
   };
   return (
     <div className="bm-question">

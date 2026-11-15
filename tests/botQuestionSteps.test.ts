@@ -38,8 +38,9 @@ async function workspace(req: Request): Promise<Response> {
     const body = (await req.json()) as { question?: { answer?: string; answers?: (string | null)[]; submit?: boolean } };
     writes.push({ method: "PATCH", body });
     const m = stored.find((x) => x.id === id)!;
-    // As the server keeps them (server/bots/service.ts answerQuestion and answerSteps).
+    // As the server keeps them (server/bots/service.ts answerQuestion and answerSteps): a closed card refuses them.
     const q = m.question!;
+    if (q.closed) return Response.json({ error: q.steps ? "That card was closed." : "That question was closed." }, { status: 400, headers });
     if (typeof body.question?.answer === "string") m.question = { ...q, answer: body.question.answer };
     if (body.question?.answers && q.steps && !q.submitted) m.question = { ...q, steps: q.steps.map(({ answer: _, ...s }, i) => (body.question!.answers![i] ? { ...s, answer: body.question!.answers![i]! } : s)), ...(body.question.submit ? { submitted: true } : {}) };
     return Response.json(m, { headers });
@@ -351,6 +352,41 @@ describe.skipIf(!browser)("a closed card", () => {
       expect(writes).toEqual([]);
     }, 30_000);
   }
+
+  test("closed while the page still shows it open, an answer is refused and its message never goes", async () => {
+    const page = await open();
+    // Steps answered so far, as the workspace keeps them, before the bot closes both cards.
+    await page.pick("many", "SQLite");
+    await page.at("2 of 3");
+    await page.pick("many", "Every night");
+    await page.at("3 of 3");
+    await page.pick("many", "Yes");
+    await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+    for (let i = 0; i < 50 && card("many").steps![2]!.answer === undefined; i++) await Bun.sleep(50);
+    expect(card("many").steps!.map((s) => s.answer)).toEqual(["B", "A", "A"]);
+    // The bot closes a card; the page doesn't know yet.
+    const close = (id: string) => (stored.find((m) => m.id === id)!.question = { ...card(id), closed: "bot", reason: "You said so in the chat" });
+    writes = [];
+
+    // Submitting the card of several is refused, nothing is posted, and the card shows closed.
+    close("many");
+    await page.click('[data-id="many"] .bm-steps-submit');
+    await page.until(`document.querySelector('[data-id="many"] .bm-question-closed')?.textContent === "Closed · You said so in the chat"`);
+    // The single card is still open, until it's closed too: then a tap on it goes the same way.
+    expect(await page.eval<boolean>(`!!document.querySelector('[data-id="one"] .bm-own input')`)).toBe(true);
+    close("one");
+    await page.pick("one", "Yes");
+    await page.until(`document.querySelector('[data-id="one"] .bm-question-closed')?.textContent === "Closed · You said so in the chat"`);
+    await Bun.sleep(300);
+    expect(writes.map((w) => w.method)).toEqual(["PATCH", "PATCH"]);
+    expect(posts()).toEqual([]);
+    expect([card("one").answer, card("many").submitted]).toEqual([undefined, undefined]);
+    // Neither shows the answer that was refused, and neither can be answered again.
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('[data-id="one"] .bm-option-on, [data-id="many"] .bm-answered-answer')].length`)).toBe(0);
+    expect(await page.eval<number>(`[...document.querySelectorAll('[data-id="one"] .bm-question :is(button, input), [data-id="many"] .bm-question :is(button, input)')].filter((b) => !b.disabled).length`)).toBe(0);
+    // Nor is either left waiting to be sent again.
+    await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+  }, 30_000);
 
   test("an open card closes on the next load, and its box goes", async () => {
     let page = await open();

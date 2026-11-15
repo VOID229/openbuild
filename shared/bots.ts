@@ -373,6 +373,18 @@ export const answerLabel = (q: Pick<QuestionStep, "options" | "answer">): string
 /** A submitted card's answers as the one message that delivers them: each under its number, paired with its question. */
 export const answersText = (steps: QuestionStep[]): string => steps.map((s, i) => `${i + 1}. ${s.title} → ${answerLabel(s) ?? ""}`).join("\n");
 
+/**
+ * Whether a message of the user's, in reply to a card, is what answering the card sends: an option's
+ * "A: label" for a card of one question, or every answer of a card of several (answersText). Words
+ * typed as an answer read like any other reply, so they can't be told apart and don't count.
+ */
+export function answersCard(q: Question, text: string): boolean {
+  const t = text.trim();
+  if (!q.steps) return q.options.some((o) => t === `${o.key}: ${o.label}`);
+  const lines = t.split("\n");
+  return lines.length === q.steps.length && q.steps.every((s, i) => lines[i]!.startsWith(`${i + 1}. ${s.title} → `));
+}
+
 /** Up to A–J. */
 export const POLL_OPTIONS = 10;
 
