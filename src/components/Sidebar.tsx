@@ -27,7 +27,6 @@ import { arrowNav, canHover, copyText, crossfade, cx, useDismiss, useMediaQuery,
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { FilterIcon, PanelIcon, SearchIcon } from "./HeaderIcons";
-import { OpenBuildMark } from "./OpenBuildMark";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 import { BotsGlyph } from "./bots/BotAvatar";
 import { clock } from "../lib/clock";
@@ -1188,7 +1187,7 @@ export function expandBotsThread() {
   });
 }
 
-/** The footer button for that switch: OpenBots' puff to go in, a back arrow to leave. */
+/** The rail's button for that switch: OpenBots' puff to go in, a back arrow to leave. */
 export function BotsToggle() {
   const open = useStore((s) => s.botsOpen);
   return (
@@ -1523,7 +1522,7 @@ export function Sidebar() {
   const { setSidebarOpen, newChat, selectChat, openSettings, setSearchFocus } = useStore.getState();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [query, setQuery] = useState("");
-  // The search is behind a button, as in OpenBots: open while it's wanted, always on a phone.
+  // The search is behind a button, as in OpenBots: open while it's wanted, on a phone as on a desktop.
   const [searching, setSearching] = useState(false);
   const searchField = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -1720,23 +1719,22 @@ export function Sidebar() {
             <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
               <PanelIcon />
             </IconButton>
-            {mobile ? <span className="wordmark"><OpenBuildMark size={22} />OpenBuild</span> : <ModeSwitch />}
-            {!mobile && (
-              <IconButton
-                label="Search"
-                aria-pressed={searching}
-                className={cx(searching && "filter-active")}
-                // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
-                // it and then a click that opens it again.
-                onMouseDown={(e) => searching && e.preventDefault()}
-                onClick={() => {
-                  setSearching(!searching);
-                  setQuery("");
-                }}
-              >
-                <SearchIcon />
-              </IconButton>
-            )}
+            {/* The same header on a phone: its drawer swaps for OpenBots' list (toggleBots). */}
+            <ModeSwitch />
+            <IconButton
+              label="Search"
+              aria-pressed={searching}
+              className={cx(searching && "filter-active")}
+              // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
+              // it and then a click that opens it again.
+              onMouseDown={(e) => searching && e.preventDefault()}
+              onClick={() => {
+                setSearching(!searching);
+                setQuery("");
+              }}
+            >
+              <SearchIcon />
+            </IconButton>
             <FilterMenu />
           </div>
           <PluginSlot name="sidebar:header" />
@@ -1755,7 +1753,7 @@ export function Sidebar() {
             New thread
           </button>
 
-          {(searching || mobile) && (
+          {searching && (
             <label className="search">
               <Search size={14} />
               <input
@@ -1764,12 +1762,12 @@ export function Sidebar() {
                 value={query}
                 placeholder="Search threads…"
                 aria-label="Search threads"
-                autoFocus={!mobile}
+                autoFocus
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
                 // Clicking away from an empty search closes it; with something typed, it stays.
                 onBlur={(e) => {
-                  if (!mobile && !e.currentTarget.value.trim() && !e.currentTarget.closest(".search")?.contains(e.relatedTarget)) setSearching(false);
+                  if (!e.currentTarget.value.trim() && !e.currentTarget.closest(".search")?.contains(e.relatedTarget)) setSearching(false);
                 }}
               />
               {query && (
@@ -1880,8 +1878,6 @@ export function Sidebar() {
             >
               <SquareCheck size={16} />
             </button>
-            {/* On a desktop the header's switch does this; a phone's drawer keeps its wordmark. */}
-            {mobile && <BotsToggle />}
           </div>
         </div>
       </aside>

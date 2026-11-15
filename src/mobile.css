@@ -3,89 +3,6 @@
    (max-width: 768px), and what only a finger can do behind (pointer: coarse) or (hover: none).
    ========================================================================== */
 
-/* The bottom sheet (Sheet in primitives.tsx). Only touch screens open one, whatever their width. */
-.sheet-root {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-}
-
-.sheet-scrim {
-  position: absolute;
-  inset: 0;
-  background: var(--scrim);
-  opacity: 0;
-  touch-action: none;
-  transition: opacity var(--med) var(--ease-out);
-}
-
-.sheet-root[data-state="open"] .sheet-scrim {
-  opacity: 1;
-}
-
-.sheet {
-  position: absolute;
-  left: max(8px, env(safe-area-inset-left));
-  right: max(8px, env(safe-area-inset-right));
-  bottom: calc(var(--kb-h, 0px) + max(8px, env(safe-area-inset-bottom)));
-  max-width: 480px;
-  max-height: calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 24px);
-  margin: 0 auto;
-  padding: 0 6px 6px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-lg);
-  outline: none;
-  transform: translateY(calc(100% + 32px));
-  transition: transform 220ms var(--ease-out);
-}
-
-.sheet-root[data-state="open"] .sheet {
-  transform: translateY(var(--sheet-drag, 0px));
-}
-
-.sheet[data-dragging] {
-  transition: none;
-}
-
-.sheet-handle {
-  width: 36px;
-  height: 4px;
-  margin: 8px auto 6px;
-  border-radius: 2px;
-  background: var(--border-strong);
-}
-
-.sheet-item {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  width: 100%;
-  min-height: 48px;
-  padding: 0 14px;
-  border-radius: var(--radius-lg);
-  font-size: 16px;
-  text-align: left;
-  color: var(--text);
-  transition: background-color var(--fast) var(--ease);
-}
-
-.sheet-item:active:not(:disabled) {
-  background: var(--active);
-}
-
-.sheet-item svg {
-  flex: none;
-  color: var(--text-2);
-}
-
-.sheet-item:disabled {
-  opacity: 0.45;
-}
-
 /* What holding a bubble brings up (MessageMenu in BotChat.tsx): the bubble lifted where it was over
    the dimmed conversation, its reactions just above and its actions just below. Only touch screens
    open it. The padding is the room it keeps from the screen's edges. */
@@ -389,7 +306,6 @@
   .chip,
   .segment,
   .menu-item,
-  .sheet-item,
   .settings-nav-item,
   .select-trigger,
   .reasoning-toggle,
@@ -412,7 +328,6 @@
   .chip:active,
   .segment:active,
   .menu-item:active,
-  .sheet-item:active,
   .settings-nav-item:active,
   .select-trigger:active,
   .reasoning-toggle:active,
@@ -530,20 +445,10 @@
     gap: 0;
     height: 52px;
     margin: 0;
-    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
   }
 
-  .bots-wordmark {
-    position: static;
-    flex: 1;
-    justify-content: flex-start;
-    gap: 9px;
-    font-size: 30px;
-    font-weight: 700;
-    text-align: left;
-  }
-
-  .bots-sidebar .brand-row > .wordmark + * {
+  .bots-sidebar .mode-switch {
     margin-left: 0;
   }
 
@@ -656,22 +561,6 @@
     width: 44px;
     height: 44px;
     color: var(--text);
-  }
-
-  /* The way back to the threads says where it goes. */
-  .bots-sidebar .bots-toggle {
-    gap: 6px;
-    width: auto;
-    height: 44px;
-    padding: 0 12px;
-    display: flex;
-    align-items: center;
-    font-size: 15.5px;
-    color: var(--text);
-  }
-
-  .bots-sidebar .bots-toggle::after {
-    content: "Threads";
   }
 
   /* --- The chat's bar: back, who it is, and what they're doing. --- */
@@ -946,7 +835,7 @@
     font-size: 15px;
   }
 
-  /* --- The composer: a pill with an add button, the text, and a mic that turns into send. --- */
+  /* --- The composer: the desktop's box and controls, clear of the home indicator. --- */
 
   .bots-dock {
     position: relative;
@@ -954,56 +843,14 @@
     background: var(--surface);
   }
 
-  .bots-dock .stash {
-    width: calc(100% - 44px);
-  }
-
-  .bots-composer {
-    border-radius: 23px;
-    box-shadow: none;
-    background: var(--surface-2);
-  }
-
-  .bots-composer-row {
-    gap: 0;
-    padding: 2px;
-  }
-
-  .bots-composer-btn {
-    flex: none;
-    width: 42px;
-    height: 42px;
-  }
-
-  .bots-composer-add {
-    color: var(--text-2);
-  }
-
+  /* The keyboard takes most of the screen: a long draft scrolls inside the box instead. */
   .bots-composer-input {
     max-height: min(148px, 30dvh);
-    padding: 10px 6px 10px 2px;
-    line-height: 22px;
     -webkit-overflow-scrolling: touch;
   }
 
   .bots-composer-textarea::placeholder {
     white-space: nowrap;
-  }
-
-  /* One button at the end of the field: nothing to send yet is a mic, and text makes it send. */
-  .bots-send {
-    display: none;
-    width: 38px;
-    height: 38px;
-    margin: 2px;
-  }
-
-  .bots-send-on {
-    display: grid;
-  }
-
-  .bots-composer-row:has(.bots-send-on) .bots-mic:not(.dictation-listening) {
-    display: none;
   }
 
   .bots-reply-bar {
@@ -1333,18 +1180,6 @@
     padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 
-  .composer {
-    padding: 8px 6px 6px 12px;
-    border-radius: 24px;
-    box-shadow: none;
-    background: var(--surface-2);
-  }
-
-  .composer-input {
-    line-height: 1.4;
-    padding-top: 4px;
-  }
-
   .attach-btn,
   .composer-controls .round-btn {
     width: 40px;
@@ -1365,19 +1200,6 @@
   .sidebar:not(.bots-sidebar) .settings-row .icon-btn {
     width: 42px;
     height: 42px;
-  }
-
-  /* A phone's footers have their switches and no room beside them: the release gets a line below. */
-  .sidebar .settings-row {
-    flex-wrap: wrap;
-  }
-
-  .sidebar .release-label {
-    order: 1;
-    flex: 0 1 100%;
-    justify-content: flex-start;
-    margin: 0 0 -2px 4px;
-    padding: 4px;
   }
 
   /* The same easing as OpenBots' panes. */
@@ -1434,18 +1256,6 @@
   }
 }
 
-/* One button at the end of the composer, as in OpenBots: a mic until there's something to send. On the
-   narrowest phones the mic gives way entirely (see styles.css), so send stays put there. */
-@media (min-width: 375px) and (max-width: 768px) {
-  .round-btn-send:disabled {
-    display: none;
-  }
-
-  .composer-controls:has(.round-btn-send:not(:disabled)) .round-btn-mic:not(.dictation-listening) {
-    display: none;
-  }
-}
-
 /* Keyboard shortcuts mean nothing without a keyboard. */
 @media (pointer: coarse) {
   .menu-hint,
@@ -1462,8 +1272,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sheet,
-  .sheet-scrim,
   .bm-hold-scrim,
   .bm-hold-stack,
   .bm-hold-reactions,

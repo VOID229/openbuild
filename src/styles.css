@@ -5737,11 +5737,7 @@ p.key-status svg {
     margin-bottom: 22px;
   }
 
-  .composer {
-    padding: 12px 10px 8px 14px;
-    border-radius: 22px;
-  }
-
+  /* The desktop's box (radius, hairline, padding); the keyboard leaves less room for a long draft. */
   .composer-input {
     max-height: 30dvh;
   }
