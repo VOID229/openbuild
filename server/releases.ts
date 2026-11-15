@@ -9,8 +9,10 @@ export type Track = "stable" | "nightly";
 /** Every tag in the canonical repository, and the commit it names. */
 export type RemoteTags = Record<string, string>;
 const ROOT = resolve(import.meta.dir, "..");
-const REPO = "https://github.com/VOID229/openbuild.git";
-const RELEASES = "https://github.com/VOID229/openbuild/releases/tag/";
+// Releases come from here, whatever a checkout's origin says. The repository moved from
+// VOID229/openbuild, which GitHub redirects: checkouts cloned from there still update from here.
+const REPO = "https://github.com/dkod-ai/openbuild.git";
+const RELEASES = "https://github.com/dkod-ai/openbuild/releases/tag/";
 const statePath = () => join(dataDir(), "release-track.json");
 const cachePath = () => join(dataDir(), "release-cache.json");
 const FRESH_FOR = 60 * 60_000, RETRY_AFTER = 5 * 60_000;

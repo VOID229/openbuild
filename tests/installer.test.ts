@@ -32,7 +32,7 @@ function install(tags: string[], nightly = false, wrapper = false, curlFails = f
     const { mkdirSync, writeFileSync } = require("node:fs");
     const args = process.argv.slice(2);
     if (args[0] === "ls-remote") {
-      if (args.at(-1) !== "https://github.com/VOID229/openbuild.git" || !args.includes("--tags")) process.exit(2);
+      if (args.at(-1) !== "https://github.com/dkod-ai/openbuild.git" || !args.includes("--tags")) process.exit(2);
       for (const tag of JSON.parse(process.env.TEST_TAGS)) console.log("0123abcd\\trefs/tags/" + tag);
       process.exit(0);
     }
