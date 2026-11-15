@@ -7,7 +7,7 @@ import { budgetCacheMarkers, MAX_CACHE_MARKERS, rewriteInitialRequest } from "..
 import claudeCodeExtension from "../server/bots/claude-code/index.ts";
 import type { NativeFrame } from "../server/bots/claude-code/native-types.ts";
 import { createClaudeCodeProvider, KEEP_LOGIN_FAILED_CHECKS, KEEP_LOGIN_MS } from "../server/bots/claude-code/provider.ts";
-import { nativeToolUseId } from "../server/bots/claude-code/transcript.ts";
+import { MISSING_TOOL_RESULT, nativeToolUseId, prepareFrames, prepareMessages, prepareNativeTranscript } from "../server/bots/claude-code/transcript.ts";
 import { allProfiles, providerId } from "../server/bots/claude.ts";
 import { spawnScript } from "./spawnScript";
 
@@ -622,6 +622,361 @@ test("status, discovery and requests for each login never see the server's Claud
       a.ok(launches.filter((l) => l.dir === dirs[1]).every((l) => l.kind === "status"), "the second login only ever had its status asked");
       process.exit(0);
     `, { ...ambient, HOME: root, SIGNED_IN_DIR: dirs[0], LAUNCH_LOG: join(root, "launches.jsonl"), AMBIENT_NAMES: JSON.stringify(Object.keys(ambient)) });
+    expect(err + out).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);
+
+// ------------------------------------------------------------------ Pi's history against the request Claude Code builds
+
+// A bot's history as Pi holds it, in the shapes of the session that failed over: a compacted summary,
+// a kept turn that starts at a reply (the split turn), notices that arrive with tool results, and
+// replies with thinking only.
+const OPUS = { provider: "claude-code", api: "claude-code-stream-json", id: "claude-opus-5-5" } as any;
+const piUser = (...content: unknown[]) => ({ role: "user", content, timestamp: 1 }) as any;
+const piSaid = (...content: unknown[]) => ({ role: "assistant", content, provider: OPUS.provider, api: OPUS.api, model: OPUS.id, stopReason: content.some((b: any) => b.type === "toolCall") ? "toolUse" : "stop", timestamp: 1 }) as any;
+const piResult = (id: string, text: string) => ({ role: "toolResult", toolCallId: id, toolName: "bash", content: [{ type: "text", text }], isError: false, timestamp: 1 }) as any;
+const piText = (text: string) => ({ type: "text", text });
+const piThinking = (thinking: string) => ({ type: "thinking", thinking, thinkingSignature: "c2lnbmF0dXJl" });
+const piCall = (id: string) => ({ type: "toolCall", id, name: "bash", arguments: { command: "gh pr view" } });
+const piImage = () => ({ type: "image", mimeType: "image/png", data: "aGk=" });
+const framesOf = (messages: unknown[]) => prepareFrames(prepareMessages(messages as any, OPUS));
+const shape = (frames: NativeFrame[]) =>
+  frames.map((f) => `${f.type}: ${f.message.content.map((b: any) => (b.type === "tool_result" ? `result ${b.tool_use_id}${b.is_error ? " (error)" : ""}` : b.type === "tool_use" ? `call ${b.id}` : b.type === "text" ? b.text : b.type)).join(" | ")}`);
+
+const SUMMARY = "The conversation history before this point was compacted into the following summary: ## Goal …";
+const NOTICE = (n: number) => `Conversation dd8e6bad (direct, “Dr Eggbot”):\nTo-do list, 2/8 done …\n[${n}] Outis: next?`;
+
+test("a reply with no visible output is left out of the replay, and the messages around it are one", () => {
+  const history = [
+    piUser(piText(SUMMARY)),
+    piSaid(piText("The connectors plan is complete.")),
+    piUser(piText(NOTICE(1))),
+    piSaid(piThinking("Check the PR."), piCall("toolu_a"), piCall("toolu_b")),
+    piResult("toolu_a", "Sent as [fc7fb3de]"),
+    piResult("toolu_b", "Sent as [803cbe02]"),
+    // The reply that failed the next request over: signed thinking, no text, no tool call.
+    piSaid(piThinking("Both sent. Nothing more to say.")),
+    piUser(piText(NOTICE(2))),
+  ];
+  expect(shape(framesOf(history))).toEqual([
+    `user: ${SUMMARY}`,
+    "assistant: The connectors plan is complete.",
+    `user: ${NOTICE(1)}`,
+    "assistant: thinking | call toolu_a | call toolu_b",
+    `user: result toolu_a | result toolu_b | ${NOTICE(2)}`,
+  ]);
+  // The same for blank text, with or without thinking before it, and for redacted thinking.
+  for (const blank of [[piText("\n\n")], [piThinking("Hm."), piText(" ")], [{ ...piThinking("[Reasoning redacted]"), redacted: true }]]) {
+    expect(shape(framesOf([piUser(piText("first")), piSaid(...blank), piUser(piText("second"))]))).toEqual(["user: first | second"]);
+  }
+  // Thinking beside something visible stays as it was.
+  expect(shape(framesOf([piUser(piText("first")), piSaid(piThinking("Hm."), piText("A reply.")), piUser(piText("second"))]))).toEqual(["user: first", "assistant: thinking | A reply.", "user: second"]);
+});
+
+test("tool changes after a reply with no visible output are placed by the replies that are replayed", () => {
+  const tool = (name: string) => ({ name, description: name, parameters: { type: "object", properties: {} } });
+  const system = (extra: Record<string, unknown>) => ({ role: "system", content: "", timestamp: 1, ...extra });
+  const history = [
+    system({ content: "You are a bot.", toolsAdded: [tool("bash")] }),
+    piUser(piText("first")),
+    piSaid(piText("A reply.")),
+    piUser(piText("second")),
+    piSaid(piThinking("Nothing to say.")),
+    system({ toolsAdded: [tool("search")] }),
+    piUser(piText("third")),
+    piSaid(piText("Another reply.")),
+    piUser(piText("fourth")),
+  ];
+  const frames = framesOf(history);
+  expect(shape(frames)).toEqual(["user: first", "assistant: A reply.", "user: second | third", "assistant: Another reply.", "user: fourth"]);
+  // "search" arrives before the second reply that is sent: the request's assistant message 1, not 2.
+  const plan = prepareNativeTranscript(prepareMessages(history as any, OPUS), true)!;
+  expect(plan.systemInjections.map((i) => i.beforeAssistant)).toEqual([1]);
+});
+
+test("a tool call that never got a result is answered with an error result, before the next message's content", () => {
+  // The production 400: the run was stopped while `bash` ran, and the next message came after.
+  const history = [
+    piUser(piText(NOTICE(1))),
+    piSaid(piThinking("Look at the logs."), piCall("toolu_019xgC")),
+    piUser(piText(NOTICE(2)), piImage()),
+  ];
+  const frames = framesOf(history);
+  expect(shape(frames)).toEqual([`user: ${NOTICE(1)}`, "assistant: thinking | call toolu_019xgC", `user: result toolu_019xgC (error) | ${NOTICE(2)} | image`]);
+  expect(frames[2]!.message.content[0]).toEqual({ type: "tool_result", tool_use_id: "toolu_019xgC", content: MISSING_TOOL_RESULT, is_error: true });
+  // One of two answered: the other gets its result beside it, ahead of the notice.
+  expect(shape(framesOf([piUser(piText("first")), piSaid(piCall("toolu_a"), piCall("toolu_b")), piResult("toolu_b", "done"), piUser(piText("second"))]))).toEqual([
+    "user: first",
+    "assistant: call toolu_a | call toolu_b",
+    "user: result toolu_b | result toolu_a (error) | second",
+  ]);
+  // Answered calls are left alone, and a call followed by another reply gets a message for its result.
+  const answered = [piUser(piText("first")), piSaid(piCall("toolu_a")), piResult("toolu_a", "done"), piSaid(piText("ok")), piUser(piText("second"))];
+  expect(shape(framesOf(answered))).toEqual(["user: first", "assistant: call toolu_a", "user: result toolu_a", "assistant: ok", "user: second"]);
+  const between = framesOf([piUser(piText("first")), piSaid(piCall("toolu_a")), piSaid(piText("carried on")), piUser(piText("second"))]);
+  expect(shape(between)).toEqual(["user: first", "assistant: call toolu_a", "user: result toolu_a (error)", "assistant: carried on", "user: second"]);
+  expect(between.map((f) => f.shouldQuery)).toEqual([false, undefined, false, undefined, undefined]);
+});
+
+// The request Claude Code 2.1 builds, as captured from the real binary: its environment message after
+// the first user message, the date at the tail, and its own additions inside user messages.
+const wireText = (text: string, extra: Record<string, unknown> = {}) => ({ type: "text", text, ...extra });
+const wireResult = (id: string, content: string) => ({ type: "tool_result", tool_use_id: id, content, is_error: false });
+const wireCall = (id: string) => ({ type: "tool_use", id, name: "mcp__pi__bash", input: { command: "gh pr view" } });
+const ENVIRONMENT = { role: "system", content: "# Environment\nYou have been invoked in the following environment: …" };
+const DATE = { role: "system", content: [wireText("Today's date is 2026-11-15.", { cache_control: { type: "ephemeral" } })] };
+const NUDGE = "[Your previous response had no visible output. Please continue and produce a user-visible response.]\n";
+const frame = (type: "user" | "assistant", ...content: unknown[]): NativeFrame => ({ type, message: { role: type, content } });
+const rewritten = (messages: unknown[], frames: NativeFrame[], injections?: { beforeAssistant: number | null; content: Record<string, unknown>[] }[]) =>
+  JSON.parse(rewriteInitialRequest(Buffer.from(JSON.stringify({ system: [], messages })), frames, undefined, injections).toString()).messages as { role: string; content: any[] }[];
+const withoutMarkers = (content: any[]) => content.map(({ cache_control, ...block }) => block);
+
+test("user messages Claude Code joined are filled from each of Pi's they hold, and what it added is dropped", () => {
+  // The production failure, "22 user messages where Pi's history has 23", in small. A process that is
+  // carried on in after its own reply with no visible output has dropped that reply, kept the line it
+  // asked itself for a visible one with, and joined the next notice to the tool results before it.
+  const frames = [
+    frame("user", wireText(SUMMARY)),
+    frame("assistant", wireText("The connectors plan is complete.")),
+    frame("user", wireText(NOTICE(1))),
+    frame("assistant", wireCall("toolu_a"), wireCall("toolu_b")),
+    frame("user", wireResult("toolu_a", "Sent as [fc7fb3de]"), wireResult("toolu_b", "Sent as [803cbe02]")),
+    frame("assistant", { type: "thinking", thinking: "Both sent.", signature: "c2lnbmF0dXJl" }),
+    frame("user", wireText(NOTICE(2)), { type: "image", source: { type: "base64", media_type: "image/png", data: "aGk=" } }),
+  ];
+  const native = [
+    { role: "user", content: [wireText(SUMMARY)] },
+    ENVIRONMENT,
+    { role: "assistant", content: [wireText("The connectors plan is complete.")] },
+    { role: "user", content: [wireText(NOTICE(1))] },
+    { role: "assistant", content: [wireCall("toolu_a"), wireCall("toolu_b")] },
+    {
+      role: "user",
+      content: [
+        // Claude Code also appends to tool results; Pi's text is what is sent.
+        wireResult("toolu_a", "Sent as [fc7fb3de]\n<system-reminder>native</system-reminder>"),
+        wireResult("toolu_b", "Sent as [803cbe02]"),
+        wireText(NUDGE),
+        wireText(NOTICE(2)),
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "c21hbGxlcg==" } },
+        wireText("[Image: original 2000x1000, displayed at 1000x500. Multiply coordinates by 2.]", { cache_control: { type: "ephemeral" } }),
+      ],
+    },
+    DATE,
+  ];
+  const output = rewritten(native, frames);
+  expect(output.map((m) => m.role)).toEqual(["user", "system", "assistant", "user", "assistant", "user", "system"]);
+  expect(withoutMarkers(output[5]!.content)).toEqual([
+    { ...wireResult("toolu_a", "Sent as [fc7fb3de]") },
+    { ...wireResult("toolu_b", "Sent as [803cbe02]") },
+    wireText(NOTICE(2)),
+    // Claude Code's downscaled copy of the image, and its note on the scale, as in any other message.
+    { type: "image", source: { type: "base64", media_type: "image/png", data: "c21hbGxlcg==" } },
+    wireText("[Image: original 2000x1000, displayed at 1000x500. Multiply coordinates by 2.]"),
+  ]);
+  expect(JSON.stringify(output)).not.toContain("no visible output");
+  // Its cache breakpoint stays on the message.
+  expect(output[5]!.content.at(-1).cache_control).toEqual({ type: "ephemeral" });
+  expect(withoutMarkers(output[3]!.content)).toEqual([wireText(NOTICE(1))]);
+});
+
+test("several joined messages in one request, and text Claude Code ended with a newline when it joined", () => {
+  const frames = [
+    frame("user", wireText("first")),
+    frame("assistant", { type: "thinking", thinking: "one", signature: "c2ln" }),
+    frame("user", wireText("second"), wireText("a second block")),
+    frame("assistant", { type: "thinking", thinking: "two", signature: "c2ln" }),
+    frame("user", wireText("third")),
+    frame("assistant", wireText("A reply.")),
+    frame("user", wireText("fourth")),
+    frame("assistant", { type: "thinking", thinking: "three", signature: "c2ln" }),
+    frame("user", wireText("fifth")),
+  ];
+  const native = [
+    { role: "user", content: [wireText("first\n"), wireText(NUDGE), wireText("second"), wireText("a second block\n"), wireText(NUDGE), wireText("third")] },
+    ENVIRONMENT,
+    { role: "assistant", content: [wireText("A reply.")] },
+    { role: "user", content: [wireText("fourth\n"), wireText(NUDGE), wireText("fifth")] },
+    DATE,
+  ];
+  const output = rewritten(native, frames);
+  expect(withoutMarkers(output[0]!.content)).toEqual([wireText("first"), wireText("second"), wireText("a second block"), wireText("third")]);
+  expect(withoutMarkers(output[3]!.content)).toEqual([wireText("fourth"), wireText("fifth")]);
+
+  // A tool change Pi placed before a reply the request doesn't have goes before the next one that is
+  // there, or at the tail when none is.
+  const change = (name: string) => [{ type: "tool_addition", tool: { type: "tool_reference", name } }];
+  const injected = rewritten(native, frames, [
+    { beforeAssistant: 1, content: change("mcp__pi__one") },
+    { beforeAssistant: 2, content: change("mcp__pi__two") },
+    { beforeAssistant: 3, content: change("mcp__pi__three") },
+    { beforeAssistant: null, content: change("mcp__pi__four") },
+  ]);
+  const order = injected.map((m) => (m.role === "system" && Array.isArray(m.content) && m.content[0]?.tool ? m.content[0].tool.name.slice(9) : m.role));
+  expect(order).toEqual(["user", "system", "one", "two", "assistant", "user", "system", "three", "four"]);
+});
+
+test("a history that can't be placed in the request still fails it, and nothing is moved to another message", () => {
+  const frames = [
+    frame("user", wireText("first")),
+    frame("assistant", { type: "thinking", thinking: "one", signature: "c2ln" }),
+    frame("user", wireText("second")),
+    frame("assistant", wireCall("toolu_a")),
+    frame("user", wireResult("toolu_a", "done"), wireText("third")),
+  ];
+  const reply = { role: "assistant", content: [wireCall("toolu_a")] };
+  const tail = { role: "user", content: [wireResult("toolu_a", "done"), wireText("third")] };
+  // As Claude Code joins them: placed.
+  expect(rewritten([{ role: "user", content: [wireText("first\n"), wireText(NUDGE), wireText("second")] }, reply, tail], frames).length).toBe(3);
+  // Pi's second message isn't in the joined one (other text, or missing): refused, as before.
+  for (const joined of [[wireText("first\n"), wireText("something else")], [wireText("first")], [wireText("second"), wireText("first")]]) {
+    expect(() => rewritten([{ role: "user", content: joined }, reply, tail], frames)).toThrow(/2 user messages where Pi's history has 3/);
+  }
+  // A frame is never taken from the message it belongs to, to fill an earlier one that looks alike.
+  const alike = [frame("user", wireText("ping")), frame("assistant", { type: "thinking", thinking: "one", signature: "c2ln" }), frame("user", wireText("ping")), frame("assistant", wireText("pong")), frame("user", wireText("ping"))];
+  const placed = rewritten([{ role: "user", content: [wireText("ping\n"), wireText(NUDGE), wireText("ping")] }, { role: "assistant", content: [wireText("pong")] }, { role: "user", content: [wireText("ping")] }], alike);
+  expect(placed.map((m) => m.content.length)).toEqual([2, 1, 1]);
+  // A user message of Claude Code's own, one more than Pi has, is refused too.
+  expect(() => rewritten([{ role: "user", content: [wireText("first")] }, { role: "user", content: [wireText("extra")] }], [frame("user", wireText("first"))])).toThrow(/2 user messages where Pi's history has 1/);
+  // With as many messages as Pi has, a tool result in the wrong one is still caught.
+  const shifted = [frame("user", wireText("first")), frame("assistant", wireCall("toolu_a")), frame("user", wireResult("toolu_a", "done"))];
+  expect(() => rewritten([{ role: "user", content: [wireText("first")] }, reply, { role: "user", content: [wireText("(no content)")] }], shifted)).toThrow(/lost a tool_result block/);
+});
+
+/**
+ * A Claude Code that sends its requests through the bridge's relay and keeps its own history, as the
+ * real one does: user messages in a row are one message, and a reply with no visible output is
+ * dropped, with a line asking for a visible one in its place and a second request (which the relay
+ * refuses). With DRIFT set, a process that has answered once has a user message Pi never sent.
+ */
+const RELAY_CLI = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const readline = require("node:readline");
+if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, authMethod: "claude.ai", subscriptionType: "max" })); process.exit(0); }
+const out = (v) => console.log(JSON.stringify(v));
+const usage = { input_tokens: 3, output_tokens: 1 };
+const history = [];
+let answered = 0;
+const messages = () => {
+  const joined = [];
+  for (const m of history) {
+    const last = joined.at(-1);
+    if (m.role === "user" && last?.role === "user") last.content.push(...m.content);
+    else joined.push({ role: m.role, content: [...m.content] });
+  }
+  return joined;
+};
+const send = async () => {
+  const response = await fetch(process.env.ANTHROPIC_BASE_URL + "/v1/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ system: [], messages: messages() }) });
+  return { ok: response.ok, text: await response.text() };
+};
+(async () => {
+  for await (const line of readline.createInterface({ input: process.stdin })) {
+    const frame = JSON.parse(line);
+    const echo = frame.uuid ? { user_message_uuids: [frame.uuid] } : {};
+    if (process.env.DRIFT && answered > 0 && frame.type === "user") history.push({ role: "user", content: [{ type: "text", text: "a message Pi never sent" }] });
+    history.push({ role: frame.message.role, content: frame.message.content });
+    if (frame.shouldQuery === false) { out({ type: "result", num_turns: 0, ...echo }); continue; }
+    if (frame.type !== "user") continue;
+    appendFileSync(process.env.LAUNCH_LOG, JSON.stringify({ pid: process.pid }) + "\\n");
+    const reply = await send();
+    answered += 1;
+    if (!reply.ok) { out({ type: "result", subtype: "error_during_execution", is_error: true, usage, ...echo }); continue; }
+    if (reply.text.includes("text_delta")) history.push({ role: "assistant", content: [{ type: "text", text: "ok" }] });
+    else {
+      history.push({ role: "user", content: [{ type: "text", text: "[Your previous response had no visible output. Please continue and produce a user-visible response.]" }] });
+      await send();
+    }
+    out({ type: "result", subtype: "success", is_error: false, usage, ...echo });
+  }
+})();
+`;
+
+test("a reply with no visible output isn't carried on from, and a request that can't be rewritten is replayed in a new process", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-claude-replay-"));
+  try {
+    const cli = join(root, "claude");
+    writeFileSync(cli, RELAY_CLI);
+    chmodSync(cli, 0o755);
+    const { code, stderr: err, stdout: out } = await spawnScript(`
+      import { strict as a } from "node:assert";
+      import { readFileSync } from "node:fs";
+      import { createServer } from "node:http";
+      const bridge = await import("./server/bots/claude-code/claude-cli.ts");
+
+      // The API: thinking alone when the last message asks for it, else "ok". It keeps what it was sent.
+      const sent = [];
+      const usage = { input_tokens: 3, output_tokens: 1 };
+      const sse = (events) => events.map((e) => "event: " + e.type + "\\ndata: " + JSON.stringify(e) + "\\n\\n").join("");
+      const api = createServer(async (request, response) => {
+        const chunks = [];
+        for await (const chunk of request) chunks.push(chunk);
+        const body = JSON.parse(Buffer.concat(chunks).toString());
+        sent.push(body.messages);
+        const thinking = JSON.stringify(body.messages.at(-1).content.at(-1)).includes("THINK");
+        response.writeHead(200, { "content-type": "text/event-stream" }).end(sse([
+          { type: "message_start", message: { id: "msg_1", role: "assistant", content: [], stop_reason: null, usage } },
+          { type: "content_block_start", index: 0, content_block: thinking ? { type: "thinking", thinking: "", signature: "" } : { type: "text", text: "" } },
+          { type: "content_block_delta", index: 0, delta: thinking ? { type: "thinking_delta", thinking: "Nothing to say." } : { type: "text_delta", text: "ok" } },
+          ...(thinking ? [{ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "c2ln" } }] : []),
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: "end_turn" }, usage },
+          { type: "message_stop" },
+        ]));
+      });
+      await new Promise((resolve) => api.listen(0, "127.0.0.1", resolve));
+      const upstreamUrl = "http://127.0.0.1:" + api.address().port;
+
+      const env = { PI_CLAUDE_CODE_COMMAND: ${JSON.stringify(cli)}, CLAUDE_CONFIG_DIR: ${JSON.stringify(root)} };
+      const past = (frame) => (frame.type === "user" ? { ...frame, shouldQuery: false } : frame);
+      const text = (value) => ({ type: "text", text: value });
+      const user = (...values) => ({ type: "user", message: { role: "user", content: values.map(text) } });
+      const said = (...content) => ({ type: "assistant", message: { role: "assistant", content } });
+      const ask = (frames, extra = {}) => bridge.runClaudeRequest({ model: "sonnet", frames: [...frames.slice(0, -1).map(past), frames.at(-1)], systemPrompt: "system", manifest: [], extraBody: {}, env, upstreamUrl, ...extra });
+      const pids = () => readFileSync(process.env.LAUNCH_LOG, "utf8").trim().split("\\n").map((l) => JSON.parse(l).pid);
+      const texts = (messages) => messages.map((m) => m.role + ": " + m.content.map((b) => b.text ?? b.type).join(" | "));
+
+      // A reply with thinking and nothing else. Its process has asked itself for a visible one and
+      // keeps that line: it is closed, not kept for the next request.
+      const thought = await ask([user("THINK about it")], { sessionId: "one" });
+      a.deepEqual(thought.message.content.map((b) => b.type), ["thinking"]);
+      a.equal(thought.relay.blockedRequests, 1);
+      a.equal(bridge.cachedClaudeProcessCount(), 0);
+      // The next request, as Pi's history is replayed now: the reply left out, both messages in one.
+      a.equal((await ask([user("THINK about it", "and then?")], { sessionId: "one" })).message.content[0].text, "ok");
+      a.deepEqual(texts(sent.at(-1)), ["user: THINK about it | and then?"]);
+      a.notEqual(pids()[1], pids()[0]);
+      // And with the reply still in the history, which the closed process would have carried on from.
+      await bridge.closeClaudeProcesses();
+      await ask([user("THINK twice")], { sessionId: "two" });
+      const before = pids().length;
+      const reply = said({ type: "thinking", thinking: "Nothing to say.", signature: "c2ln" });
+      a.equal((await ask([user("THINK twice"), reply, user("and then?")], { sessionId: "two" })).message.content[0].text, "ok");
+      a.notEqual(pids()[before], pids()[before - 1]);
+      a.ok(!JSON.stringify(sent).includes("no visible output"), "Claude Code's own line reached the API");
+
+      // A process that is carried on in, with a history Pi's can't be placed in: the request is never
+      // sent, and is replayed in a new process instead of failing the turn.
+      await bridge.closeClaudeProcesses();
+      const drift = { sessionId: "three", env: { ...env, DRIFT: "1" } };
+      a.equal((await ask([user("hello")], drift)).message.content[0].text, "ok");
+      a.equal(bridge.cachedClaudeProcessCount(), 1);
+      const requests = sent.length;
+      const start = pids().length;
+      const again = await ask([user("hello"), said(text("ok")), user("again")], drift);
+      a.equal(again.message.content[0].text, "ok");
+      a.equal(sent.length, requests + 1);
+      a.deepEqual(texts(sent.at(-1)), ["user: hello", "assistant: ok", "user: again"]);
+      // Tried where it was carried on (the first process of the three), answered in a new one.
+      a.deepEqual([pids()[start] === pids()[start - 1], pids()[start + 1] === pids()[start]], [true, false]);
+
+      await bridge.closeClaudeProcesses();
+      api.close();
+      process.exit(0);
+    `, { HOME: root, LAUNCH_LOG: join(root, "launches.jsonl") });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {

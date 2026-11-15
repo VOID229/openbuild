@@ -132,6 +132,8 @@ export function describeFailure(error: unknown): string {
 export class TurnRelay {
   capture: AnthropicCapture;
   used = false;
+  /** OpenBuild: the turn's request, rewritten, was sent on to the API. `used` is set when it arrives. */
+  forwarded = false;
   denied = 0;
   status?: number;
   requestId?: string;
@@ -190,6 +192,7 @@ export class TurnRelay {
     if (this.active.size > 0) throw new Error("Claude Code turn relay still has an active request");
     this.capture = new AnthropicCapture(onEvent);
     this.used = false;
+    this.forwarded = false;
     this.denied = 0;
     this.status = undefined;
     this.requestId = undefined;
@@ -284,6 +287,7 @@ export class TurnRelay {
       if (this.transformRequest) body = this.transformRequest(body);
       this.requestBody = Buffer.from(body);
       if (this.cancelled) return;
+      this.forwarded = true;
       trace("api-request", { bytes: body.length, ...requestSizes(body) });
 
       const headers: http.OutgoingHttpHeaders = {};
