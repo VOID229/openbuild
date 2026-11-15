@@ -373,6 +373,14 @@
   [data-keyboard] .bots-dock {
     padding-bottom: 6px;
   }
+
+  /* The desktop's composer, with buttons a finger can hit: 40px, as the thread composer's are. */
+  .bots-composer-btn,
+  .bots-send {
+    flex: none;
+    width: 40px;
+    height: 40px;
+  }
 }
 
 /* ---------------------------------------------------------------- phones */

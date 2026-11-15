@@ -107,4 +107,33 @@ describe.skipIf(!browser)("phone layout", () => {
     // A group's two buttons before the text, not one that opens a sheet of them.
     expect(await page.eval<(string | null)[]>("[...document.querySelectorAll('.bots-composer-row > .bots-composer-btn')].slice(0, 2).map((b) => b.getAttribute('aria-label'))")).toEqual(["Add files", "New poll"]);
   }, 60_000);
+
+  test("a bot chat's composer buttons are a finger's size on a touch screen, and the desktop's with a mouse", async () => {
+    const page = await Page.open(chrome!.ws, server!.url.href, 1280, 800, READY);
+    await page.eval("store.setState({ botsOpen: true, botsSidebarOpen: true }); bots.setState({ activeId: 'dev' })");
+    await page.until("!!document.querySelector('.bots-composer')");
+    await page.finish();
+    expect(await page.eval<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(false);
+    // With a mouse, the desktop's 34px tools and 36px send.
+    expect(await targets(page)).toEqual({ buttons: [34, 34, 34], send: 36 });
+    // A phone with a touch screen.
+    await resize(page, PHONE.width, PHONE.height);
+    await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+    await page.until("matchMedia('(pointer: coarse)').matches");
+    await page.eval("store.setState({ botsSidebarOpen: false })");
+    await page.finish();
+    const touch = await targets(page);
+    expect(touch.buttons.length).toBe(3);
+    for (const size of [...touch.buttons, touch.send]) expect(size).toBeGreaterThanOrEqual(40);
+  }, 60_000);
 });
+
+/** The smaller side of each of the bot composer's buttons (files, poll, mic) and of its send button. */
+const targets = (page: Page) =>
+  page.eval<{ buttons: number[]; send: number }>(`(() => {
+    const side = (el) => { const r = el.getBoundingClientRect(); return Math.round(Math.min(r.width, r.height)); };
+    return {
+      buttons: [...document.querySelectorAll('.bots-composer-row .bots-composer-btn')].map(side),
+      send: side(document.querySelector('.bots-composer-row .bots-send')),
+    };
+  })()`);
