@@ -43,6 +43,10 @@ export interface Wake {
   lead?: string;
   /** Messages that answer something this bot asked another bot (see settleHandoffs): shown as its answer. */
   replies?: string[];
+  /** The conversation this came from, when it's another: a bot working there posted it (BotStatus.from). */
+  from?: string;
+  /** A routine's turn: the routine's title (BotStatus.routine). */
+  routine?: string;
 }
 
 type Hooks = {
@@ -1515,7 +1519,11 @@ function mentionedBots(text: string, ids: string[]): string[] {
   return [...new Set(tags.map((t) => t.bot!.id))];
 }
 
-export function postMessage(conversationId: string, message: BotMessage): BotMessage {
+/**
+ * `from`: the conversation the author's turn is working in, when it writes somewhere else. Whoever its
+ * message wakes works on that chat's account, and other chats can say so (BotStatus.from).
+ */
+export function postMessage(conversationId: string, message: BotMessage, { from }: { from?: string } = {}): BotMessage {
   const c = db.getConversation(conversationId);
   if (!c) throw new BotsError("No such conversation.", 404);
   checkMessage(message);
@@ -1587,7 +1595,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     if (message.author !== "me" && !friendHere) noteHandoffs(c, message, seq, targets);
     // Several bots asked at once: one answers, and the others add only what's theirs.
     const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets, talking) : undefined;
-    for (const botId of targets) if (!skip.has(botId)) wakeUp(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
+    for (const botId of targets) if (!skip.has(botId)) wakeUp(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}), ...(from && from !== conversationId ? { from } : {}) });
   }
   return message;
 }
@@ -2131,7 +2139,7 @@ export function tick(busy: (botId: string) => boolean) {
       text: "",
       event: { kind: "routine", text: routine.followUp ? "Followed up" : "Ran a routine", detail: routine.title },
     });
-    wakeUp(botId, { kind: "routine", conversationId, text });
+    wakeUp(botId, { kind: "routine", conversationId, text, routine: routine.title });
   }
   if (settings().onboarding === "active") {
     // Waiting on Pi with a tab open: look again, in case it was set up from a terminal.

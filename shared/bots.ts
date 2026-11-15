@@ -116,6 +116,14 @@ export interface BotStatus {
    * them. It's free to take a message anywhere.
    */
   threads?: number;
+  /**
+   * The chat its turn is about, when that isn't the one it's working in: the work came from there (a
+   * bot there handed it over or posted about it, or a side chat opened from there). Another chat shows
+   * that the bot is busy elsewhere on its account ("posting about this in…").
+   */
+  from?: string;
+  /** Its turn is one of its routines: this one, by title. */
+  routine?: string;
   since?: number;
 }
 
@@ -174,6 +182,9 @@ export const betweenTurns = (status: Pick<BotStatus, "jobs" | "threads"> | undef
  */
 export const WORKING_PHRASES = ["Working on it", "Getting it done", "Making progress", "Sorting it out", "Keeping at it"] as const;
 export const workingPhrase = (n = 0): string => WORKING_PHRASES[((Math.trunc(n) % WORKING_PHRASES.length) + WORKING_PHRASES.length) % WORKING_PHRASES.length]!;
+
+/** What a routine's turn says it's on until the bot names a step of its own (steps.ts, startLine). */
+export const ROUTINE_START = "Getting started on a routine";
 
 /** The status while a bot's words are on their way to the chat: text it's streaming, or a message it's sending. */
 export const WRITING_REPLY = "Writing a reply";

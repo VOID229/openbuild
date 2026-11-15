@@ -328,6 +328,16 @@ export function waitingIn(botId: string): string[] {
   return [...new Set(ids)];
 }
 
+/** What each bot's turn is about, besides where it runs (BotStatus.from, .routine): every status of the turn carries it. */
+const about = new Map<string, Pick<BotStatus, "from" | "routine">>();
+
+/** Where a turn's work came from, when not its own chat, and the routine it is, if one. */
+function turnAbout(jobs: Wake[], conversationId: string | undefined): Pick<BotStatus, "from" | "routine"> {
+  const from = jobs.find((j) => j.from && j.from !== conversationId)?.from ?? db.getConversation(conversationId ?? "")?.huddle?.from;
+  const routine = jobs.find((j) => j.kind === "routine" && j.routine)?.routine;
+  return { ...(from && from !== conversationId && { from }), ...(routine && { routine }) };
+}
+
 function setStatus(botId: string, next: BotStatus) {
   // A retired bot shows nothing going on: the threads it started carry on, and report to the primary.
   if (svc.retired(botId)) return svc.setStatus(botId, { state: "idle" });
@@ -344,7 +354,7 @@ function setStatus(botId: string, next: BotStatus) {
   // A message waiting in the chat it's working in isn't quiet work: the chat shows it busy until it gets there.
   // In a group, the bot is still to decide whether that one is its to answer too.
   const owed = !!next.quiet && !next.deciding && (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === next.conversationId);
-  svc.setStatus(botId, { ...next, quiet: owed ? undefined : next.quiet, waiting: waiting.length ? waiting : undefined, undecided: undecided.length ? undecided : undefined });
+  svc.setStatus(botId, { ...next, ...(next.state === "working" && about.get(botId)), quiet: owed ? undefined : next.quiet, waiting: waiting.length ? waiting : undefined, undecided: undecided.length ? undecided : undefined });
   // The chat shows it at work: the first the user sees of this turn.
   if (next.state === "working" && (!next.quiet || owed)) meters.get(botId)?.status();
 }
@@ -1026,7 +1036,7 @@ export function pendingAssignments(botId: string) {
 async function run(botId: string, all: Wake[]) {
   activeAssignments.set(botId, all);
   try { await runTurn(botId, all); }
-  finally { activeAssignments.delete(botId); }
+  finally { activeAssignments.delete(botId); about.delete(botId); }
 }
 
 async function runTurn(botId: string, all: Wake[]) {
@@ -1044,6 +1054,7 @@ async function runTurn(botId: string, all: Wake[]) {
   halted.delete(botId);
   if (nothingNew(botId, jobs, conversationId)) return;
   setFocus(botId, conversationId);
+  about.set(botId, turnAbout(jobs, conversationId));
   // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a
   // group that's this bot's to answer. The others asked with it are only deciding whether to add anything.
   const direct = db.getConversation(conversationId ?? "")?.kind === "direct";

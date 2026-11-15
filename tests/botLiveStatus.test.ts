@@ -344,6 +344,53 @@ test("a group bot still deciding shows nothing, and shows its step the moment it
   await over(prompt);
 `), 30_000);
 
+test("a turn that came from another chat says where from, every status of it, and a routine's turn says which routine", () => run("from", `
+  const betaId = beta.bot.id;
+  const betaStatus = () => svc.getStatus(betaId);
+  const betaPrompts = () => prompts.filter((p) => p.bot === betaId);
+  // Alpha, at work in its own chat, asks Beta in the group: Beta's turn there is on that chat's account.
+  const prompt = await turn(own, 'ask Beta in Team to check the build');
+  a.equal(status().from, undefined);
+  const asked = await agent.sendMessage(alpha.bot.id, { conversation: group.id.slice(0, 8), text: '@Beta can you check the build?' });
+  a.ok(!asked.note, JSON.stringify(asked));
+  await until(() => betaPrompts().length === 1);
+  a.equal(betaStatus().conversationId, group.id);
+  a.equal(betaStatus().from, own);
+  // A step later, still.
+  const betaMind = minds.get(betaId);
+  runner.onRecord(betaId, betaMind, { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'b1', toolName: 'bash' } });
+  a.equal(betaStatus().activity, 'Running a command');
+  a.equal(betaStatus().from, own);
+  betaPrompts()[0].finish();
+  await until(() => !runner.busy(betaId));
+  a.equal(betaStatus(), undefined);
+  await over(prompt);
+  // Asked in the group itself, its turn is the group's own.
+  post(group.id, 'me', '@Beta and the docs?');
+  await until(() => betaPrompts().length === 2);
+  a.equal(betaStatus().conversationId, group.id);
+  a.equal(betaStatus().from, undefined);
+  betaPrompts()[1].finish();
+  await until(() => !runner.busy(betaId));
+
+  // A side chat opened from the group: the turns in it are on the group's account.
+  const huddle = svc.createConversation({ kind: 'side', name: 'Build', botIds: [alpha.bot.id, beta.bot.id], huddle: { by: alpha.bot.id, from: group.id, topic: 'Build', limit: 6 } });
+  post(huddle.id, alpha.bot.id, '@Beta which shard failed?');
+  await until(() => betaPrompts().length === 3);
+  a.equal(betaStatus().conversationId, huddle.id);
+  a.equal(betaStatus().from, group.id);
+  betaPrompts()[2].finish();
+  await until(() => !runner.busy(betaId));
+
+  // A routine's turn names the routine, and nothing else of the turn does.
+  runner.wake(alpha.bot.id, { kind: 'routine', conversationId: own, text: 'Routine “Morning digest”. Sum up the news', routine: 'Morning digest' });
+  await until(() => prompts.length && status()?.routine === 'Morning digest' && mind.steerable);
+  a.equal(line(), 'Getting started on a routine');
+  a.equal(status().from, undefined);
+  await over(prompts.at(-1));
+  a.equal(status(), undefined);
+`), 30_000);
+
 test("a fallback taking over says so, until that model gets going", () => run("fallback", `
   // The switch is logged for the server's owner; it isn't this test's subject.
   console.warn = () => {};
