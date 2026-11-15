@@ -313,6 +313,34 @@ test("an answer and the message that delivers it are saved by one request, so a 
     await patch(many.id, { answers: ['B', 'Nightly'], submit: true, reply: sent });
     a.equal(replies(many.id).length, 1);
 
+    // A stale tab answers again in between, then the first answer is retried: the retry was delivered
+    // already, so it changes nothing and can't put the older answer back over the newer one.
+    const twice = askUser(builder, { title: 'Ship it?', options: ['Yes', 'No'] });
+    const first = { answer: 'A', reply: crypto.randomUUID() }, second = { answer: 'B', reply: crypto.randomUUID() };
+    await patch(twice.id, first);
+    await patch(twice.id, second);
+    wakes.length = 0;
+    const retried = await patch(twice.id, first);
+    a.equal(retried.status, 200);
+    a.equal((await retried.json()).question.answer, 'B');
+    a.equal(stored(twice.id).answer, 'B');
+    a.deepEqual(replies(twice.id).map(m => [m.id, m.text]), [[first.reply, 'A: Yes'], [second.reply, 'B: No']]);
+    a.deepEqual(wakes, []);
+    // A card of several can't be: once submitted, its answers are final, and a later submit or retry changes nothing.
+    const final = askUser(builder, { questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }, { title: 'When?' }] });
+    const sub1 = { answers: ['B', 'Nightly'], submit: true, reply: crypto.randomUUID() }, sub2 = { answers: ['A', 'Hourly'], submit: true, reply: crypto.randomUUID() };
+    await patch(final.id, sub1);
+    await patch(final.id, sub2);
+    await patch(final.id, sub1);
+    a.deepEqual(stored(final.id).steps.map(s => s.answer), ['B', 'Nightly']);
+    a.deepEqual(replies(final.id).map(m => m.id), [sub1.reply]);
+    // An id another message already has is refused before the card changes.
+    const taken = askUser(builder, { title: 'Tag the release?', options: ['Yes'] });
+    a.equal((await patch(taken.id, { answer: 'A', reply: twice.id })).status, 400);
+    a.equal((await patch(taken.id, { answer: 'A', reply: first.reply })).status, 400);
+    a.deepEqual([stored(taken.id).answer, replies(taken.id).length], [undefined, 0]);
+    wakes.length = 0;
+
     // A closed card refuses the answer, and so posts nothing.
     const closed = askUser(builder, { title: 'Rotate the key?', options: ['Yes', 'No'] });
     askUser(builder, { close: closed.id, reason: 'Rotated already' });

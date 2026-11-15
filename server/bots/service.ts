@@ -1877,11 +1877,25 @@ function deliverAnswer(conversationId: string, card: BotMessage, before: Questio
   }
 }
 
+/**
+ * Whether the message delivering an answer is already posted: the request is a replay (a retry after
+ * a lost acknowledgement), and that answer was saved and delivered then. The card is left as it is
+ * now, so a replay can't put an older answer back over a newer one. An id taken by any other message
+ * is refused before anything changes.
+ */
+function delivered(conversationId: string, messageId: string, reply: string | undefined): boolean {
+  const sent = reply ? db.getMessage(reply) : undefined;
+  if (!sent) return false;
+  if (sent.conversationId !== conversationId || sent.message.author !== "me" || sent.message.replyTo !== messageId) throw new BotsError("That message id already exists.");
+  return true;
+}
+
 /** `reply` is the id for the message that delivers the answer (deliverAnswer); without one, the app posts it. */
 export function answerQuestion(conversationId: string, messageId: string, key: string, reply?: string) {
   const row = db.getMessage(messageId);
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
+  if (delivered(conversationId, messageId, reply)) return row.message;
   // Not a 409: that tells the app its workspace is gone.
   if (question.closed) throw new BotsError(question.closed === "bot" ? "That question was closed." : "That question was settled in its thread.");
   if (question.steps) throw new BotsError("That card asks several questions: answer them together.");
@@ -1929,7 +1943,7 @@ export function answerSteps(conversationId: string, messageId: string, answers: 
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question?.steps) throw new BotsError("That message isn't a card of several questions.", 404);
   // Sent again after it landed (a retry): it stays as submitted, and its answers' message was posted with it.
-  if (question.submitted) return row.message;
+  if (question.submitted || delivered(conversationId, messageId, reply)) return row.message;
   if (question.closed) throw new BotsError("That card was closed.");
   assertAnswerable(conversationId, row.message.author);
   const steps = question.steps.map(({ answer: _, ...step }, i): QuestionStep => {
