@@ -95,5 +95,6 @@
   "tests/botChatStill.test.ts": 35.4,
   "tests/botSendScroll.test.ts": 13.2,
   "tests/threadSendScroll.test.ts": 10.0,
-  "tests/worktreeCancel.test.ts": 13.0
+  "tests/worktreeCancel.test.ts": 13.0,
+  "tests/releaseUpdate.test.ts": 26.0
 }

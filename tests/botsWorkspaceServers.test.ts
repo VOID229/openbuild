@@ -473,6 +473,24 @@ test("this server's own session manages its bots on the bound route; a device ne
   expect(((await hostSnapshot()) as any).settings.defaultModel).toBe("owner/choice");
 }, 20_000);
 
+test("only this server's own session can update or restart it: a paired device is refused before anything is checked or run", async () => {
+  const asDevice = { authorization: `Bearer ${token}` };
+  // The device's token is a real one: it reaches what a paired device may use.
+  expect((await fetch(`${hostBase()}/api/config`, { headers: asDevice })).status).toBe(200);
+  for (const [path, method] of [["/api/releases", "GET"], ["/api/releases?fresh=1", "GET"], ["/api/releases/update", "POST"], ["/api/releases/restart", "GET"], ["/api/releases/restart", "POST"]] as const) {
+    const res = await fetch(`${hostBase()}${path}`, { method, headers: asDevice });
+    expect({ path, method, status: res.status }).toEqual({ path, method, status: 403 });
+  }
+  // No update was started for it: no maintenance job exists.
+  expect((await fetch(`${hostBase()}/api/pi/job`)).status).toBe(204);
+  // The server's own session gets through to the route, which has nothing installed to restart onto
+  // (and so restarts nothing here).
+  const own = await fetch(`${hostBase()}/api/releases/restart`, { method: "POST" });
+  expect(own.status).toBe(409);
+  expect(((await own.json()) as { error: string }).error).toBe("No installed update is waiting for a restart");
+  expect(await (await fetch(`${hostBase()}/api/releases/restart`)).json()).toEqual({ pending: false });
+}, 20_000);
+
 test("a reaction sent again while its first try is still on its way ends as asked, once", async () => {
   const message = myMessage("react to me");
   expect((await via(`/api/bots/conversations/${conversation}/messages`, { method: "POST", ...json(message) })).status).toBe(200);

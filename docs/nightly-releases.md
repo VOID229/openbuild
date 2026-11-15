@@ -94,9 +94,48 @@ when it starts (`server/version.ts`) and sends it with `/api/config`:
   `.release-ref` as it makes the archive (`export-subst` in `.gitattributes`),
   and the server reads that instead.
 - A version promoted after it was installed shows as stable once the release
-  check (at most hourly) has seen its plain tag.
+  check (every five minutes with the app open, otherwise at most hourly) has
+  seen its plain tag.
 - With nothing to go on (an archive of an untagged commit, a history without
   release tags), the sidebar shows no version.
 
 An update moves the checkout on, but the label keeps naming the release the
 server started as until it restarts.
+
+## Updating from the app
+
+Beside that label is a small button that does what `ob update` and
+`ob restart` do, without a terminal. It follows the installation's track
+(`ob --set-track stable|nightly`):
+
+- **Refresh** (↻): nothing newer is known. A click asks the repository
+  (`git ls-remote --tags`, as every check does), the wheel turning while it
+  does. An open app also asks by itself every five minutes, and when its tab
+  comes back into view or online; several tabs share one answer.
+- **Download** (↓): a newer release is out. Hovering lists what it changes: the
+  subjects of the commits between the checkout and the release (every merge is
+  one commit and one version), read with git from the same repository. A click
+  installs it: the server runs `ob update` as a maintenance job, and each step
+  that command prints (checking, downloading, installing dependencies) moves
+  the ring round the icon on. If it fails, the card over the button says why,
+  in `ob update`'s own words, and a click tries again.
+- **Restart** (⟳): the release is installed and the running server is still the
+  old one. A click runs `ob restart` and reloads the page once the new server
+  answers. Turns that are running carry on, as with `ob restart`.
+
+On a touch screen there is no hover, so a tap opens the card first (the
+changelog, then a button to install or restart).
+
+The notice at the top of the window (Settings → Notifications → builds) offers
+the same update and shares its state: started from either, it shows in both.
+
+Only the server's own signed-in browser session can check, install or restart:
+`/api/releases`, `/api/releases/update` and `/api/releases/restart` are not
+among the routes a paired device's token may call (`devicePathAllowed`,
+`server/index.ts`). OpenBuild has no finer roles than that: whoever can sign in
+to a server owns it.
+
+The pieces: `server/releases.ts` (checks, changelog, install, restart),
+`shared/releaseUpdate.ts` (the wire format and the step lines),
+`src/lib/releaseUpdate.ts` (the app's state), `src/components/ReleaseUpdate.tsx`
+(the button and its card).

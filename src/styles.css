@@ -2096,6 +2096,446 @@ select.input {
   }
 }
 
+/* The release and the button that updates it (components/ReleaseUpdate.tsx), kept together. */
+.release {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+
+/* Its three icons lie on top of each other, one showing: the refresh (check for an update), the
+   download (one is out), the restart (it's installed). Going from one to the next, the old one turns
+   on out of sight as the new one turns in, so they change hands rather than swap. */
+.release-update {
+  position: relative;
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--text-3);
+  transition: color 260ms var(--ease-out), background-color 260ms var(--ease-out);
+}
+
+/* A finger's worth of target around so small a button. */
+@media (pointer: coarse) {
+  .release-update {
+    margin-left: 4px;
+  }
+
+  .release-update::before {
+    content: "";
+    position: absolute;
+    inset: -9px -6px;
+  }
+}
+
+@media (hover: hover) {
+  .release-update:hover {
+    background: var(--surface-2);
+    color: var(--text-2);
+  }
+}
+
+.release-update:focus-visible {
+  color: var(--text-2);
+}
+
+.release-update[data-view="available"],
+.release-update[data-view="installing"] {
+  color: var(--accent);
+}
+
+.release-update[data-view="ready"],
+.release-update[data-view="restarting"] {
+  color: var(--ok);
+}
+
+@media (hover: hover) {
+  .release-update[data-view="available"]:hover {
+    background: var(--accent-bg);
+    color: var(--accent);
+  }
+
+  .release-update[data-view="ready"]:hover,
+  .release-update[data-view="restarting"]:hover {
+    background: color-mix(in srgb, var(--ok) 12%, transparent);
+    color: var(--ok);
+  }
+}
+
+.release-update-icon {
+  display: grid;
+  grid-area: 1 / 1;
+  place-items: center;
+  opacity: 0;
+  scale: 0.5;
+  transition:
+    opacity 160ms var(--ease-out),
+    scale 340ms var(--ease-out),
+    rotate 340ms var(--ease-out);
+}
+
+.release-update-icon > span {
+  display: grid;
+}
+
+/* An icon the state has moved past has turned on; one still to come waits a quarter turn back. */
+.release-update-icon[data-at="-1"] {
+  rotate: 90deg;
+}
+
+.release-update-icon[data-at="1"] {
+  rotate: -90deg;
+}
+
+.release-update-icon[data-at="0"] {
+  opacity: 1;
+  scale: 1;
+  transition:
+    opacity 240ms var(--ease-out) 70ms,
+    scale 380ms var(--ease-out) 40ms,
+    rotate 380ms var(--ease-out) 40ms;
+}
+
+/* Installing: the arrow falls into the tray, again and again, inside a ring that fills as the update
+   moves through its steps (checking, downloading, installing dependencies). Git and the package
+   manager report no percentage to a pipe, so within a step the ring creeps on, ever slower, towards
+   the next: it shows that the step is alive and which one it is, and jumps on when it ends. */
+.release-update-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0;
+  rotate: -90deg;
+  pointer-events: none;
+  /* Going: once the ring has closed (or the update has failed), and only then emptied. */
+  transition: opacity 280ms var(--ease-out) 220ms;
+}
+
+.release-update-ring circle:first-child {
+  stroke: currentColor;
+  opacity: 0.2;
+}
+
+.release-update-ring circle:last-child {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 0s 600ms;
+}
+
+.release-update[data-view="installing"] .release-update-ring {
+  opacity: 1;
+  transition: opacity 240ms var(--ease-out);
+}
+
+.release-update[data-step="check"] .release-update-ring circle:last-child {
+  stroke-dashoffset: 0.9;
+  transition: stroke-dashoffset 900ms var(--ease-out);
+}
+
+.release-update[data-step="download"] .release-update-ring circle:last-child {
+  stroke-dashoffset: 0.5;
+  transition: stroke-dashoffset 14s cubic-bezier(0.1, 0.7, 0.2, 1);
+}
+
+.release-update[data-step="install"] .release-update-ring circle:last-child {
+  stroke-dashoffset: 0.08;
+  transition: stroke-dashoffset 28s cubic-bezier(0.1, 0.7, 0.2, 1);
+}
+
+/* Installed: the ring closes before it goes. */
+.release-update[data-view="ready"] .release-update-ring circle:last-child {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 240ms var(--ease-out);
+}
+
+.release-update[data-view="installing"] .release-update-icon[data-at="0"] {
+  scale: 0.8;
+}
+
+/* The arrow is the icon's shaft and head (its first and third paths); the tray stays put. */
+.release-update[data-view="installing"] .release-update-icon[data-icon="download"] path:not(:nth-child(2)) {
+  animation: release-arrow 1150ms cubic-bezier(0.45, 0, 0.25, 1) infinite;
+}
+
+@keyframes release-arrow {
+  0% {
+    opacity: 0;
+    translate: 0 -8px;
+  }
+  30% {
+    opacity: 1;
+  }
+  62% {
+    opacity: 1;
+    translate: 0 0;
+  }
+  86%,
+  100% {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
+/* Installed and waiting for a restart: a halo opens out from the button and fades, slowly, over and
+   over. Done, in no hurry, still there. The first one waits for the ring to close and go. */
+.release-update::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--ok);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.release-update[data-view="ready"] {
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.release-update[data-view="ready"]::after {
+  animation: release-waiting 2800ms var(--ease-out) 700ms infinite;
+}
+
+@keyframes release-waiting {
+  0% {
+    opacity: 0;
+    scale: 0.9;
+  }
+  18% {
+    opacity: 0.42;
+  }
+  72%,
+  100% {
+    opacity: 0;
+    scale: 1.42;
+  }
+}
+
+/* Something went wrong, and is said in the card: a mark that it's there to read. */
+.release-update-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 1.5px var(--surface);
+  opacity: 0;
+  scale: 0.4;
+  transition: opacity 200ms var(--ease-out), scale 320ms var(--ease-out);
+}
+
+.release-update[data-failed] .release-update-dot {
+  opacity: 1;
+  scale: 1;
+}
+
+/* What the button says, above it: a tooltip in looks, with the changelog, the step or the error in it,
+   and on a touch screen the button that acts. */
+.release-card {
+  position: fixed;
+  z-index: 300;
+  left: 0;
+  top: 0;
+  width: max-content;
+  max-width: min(288px, calc(100vw - 16px));
+  padding: 8px 10px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: var(--ink-fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  letter-spacing: 0;
+  box-shadow: var(--shadow-md);
+  visibility: hidden;
+  --tip-from: translateY(3px);
+}
+
+:root[data-theme="dark"] .release-card {
+  border-color: var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.release-card[data-state="open"] {
+  visibility: visible;
+  animation: tip-in var(--fast) var(--ease-out) both;
+}
+
+.release-card[data-side="bottom"] {
+  --tip-from: translateY(-3px);
+}
+
+.release-card p {
+  margin: 0;
+}
+
+.release-card-title {
+  font-weight: 600;
+}
+
+.release-card-sub,
+.release-card-hint,
+.release-card-more {
+  opacity: 0.66;
+}
+
+.release-card-changes {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.release-card-changes li {
+  position: relative;
+  display: -webkit-box;
+  padding-left: 11px;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.release-card-changes li:not(.release-card-more)::before {
+  content: "";
+  position: absolute;
+  top: 0.6em;
+  left: 1px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.5;
+}
+
+.release-card-hint {
+  margin-top: 7px !important;
+  font-size: 11px;
+}
+
+/* The update's own words: as long as they are, and no wider or taller than the card can be. */
+.release-card-error {
+  max-height: 132px;
+  margin-top: 4px !important;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  opacity: 0.86;
+}
+
+/* The update's three steps: done, the one it's on (breathing), and to come. */
+.release-card-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  min-width: 168px;
+  margin-top: 8px;
+}
+
+.release-card-steps span {
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.22;
+  transition: opacity 320ms var(--ease-out);
+}
+
+.release-card-steps [data-step="done"] {
+  opacity: 0.9;
+}
+
+.release-card-steps [data-step="now"] {
+  animation: release-step 1400ms ease-in-out infinite alternate;
+}
+
+@keyframes release-step {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 0.9;
+  }
+}
+
+.release-card-action {
+  display: block;
+  width: 100%;
+  min-height: 34px;
+  margin-top: 9px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--ink-fg);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+:root[data-theme="dark"] .release-card-action {
+  background: var(--text);
+  color: var(--surface);
+}
+
+/* Reduced motion: nothing turns, falls or pulses. The icons change by fading, a check dims the wheel
+   while it's out, the ring still shows the step (at once, without creeping), and a restart that is
+   waiting keeps a still halo. */
+@media (prefers-reduced-motion: reduce) {
+  .release-update,
+  .release-update-icon,
+  .release-update-dot,
+  .release-update-ring,
+  .release-update-ring circle,
+  .release-card-steps span {
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+  }
+
+  .release-update-icon {
+    rotate: none !important;
+    scale: 1 !important;
+  }
+
+  .release-update[data-view="checking"] .release-update-icon[data-at="0"],
+  .release-update[data-view="restarting"] .release-update-icon[data-at="0"] {
+    opacity: 0.5;
+  }
+
+  .release-update[data-view="installing"] .release-update-icon[data-icon="download"] path {
+    animation: none !important;
+  }
+
+  .release-update[data-view="ready"]::after {
+    animation: none;
+    opacity: 0.4;
+    scale: 1.2;
+  }
+
+  .release-card[data-state="open"],
+  .release-card-steps [data-step="now"] {
+    animation: none;
+  }
+
+  .release-card-steps [data-step="now"] {
+    opacity: 0.6;
+  }
+}
+
 /* The first toggle keeps clear of the name, even when the sidebar is at its narrowest. */
 .settings-row .usage-toggle {
   margin-left: 6px;

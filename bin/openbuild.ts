@@ -18,6 +18,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, 
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { checkRelease, installRelease, releaseTrack, setReleaseTrack } from "../server/releases";
+import { UPDATE_STEP_LABEL, updateStepLine } from "../shared/releaseUpdate";
 import { ask, confirm } from "./prompt";
 import { chooseStartPort } from "./startPort";
 import { stage } from "./motion";
@@ -898,14 +899,19 @@ if (service) {
   }
   case "update": {
     try {
-      const CHECKING = "Checking for a new release", DOWNLOADING = "Downloading", INSTALLING = "Installing dependencies";
+      const { check: CHECKING, download: DOWNLOADING, install: INSTALLING } = UPDATE_STEP_LABEL;
       const animated = stage.open({ scene: "update", power: 0, steps: [CHECKING, DOWNLOADING, INSTALLING] });
       stage.update({ power: 1 });
       let changed = false;
-      const result = await installRelease(undefined, animated ? (step, tag) => {
+      // Without the stage (a pipe, or the app running this for its own update button), each step is a
+      // line of its own, which the app reads as progress (shared/releaseUpdate.ts), and dependency
+      // output follows as it always did.
+      if (!animated) console.log(updateStepLine("check"));
+      const result = await installRelease(undefined, (step, tag) => {
         changed = true;
-        stage.step(step === "download" ? DOWNLOADING : INSTALLING, step === "download" ? tag : undefined);
-      } : undefined);
+        if (animated) stage.step(step === "download" ? DOWNLOADING : INSTALLING, step === "download" ? tag : undefined);
+        else console.log(updateStepLine(step, step === "download" ? tag : undefined));
+      }, animated);
       // Nothing to install: leave only the check that ran.
       if (!changed) stage.update({ steps: [{ label: CHECKING }], current: 0 });
       stage.end();

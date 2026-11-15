@@ -1,6 +1,7 @@
 import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { appRelease, isHosted } from "../lib/runtime";
 import { channelName, releaseLabel } from "../../shared/version";
+import { ReleaseUpdate } from "./ReleaseUpdate";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -1209,6 +1210,9 @@ export function BotsToggle() {
  * opening out beside it on hover or keyboard focus (styles.css, .release-version), as the bot's name does
  * in OpenBots' header. Without hover a tap shows it, and another tap or one elsewhere puts it away. Its
  * name is always the whole label. Nothing when nothing names a release.
+ *
+ * Beside it, the button that updates OpenBuild (ReleaseUpdate.tsx): the server this app is served by,
+ * so not on the website, which has none.
  */
 export function ReleaseLabel() {
   const release = appRelease();
@@ -1222,21 +1226,24 @@ export function ReleaseLabel() {
   }, [shown]);
   if (!release) return null;
   return (
-    <button
-      ref={ref}
-      type="button"
-      className={cx("release-label", shown && "release-label-shown")}
-      aria-label={releaseLabel(release)}
-      onClick={() => setShown((s) => !s)}
-      onBlur={() => setShown(false)}
-    >
-      <span aria-hidden>{channelName(release.channel)}</span>
-      <span className="release-version" aria-hidden>
-        <span>
-          <span>{release.version}</span>
+    <span className="release">
+      <button
+        ref={ref}
+        type="button"
+        className={cx("release-label", shown && "release-label-shown")}
+        aria-label={releaseLabel(release)}
+        onClick={() => setShown((s) => !s)}
+        onBlur={() => setShown(false)}
+      >
+        <span aria-hidden>{channelName(release.channel)}</span>
+        <span className="release-version" aria-hidden>
+          <span>
+            <span>{release.version}</span>
+          </span>
         </span>
-      </span>
-    </button>
+      </button>
+      {!isHosted() && <ReleaseUpdate />}
+    </span>
   );
 }
 
