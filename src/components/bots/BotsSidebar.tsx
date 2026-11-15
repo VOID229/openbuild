@@ -104,10 +104,13 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const away = useAwayLines(conversation?.id ?? "", conversation?.kind === "direct" ? conversation.botIds[0] : undefined);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
+  // Placed by its size, so again once a busy bot's line has settled on the words that fit (FitText).
+  const [fitted, setFitted] = useState(0);
+  const refit = useCallback(() => setFitted((n) => n + 1), []);
   useLayoutEffect(() => {
     if (!peek || !ref.current) return setPos(undefined);
     setPos(place(peek, ref.current.offsetWidth, ref.current.offsetHeight));
-  }, [peek]);
+  }, [peek, fitted]);
   if (!peek || !conversation) return null;
   const [title, tag] = conversationName(conversation, bots).split(" · ");
   return createPortal(
@@ -125,7 +128,12 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           Between {betweenNames(conversation, bots)}
         </span>
       )}
-      <span className="bots-peek-preview">{typing ? TYPING : (waiting ?? (away ? awayAlone(away)[0] : previewOf(conversation, bots)))}</span>
+      {/* Busy elsewhere: as much of what it's doing as its two lines hold, a long name left out whole (FitText). */}
+      {!typing && !waiting && away ? (
+        <FitText className="bots-peek-preview bots-peek-away" lines={awayAlone(away)} onFit={refit} />
+      ) : (
+        <span className="bots-peek-preview">{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
+      )}
     </div>,
     document.body,
   );

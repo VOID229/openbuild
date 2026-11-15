@@ -145,15 +145,17 @@ export function useAwayLines(conversationId: string, botId: string | undefined):
 }
 
 /**
- * One line of text, said the most exact way that fits its box: the first of `lines` that does, so a
+ * A line of text, said the most exact way that fits its box: the first of `lines` that does, so a
  * name is left out whole ("in another group") rather than cut off. The last one is shown however it
- * fits. Its box clips (overflow hidden, one line). It looks again from the first when its words change,
+ * fits. Its box clips: one line (overflow hidden, nowrap), or a few (a line clamp), and words that
+ * spill past it either way don't fit. `onFit` hears once it has settled on one, for a box placed by
+ * its size (a hover card). It looks again from the first when its words change,
  * or when its box grows wider than it was when the words last didn't fit: a box that's as wide as its
  * words narrows with shorter ones, and that's no reason to try the longer ones again. Such a box never
  * grows with the room around it either: `within` names the closest ancestor whose width it's watched
  * by instead.
  */
-export function FitText({ lines, within, className, ...rest }: { lines: string[]; within?: string; className?: string } & React.HTMLAttributes<HTMLSpanElement>) {
+export function FitText({ lines, within, onFit, className, ...rest }: { lines: string[]; within?: string; onFit?: () => void; className?: string } & React.HTMLAttributes<HTMLSpanElement>) {
   const ref = useRef<HTMLSpanElement>(null);
   const key = lines.join("\n");
   const [fit, setFit] = useState({ key, i: 0, room: Infinity });
@@ -161,9 +163,14 @@ export function FitText({ lines, within, className, ...rest }: { lines: string[]
   const i = Math.min(now.i, lines.length - 1);
   const current = useRef(now);
   current.current = now;
+  const told = useRef<string>(undefined);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el && i < lines.length - 1 && el.scrollWidth > el.clientWidth + 1) setFit({ key, i: i + 1, room: room(el) });
+    if (!el) return;
+    if (i < lines.length - 1 && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)) return setFit({ key, i: i + 1, room: room(el) });
+    if (told.current === lines[i]) return;
+    told.current = lines[i];
+    onFit?.();
   });
   const room = (el: HTMLElement) => ((within && el.closest(within)) || el).clientWidth;
   useEffect(() => {

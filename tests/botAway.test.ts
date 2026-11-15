@@ -74,3 +74,30 @@ test.skipIf(!browser)("a phone's header takes the most exact line that fits unde
   expect(wide.text).toBe("Running the test suite in the OpenBuild Dev group");
   expect(wide.fits).toBe(true);
 }, 30_000);
+
+test.skipIf(!browser)("the hover card's two lines say as much as they hold, a long group name left out whole", async () => {
+  const page = await open(1180);
+  /** Hovers Scout's row with a real mouse and reads the card's line once it's open and placed. */
+  const peek = async () => {
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 2, y: 2 });
+    await page.until("!document.querySelector('.bots-peek')");
+    const [x, y] = await page.eval<[number, number]>(`(() => { const r = [...document.querySelectorAll(".bots-row-main")].find((b) => b.querySelector(".bots-row-title")?.textContent === "Scout").getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await page.until("document.querySelector('.bots-peek')?.dataset.state === 'open' && !!document.querySelector('.bots-peek-away')", 5000);
+    await page.settle();
+    return page.eval<{ text: string; fits: boolean; lines: number; inView: boolean }>(`(() => {
+      const el = document.querySelector(".bots-peek-away"), card = document.querySelector(".bots-peek").getBoundingClientRect();
+      return { text: el.textContent, fits: el.scrollHeight <= el.clientHeight + 1 && el.scrollWidth <= el.clientWidth + 1, lines: Math.round(el.clientHeight / parseFloat(getComputedStyle(el).lineHeight)), inView: card.top >= 0 && card.bottom <= innerHeight };
+    })()`);
+  };
+  // A name that fits its two lines is said in full.
+  await work(page, "dev", "Running the test suite");
+  expect(await peek()).toEqual({ text: "Running the test suite in the OpenBuild Dev group", fits: true, lines: expect.any(Number), inView: true });
+  // One that doesn't is left out whole for "another group": never cut by the clamp.
+  await work(page, "long", "Running the test suite");
+  const long = await peek();
+  expect(long.text).toBe("Running the test suite in another group");
+  expect(long.fits).toBe(true);
+  expect(long.lines).toBeLessThanOrEqual(2);
+  expect(long.inView).toBe(true);
+}, 30_000);
