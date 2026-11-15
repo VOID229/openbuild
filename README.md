@@ -50,10 +50,10 @@ curl -fsSL https://shade-io.com/openbuild/nightly/install.sh | sh
 
 ```sh
 # stable
-curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dkod-ai/openbuild/main/install.sh | bash
 
 # nightly
-curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/nightly/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/dkod-ai/openbuild/main/nightly/install.sh | sh
 ```
 
 Installs the newest published prerelease and selects the nightly update track.
@@ -67,7 +67,7 @@ The `--yes` / `-y` flags do not answer the restart question.
 #### *Or*
 
 ```sh
-git clone https://github.com/VOID229/openbuild # clone the repo
+git clone https://github.com/dkod-ai/openbuild # clone the repo
 cd openbuild
 bun install
 bun link

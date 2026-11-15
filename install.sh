@@ -6,7 +6,9 @@
 # Rerunning over an install asks first; pass --reinstall to skip the question.
 set -eu
 
-repo=https://github.com/VOID229/openbuild.git
+repo=https://github.com/dkod-ai/openbuild.git
+# Where the repository was before it moved. GitHub redirects it, and installs cloned from it are still installs.
+former_repo=https://github.com/VOID229/openbuild.git
 steps='Checking requirements|Finding the latest release|Downloading OpenBuild|Installing dependencies|Linking the ob command'
 ui_height=15
 ui_pid=
@@ -215,11 +217,12 @@ dry_run() {
   step 5 v0.0.0; pause 0.8
 }
 
-# Installs from before the marker existed are recognised by the installer's own clone URL.
+# Installs from before the marker existed are recognised by the installer's own clone URL, old or new.
 is_install() {
   [ -d "$install_dir" ] && [ ! -L "$install_dir" ] || return 1
   [ "$(cat "$install_dir/.git/openbuild-installed" 2>/dev/null)" = "$(cd "$install_dir" && pwd -P)" ] && return 0
-  [ "$(git -C "$install_dir" remote get-url origin 2>/dev/null)" = "$repo" ]
+  origin=$(git -C "$install_dir" remote get-url origin 2>/dev/null) || return 1
+  [ "$origin" = "$repo" ] || [ "$origin" = "$former_repo" ]
 }
 
 # Runs before the animation, reading the terminal because stdin is the piped script.

@@ -61,7 +61,7 @@ export class AppAuth implements OAuthClientProvider {
   get clientMetadata(): OAuthClientMetadata {
     return {
       client_name: "OpenBuild",
-      client_uri: "https://github.com/VOID229/openbuild",
+      client_uri: "https://github.com/dkod-ai/openbuild",
       redirect_uris: this.redirect ? [this.redirect] : [],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],

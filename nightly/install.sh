@@ -8,7 +8,7 @@ main() {
   trap 'exit 130' INT
   trap 'exit 129' HUP
   trap 'exit 143' TERM
-  curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/install.sh -o "$installer"
+  curl -fsSL https://raw.githubusercontent.com/dkod-ai/openbuild/main/install.sh -o "$installer"
   sh "$installer" --nightly "$@"
 }
 

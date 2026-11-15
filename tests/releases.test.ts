@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkRelease, installRelease, knownTags, parseLsRemote, releaseTrack, restartServer, restartStatus, selectRelease, setReleaseTrack, watchInstall } from "../server/releases";
 
-const CANONICAL = "https://github.com/VOID229/openbuild.git";
+const CANONICAL = "https://github.com/dkod-ai/openbuild.git";
+/** Where the repository was before it moved to dkod-ai; existing installs still have it as origin. */
+const FORMER = "https://github.com/VOID229/openbuild.git";
 
 test("ls-remote output: tags to commits, an annotated tag by its peeled commit", () => {
   const tags = parseLsRemote([
@@ -62,7 +64,7 @@ test("tracks: the newest nightly, or the newest version promoted to stable, read
   git(source, "tag", "0.1.9-nightly");
   expect(await checkRelease(true, checkout)).toMatchObject({ latest: "0.1.8", available: false });
   setReleaseTrack("nightly");
-  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.8", latest: "0.1.9-nightly", available: true, url: "https://github.com/VOID229/openbuild/releases/tag/0.1.9-nightly" });
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.8", latest: "0.1.9-nightly", available: true, url: "https://github.com/dkod-ai/openbuild/releases/tag/0.1.9-nightly" });
 
   // Promoting adds a plain tag on the same commit: the stable track's release, and no new nightly.
   git(source, "tag", "0.1.9", nine);
@@ -154,6 +156,21 @@ test("updates fetch a release with its tags, keep branches, and roll back after 
   expect(git(checkout, "rev-parse", "HEAD")).toBe(installed);
 }));
 
+test("a checkout cloned before the move, with the old repository as origin, still checks and updates from the new one", () => withRepos(async ({ source, checkout, git, commit }) => {
+  // Its origin leads nowhere here, so only a check that asks the canonical repository finds anything.
+  git(checkout, "remote", "set-url", "origin", FORMER);
+  git(checkout, "config", `url.${join(source, "..", "gone")}.insteadOf`, FORMER);
+  expect(() => git(checkout, "ls-remote", "origin")).toThrow();
+  writeFileSync(join(source, "package.json"), JSON.stringify({ name: "release-fixture", version: "1.0.0" }));
+  git(source, "add", "."); git(source, "commit", "-q", "-m", "dependencies");
+  commit(source);
+  git(source, "tag", "0.1.9-nightly"); git(source, "tag", "0.1.9");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.8", latest: "0.1.9", available: true, url: `${CANONICAL.slice(0, -4)}/releases/tag/0.1.9` });
+  expect(await installRelease(checkout)).toMatchObject({ current: "0.1.9", installed: true });
+  expect(git(checkout, "rev-parse", "HEAD")).toBe(git(source, "rev-parse", "0.1.9"));
+  expect(git(checkout, "config", "remote.origin.url")).toBe(FORMER);
+}));
+
 test("only an install that moved the checkout waits for a restart, and a failed restart reports its output", async () => {
   const temp = mkdtempSync(join(tmpdir(), "ob-restart-"));
   const previous = process.env.OPENCHAT_DATA_DIR;
@@ -237,18 +254,24 @@ test("curl installer restores the old install when a reinstall fails, and won't 
     mkdirSync(join(target, ".git"), { recursive: true });
     writeFileSync(join(target, "keep"), "");
     writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in --version) echo 1.4.4;; *Bun.stdin*) echo 1.2.3;; run\\ cli:install|"run cli:install") exit 1;; esac\n');
-    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] || { [ -e "$OB_OLD" ] && echo https://github.com/VOID229/openbuild.git; exit 0; }\nfor target do :; done\nmkdir -p "$target/.git"\n');
+    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] || { [ -z "${OB_ORIGIN:-}" ] || echo "$OB_ORIGIN"; exit 0; }\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target };
     const script = join(import.meta.dir, "..", "install.sh");
     const foreign = Bun.spawnSync(["sh", script, "--reinstall"], { env, stdout: "pipe", stderr: "pipe" });
     expect(foreign.exitCode).toBe(1);
     expect(foreign.stderr.toString()).toContain("not an OpenBuild install");
-    // No marker, but the installer's clone URL: an install from before the marker existed.
-    const failed = Bun.spawnSync(["sh", script, "--reinstall"], { env: { ...env, OB_OLD: join(temp, "bin") }, stdout: "pipe", stderr: "pipe" });
-    expect(failed.exitCode).toBe(1);
-    expect(existsSync(join(target, "keep"))).toBe(true);
-    expect(require("node:fs").readdirSync(temp).sort()).toEqual(["bin", "install"]);
+    const other = Bun.spawnSync(["sh", script, "--reinstall"], { env: { ...env, OB_ORIGIN: "https://github.com/someone/openbuild.git" }, stdout: "pipe", stderr: "pipe" });
+    expect(other.stderr.toString()).toContain("not an OpenBuild install");
+    // No marker, but the installer's clone URL, from before or after the repository moved: an install
+    // from before the marker existed. Each reinstall gets as far as linking, fails, and puts it back.
+    for (const origin of [CANONICAL, FORMER]) {
+      const failed = Bun.spawnSync(["sh", script, "--reinstall"], { env: { ...env, OB_ORIGIN: origin }, stdout: "pipe", stderr: "pipe" });
+      expect(failed.exitCode).toBe(1);
+      expect(failed.stderr.toString()).not.toContain("not an OpenBuild install");
+      expect(existsSync(join(target, "keep"))).toBe(true);
+      expect(require("node:fs").readdirSync(temp).sort()).toEqual(["bin", "install"]);
+    }
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
 

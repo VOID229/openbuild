@@ -43,7 +43,7 @@ async function checkSignIn(app: CatalogApp, url: string): Promise<string> {
   if (register) {
     await registerClient(issuer, {
       metadata,
-      clientMetadata: { client_name: "OpenBuild", client_uri: "https://github.com/VOID229/openbuild", redirect_uris: ["http://localhost:3000/api/bots/apps/callback"], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" },
+      clientMetadata: { client_name: "OpenBuild", client_uri: "https://github.com/dkod-ai/openbuild", redirect_uris: ["http://localhost:3000/api/bots/apps/callback"], grant_types: ["authorization_code", "refresh_token"], response_types: ["code"], token_endpoint_auth_method: "none" },
     });
     return `registered with ${new URL(metadata.registration_endpoint).host}`;
   }
