@@ -3,7 +3,7 @@
 // every answer in one message. A card of one question stays as it was.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
-import type { BotMessage, Question, QuestionStep } from "../shared/bots";
+import { answerText, type BotMessage, type Question, type QuestionStep } from "../shared/bots";
 
 const lettered = (labels: string[]) => labels.map((label, i) => ({ key: String.fromCharCode(65 + i), label }));
 const STEPS: QuestionStep[] = [
@@ -16,7 +16,11 @@ const bot = { id: "builder", name: "Builder", look: { shape: "ghost", color: "bl
 /** The workspace: its messages, and every write the page made to it, in order. */
 let stored: BotMessage[] = [];
 let writes: { method: string; body: any }[] = [];
-const posts = () => writes.filter((w) => w.method === "POST").map((w) => w.body as BotMessage);
+/** The user's messages that reached the workspace: posted, or delivering an answer with it (`reply`). */
+let delivered: BotMessage[] = [];
+const posts = () => delivered;
+/** How the next answer's request goes wrong on the way: saved with its acknowledgement lost, or dropped before it's saved. */
+let trouble: "lost-ack" | "dropped" | undefined;
 const card = (id: string) => stored.find((m) => m.id === id)!.question!;
 
 const headers = { "x-openbuild-server": "srv" };
@@ -30,19 +34,32 @@ async function workspace(req: Request): Promise<Response> {
   if (req.method === "POST" && rest.endsWith("/messages")) {
     const body = (await req.json()) as BotMessage;
     writes.push({ method: "POST", body });
-    if (!stored.some((m) => m.id === body.id)) stored.push(body);
+    if (!stored.some((m) => m.id === body.id)) stored.push(body), delivered.push(body);
     return Response.json(body, { headers });
   }
   const id = /\/messages\/([^/]+)$/.exec(rest)?.[1];
   if (req.method === "PATCH" && id) {
-    const body = (await req.json()) as { question?: { answer?: string; answers?: (string | null)[]; submit?: boolean } };
+    const body = (await req.json()) as { question?: { answer?: string; answers?: (string | null)[]; submit?: boolean; reply?: string } };
     writes.push({ method: "PATCH", body });
+    const lost = trouble;
+    trouble = undefined;
+    // A gateway's 502: from the way there, so the page can't tell whether it ran.
+    const gateway = () => Response.json({ error: "Bad gateway" }, { status: 502 });
+    if (lost === "dropped") return gateway();
     const m = stored.find((x) => x.id === id)!;
-    // As the server keeps them (server/bots/service.ts answerQuestion and answerSteps).
+    // As the server keeps them (server/bots/service.ts answerQuestion and answerSteps): a closed card
+    // refuses them, and a final answer's message is posted with it, once whatever the retries.
     const q = m.question!;
+    if (q.closed) return Response.json({ error: q.steps ? "That card was closed." : "That question was closed." }, { status: 400, headers });
     if (typeof body.question?.answer === "string") m.question = { ...q, answer: body.question.answer };
     if (body.question?.answers && q.steps && !q.submitted) m.question = { ...q, steps: q.steps.map(({ answer: _, ...s }, i) => (body.question!.answers![i] ? { ...s, answer: body.question!.answers![i]! } : s)), ...(body.question.submit ? { submitted: true } : {}) };
-    return Response.json(m, { headers });
+    const reply = body.question?.reply;
+    if (reply && (typeof body.question?.answer === "string" || body.question?.submit) && !stored.some((x) => x.id === reply)) {
+      const message: BotMessage = { id: reply, author: "me", at: Date.now(), text: answerText(m.question!), replyTo: m.id };
+      stored.push(message);
+      delivered.push(message);
+    }
+    return lost === "lost-ack" ? gateway() : Response.json(m, { headers });
   }
   return Response.json({ ok: true }, { headers });
 }
@@ -69,6 +86,8 @@ beforeEach(() => {
     { id: "many", author: "builder", at: 3, text: STEPS[0]!.title, question: { ...STEPS[0]!, steps: STEPS.map((s) => ({ ...s })) } },
   ];
   writes = [];
+  delivered = [];
+  trouble = undefined;
 });
 
 class Chat extends Page {
@@ -276,6 +295,7 @@ describe.skipIf(!browser)("a card of several questions", () => {
     // Typed, then picked: the pick is the answer.
     stored.find((m) => m.id === "one")!.question = { title: "Use the staging key?", options: lettered(["Yes", "No"]) };
     writes = [];
+    delivered = [];
     page = await open();
     await page.click(`${one} .bm-own input`);
     await page.send("Input.insertText", { text: "Maybe" });
@@ -293,6 +313,186 @@ describe.skipIf(!browser)("a card of several questions", () => {
     await page.until(`document.querySelector('[data-id="one"] .bm-option-on .bm-option-label')?.textContent === "No"`);
     expect(posts().map((m) => ({ text: m.text, replyTo: m.replyTo }))).toEqual([{ text: "B: No", replyTo: "one" }]);
     expect(card("one").answer).toBe("B");
-    expect(writes.filter((w) => w.method === "PATCH").map((w) => w.body)).toEqual([{ question: { answer: "B" } }]);
+    // One request: the answer, with the id of the message that delivers it. The page posts nothing itself.
+    expect(writes.map((w) => [w.method, w.body])).toEqual([["PATCH", { question: { answer: "B", reply: posts()[0]!.id } }]]);
   }, 30_000);
+});
+
+describe.skipIf(!browser)("a closed card", () => {
+  /** What a card shows: its marker, whether anything on it can still be used, and what's checked. */
+  const shown = (page: Chat, id: string) =>
+    page.eval<{ closed: string | null; usable: number; own: boolean; on: string[]; off: number; steps: string[] }>(`(() => {
+      const c = document.querySelector('[data-id="${id}"] .bm-question');
+      return {
+        closed: c.querySelector('.bm-question-closed')?.textContent ?? null,
+        usable: [...c.querySelectorAll('button, input')].filter((b) => !b.disabled).length,
+        own: !!c.querySelector('.bm-own'),
+        on: [...c.querySelectorAll('.bm-option-on .bm-option-label')].map((o) => o.textContent),
+        off: c.querySelectorAll('.bm-option-off').length,
+        steps: [...c.querySelectorAll('.bm-answered-title')].map((t) => t.textContent),
+      };
+    })()`);
+
+  for (const [device, width] of [["desktop", 1000], ["phone", 390]] as const) {
+    test(`on a ${device}, can't be answered and says why, the same whoever closed it`, async () => {
+      const single = (closed: Partial<Question>): Question => ({ title: "Merge #351 now?", options: lettered(["Merge it", "Wait for me"]), ...closed });
+      stored = [
+        { id: "hello", author: "me", at: 1, text: "Set up the backups, please." },
+        { id: "settled", author: "builder", at: 2, text: "Merge #351 now?", question: single({ closed: "bot", answer: "A", reason: "You said merge in the chat" }) },
+        { id: "stale", author: "builder", at: 3, text: "Merge #351 now?", question: single({ closed: "bot", reason: "Not needed anymore" }) },
+        { id: "bare", author: "builder", at: 4, text: "Merge #351 now?", question: single({ closed: "bot" }) },
+        { id: "thread", author: "builder", at: 5, text: "Merge #351 now?", question: single({ thread: { id: "t", ask: "a" }, closed: "answered", answer: "B" }) },
+        { id: "gone", author: "builder", at: 6, text: "Merge #351 now?", question: single({ thread: { id: "t", ask: "b" }, closed: "gone" }) },
+        { id: "many", author: "builder", at: 7, text: STEPS[0]!.title, question: { ...STEPS[0]!, steps: STEPS.map((s) => ({ ...s })), closed: "bot", answer: "SQLite, nightly", reason: "Settled in the chat" } },
+      ];
+      const page = await Chat.open(chrome!.ws, server!.url.href, width, 900, `!!document.querySelector('[data-id="many"] .bm-question')`);
+      if (device === "phone") expect(await page.eval<boolean>(`matchMedia("(max-width: 768px)").matches`)).toBe(true);
+      const closed = { usable: 0, own: false };
+      expect(await shown(page, "settled")).toEqual({ ...closed, closed: "Closed · You said merge in the chat", on: ["Merge it"], off: 1, steps: [] });
+      expect(await shown(page, "stale")).toEqual({ ...closed, closed: "Closed · Not needed anymore", on: [], off: 2, steps: [] });
+      expect(await shown(page, "bare")).toEqual({ ...closed, closed: "Closed", on: [], off: 2, steps: [] });
+      // Closed from its thread, it reads the same way.
+      expect(await shown(page, "thread")).toEqual({ ...closed, closed: "Closed · Answered in the thread", on: ["Wait for me"], off: 1, steps: [] });
+      expect(await shown(page, "gone")).toEqual({ ...closed, closed: "Closed · The thread stopped waiting on this", on: [], off: 2, steps: [] });
+      // A card of several: the questions it asked, no stepping, and what its bot settled on.
+      expect(await shown(page, "many")).toEqual({ ...closed, closed: "Closed · Settled in the chat", on: ["SQLite, nightly"], off: 0, steps: STEPS.map((s) => s.title) });
+      expect(await page.eval<number>(`document.querySelectorAll('[data-id="many"] .bm-steps-arrow, [data-id="many"] .bm-steps-submit').length`)).toBe(0);
+      // The marker sits inside the card, under its choices.
+      const fits = await page.eval<{ inside: boolean; under: boolean }>(`(() => {
+        const card = document.querySelector('[data-id="settled"] .bm-bubble').getBoundingClientRect();
+        const note = document.querySelector('[data-id="settled"] .bm-question-closed').getBoundingClientRect();
+        const last = [...document.querySelectorAll('[data-id="settled"] .bm-option')].pop().getBoundingClientRect();
+        return { inside: note.left >= card.left && note.right <= card.right && note.bottom <= card.bottom, under: note.top >= last.bottom };
+      })()`);
+      expect(fits).toEqual({ inside: true, under: true });
+
+      // A tap on a closed card's option sends nothing.
+      await page.click('[data-id="stale"] button.bm-option');
+      await page.settle();
+      expect(writes).toEqual([]);
+    }, 30_000);
+  }
+
+  test("closed while the page still shows it open, an answer is refused and its message never goes", async () => {
+    const page = await open();
+    // Steps answered so far, as the workspace keeps them, before the bot closes both cards.
+    await page.pick("many", "SQLite");
+    await page.at("2 of 3");
+    await page.pick("many", "Every night");
+    await page.at("3 of 3");
+    await page.pick("many", "Yes");
+    await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+    for (let i = 0; i < 50 && card("many").steps![2]!.answer === undefined; i++) await Bun.sleep(50);
+    expect(card("many").steps!.map((s) => s.answer)).toEqual(["B", "A", "A"]);
+    // The bot closes a card; the page doesn't know yet.
+    const close = (id: string) => (stored.find((m) => m.id === id)!.question = { ...card(id), closed: "bot", reason: "You said so in the chat" });
+    writes = [];
+    delivered = [];
+
+    // Submitting the card of several is refused, nothing is posted, and the card shows closed.
+    close("many");
+    await page.click('[data-id="many"] .bm-steps-submit');
+    await page.until(`document.querySelector('[data-id="many"] .bm-question-closed')?.textContent === "Closed · You said so in the chat"`);
+    // The single card is still open, until it's closed too: then a tap on it goes the same way.
+    expect(await page.eval<boolean>(`!!document.querySelector('[data-id="one"] .bm-own input')`)).toBe(true);
+    close("one");
+    await page.pick("one", "Yes");
+    await page.until(`document.querySelector('[data-id="one"] .bm-question-closed')?.textContent === "Closed · You said so in the chat"`);
+    await Bun.sleep(300);
+    expect(writes.map((w) => w.method)).toEqual(["PATCH", "PATCH"]);
+    expect(posts()).toEqual([]);
+    expect([card("one").answer, card("many").submitted]).toEqual([undefined, undefined]);
+    // Neither shows the answer that was refused, and neither can be answered again.
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('[data-id="one"] .bm-option-on, [data-id="many"] .bm-answered-answer')].length`)).toBe(0);
+    expect(await page.eval<number>(`[...document.querySelectorAll('[data-id="one"] .bm-question :is(button, input), [data-id="many"] .bm-question :is(button, input)')].filter((b) => !b.disabled).length`)).toBe(0);
+    // Nor is either left waiting to be sent again.
+    await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+  }, 30_000);
+
+  test("an open card closes on the next load, and its box goes", async () => {
+    let page = await open();
+    expect((await shown(page, "one")).own).toBe(true);
+    stored.find((m) => m.id === "one")!.question = { ...stored.find((m) => m.id === "one")!.question!, closed: "bot", reason: "You said yes in the chat" };
+    page = await open();
+    expect(await shown(page, "one")).toMatchObject({ closed: "Closed · You said yes in the chat", usable: 0, own: false });
+  }, 30_000);
+});
+
+describe.skipIf(!browser)("an answer on a bad connection", () => {
+  /** Waits for the workspace to have had every write, and the page its snapshot after the last. */
+  const quiet = async (page: Chat) => {
+    await page.settle();
+    await Bun.sleep(400);
+    await page.settle();
+  };
+
+  test("saved with its acknowledgement lost, a single card's answer still reaches the bot, once", async () => {
+    const page = await open();
+    trouble = "lost-ack";
+    await page.pick("one", "Yes");
+    await quiet(page);
+    // Saved, and its message with it: the bot is woken, though the page never heard back.
+    expect(card("one").answer).toBe("A");
+    expect(posts().map((m) => ({ text: m.text, replyTo: m.replyTo }))).toEqual([{ text: "A: Yes", replyTo: "one" }]);
+    expect(writes.map((w) => w.method)).toEqual(["PATCH"]);
+    // The page shows it all as the workspace has it, with nothing left to send again.
+    await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+    expect(await page.eval<string | null>(`document.querySelector('[data-id="one"] .bm-option-on .bm-option-label')?.textContent ?? null`)).toBe("Yes");
+    expect(await page.eval<boolean>(`[...document.querySelectorAll('.bm-row')].some((r) => r.dataset.id === ${JSON.stringify(posts()[0]!.id)})`)).toBe(true);
+  }, 30_000);
+
+  test("submitted with its acknowledgement lost, a card of several's answers still reach the bot, once", async () => {
+    const page = await open();
+    await page.pick("many", "SQLite");
+    await page.at("2 of 3");
+    await page.pick("many", "Every night");
+    await page.at("3 of 3");
+    await page.pick("many", "Yes");
+    await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+    await quiet(page);
+    writes = [];
+    trouble = "lost-ack";
+    await page.click('[data-id="many"] .bm-steps-submit');
+    await quiet(page);
+    expect(card("many").submitted).toBe(true);
+    const text = "1. Which database should it use? → SQLite\n2. When should the backup run? → Every night\n3. Deploy to Dev when it's green? → Yes";
+    expect(posts().map((m) => ({ text: m.text, replyTo: m.replyTo }))).toEqual([{ text, replyTo: "many" }]);
+    expect(writes.map((w) => w.method)).toEqual(["PATCH"]);
+    await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+    await page.until(`!!document.querySelector('[data-id="many"] .bm-answered')`);
+    // The message shows as the answers' short list, as one sent from here does.
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('.bm-echo-row')].map((r) => r.textContent)`)).toEqual(["1SQLite", "2Every night", "3Yes"]);
+  }, 30_000);
+
+  for (const kind of ["one", "many"] as const) {
+    test(`dropped before it's saved, ${kind === "one" ? "a single card's answer" : "a card of several's answers"} can be sent again, and reach the bot once`, async () => {
+      const page = await open();
+      if (kind === "many") {
+        // Answered to the last question first, as the user would.
+        for (const [label, at] of [["SQLite", "2 of 3"], ["Every night", "3 of 3"]] as const) {
+          await page.pick("many", label);
+          await page.at(at);
+        }
+        await page.pick("many", "Yes");
+        await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+        await quiet(page);
+        writes = [];
+      }
+      trouble = "dropped";
+      if (kind === "one") await page.pick("one", "Yes");
+      else await page.click('[data-id="many"] .bm-steps-submit');
+      // Nothing saved, nothing delivered, and the change waits with its Retry.
+      await page.until(`!!document.querySelector('.bots-unconfirmed-row button:not([aria-label])')`);
+      expect(posts()).toEqual([]);
+      expect(kind === "one" ? card("one").answer : card("many").submitted).toBeUndefined();
+      await page.click(".bots-unconfirmed-row button:not([aria-label])");
+      await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+      await quiet(page);
+      // Sent again as it was, message id and all: delivered now, once.
+      expect(writes.map((w) => w.method)).toEqual(["PATCH", "PATCH"]);
+      expect(writes[1]!.body).toEqual(writes[0]!.body);
+      expect(posts().map((m) => [m.id, m.replyTo])).toEqual([[writes[0]!.body.question.reply, kind]]);
+      expect(kind === "one" ? card("one").answer : card("many").submitted).toBe(kind === "one" ? "A" : true);
+    }, 30_000);
+  }
 });

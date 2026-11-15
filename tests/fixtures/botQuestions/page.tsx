@@ -5,6 +5,7 @@ import "../../../src/bots.css";
 import "../../../src/mobile.css";
 import { createRoot } from "react-dom/client";
 import { BotChat } from "../../../src/components/bots/BotChat";
+import { NotConfirmed } from "../../../src/components/bots/WorkspaceStatus";
 import { enterWorkspace, preloadBots, useBots } from "../../../src/lib/bots/store";
 import { useWorkspace } from "../../../src/lib/bots/workspace";
 
@@ -20,6 +21,8 @@ document.documentElement.dataset.theme = new URLSearchParams(location.search).ge
 createRoot(document.getElementById("root")!).render(
   <div className="bots-view" style={{ height: "100%", width: "100%" }}>
     <div className="bots-view-content">
+      {/* Changes the workspace didn't confirm, with their Retry, as the bots view shows them. */}
+      <NotConfirmed />
       <Chat />
     </div>
   </div>,

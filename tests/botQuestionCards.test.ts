@@ -150,3 +150,214 @@ test("a card keeps the whole hint a bot writes, and one past any sensible length
     process.exit(0);
   `);
 }, 30_000);
+
+test("question tells a bot it can close a card it asked, with a reason or the answer it settled on", () => {
+  const tools: any[] = [];
+  openbots({ on() {}, registerTool(t: any) { tools.push(t); } } as any);
+  const question = tools.find((t) => t.name === "question");
+  expect(Object.keys(question.parameters.properties)).toEqual(expect.arrayContaining(["close", "reason", "answer"]));
+  expect(question.description).toContain("close it: close with its id, and reason or answer");
+  expect(question.description).toContain("closing wakes nobody");
+});
+
+test("a bot closes a card it asked: it can't be answered anymore, shows why, and wakes nobody", async () => {
+  await isolated("close", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const runner = await import('./server/bots/runner.ts');
+    const routes = await import('./server/bots/routes.ts');
+    const { askUser, setFocus } = await import('./server/bots/agent.ts');
+    const builder = svc.createBot({ name: 'Builder' }).bot.id;
+    const other = svc.createBot({ name: 'Scout' }).bot.id;
+    const chat = svc.directId(builder);
+    const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [builder, other] }).id;
+    const wakes = [];
+    svc.setHooks({ wake: (id, w) => wakes.push([id, w]), stop() {}, pendingAssignments: () => [], unseen: runner.unseen });
+    setFocus(builder, chat);
+    const lines = (c = chat, bot = builder) => runner.render([{ kind: 'messages', conversationId: c }], bot);
+    const stored = id => db.getMessage(id).message.question;
+
+    // The user said "merge" in a message instead of tapping the card.
+    const merge = askUser(builder, { title: 'Merge #351 now?', options: ['Merge it', 'Wait for me'] });
+    svc.postMessage(chat, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'merge' });
+    wakes.length = 0;
+    const count = db.messages(chat, 50).length;
+
+    // Only the bot that asked can close it, and only a question card.
+    setFocus(other, group);
+    a.throws(() => askUser(other, { close: merge.id }), /no question card with that id/);
+    a.throws(() => svc.closeQuestion(chat, merge.id, other), /Only the bot that asked/);
+    const said = db.messages(chat, 50).find(r => r.message.text === 'merge').message.id;
+    a.throws(() => askUser(builder, { close: said }), /no question card with that id/);
+    a.throws(() => askUser(builder, { close: merge.id, title: 'Something else?' }), /close goes on its own/);
+    a.equal(stored(merge.id).closed, undefined);
+
+    // Closed by its short id from another chat, settling on one of its options: that one is checked.
+    setFocus(builder, group);
+    const closed = askUser(builder, { close: '[' + merge.id.slice(0, 8) + ']', answer: 'merge it', reason: '  You said merge\\n in the chat  ' });
+    a.match(closed.note, /^Closed: the user sees it can't be answered anymore/);
+    a.equal(closed.id, undefined);
+    a.deepEqual([stored(merge.id).closed, stored(merge.id).answer, stored(merge.id).reason], ['bot', 'A', 'You said merge in the chat']);
+    a.match(lines(), /\\(asked with question: “Merge #351 now\\?” \\[Merge it \\/ Wait for me\\], closed by you, settled: Merge it \\(You said merge in the chat\\)\\)/);
+    // Nothing posted, nobody woken.
+    a.equal(db.messages(chat, 50).length, count);
+    a.deepEqual(wakes, []);
+
+    // Closed, it can't be answered: refused as a plain 400 (a 409 would make the app drop the workspace).
+    a.throws(() => svc.answerQuestion(chat, merge.id, 'B'), /That question was closed/);
+    a.equal((await routes.patchMine(chat, merge.id, { question: { answer: 'B' } })).status, 400);
+    a.equal(stored(merge.id).answer, 'A');
+    // Nor can the message an answer sends reach the bot, from a tab that posts it anyway: refused,
+    // not kept, nobody woken. Any other reply to the card is a message like any other.
+    const post = (text, replyTo = merge.id) => routes.postMine(chat, { id: crypto.randomUUID(), author: 'me', text, replyTo });
+    a.equal((await post('B: Wait for me')).status, 400);
+    a.match(await (await post('A: Merge it')).text(), /That question was closed/);
+    a.equal(db.messages(chat, 50).length, count);
+    a.deepEqual(wakes, []);
+    a.equal((await post('Why did you close it?')).status, 200);
+    a.equal(db.messages(chat, 50).length, count + 1);
+    a.ok(wakes.some(([id]) => id === builder));
+    wakes.length = 0;
+    // Closing it again changes nothing.
+    a.match(askUser(builder, { close: merge.id, reason: 'Again' }).note, /already closed\\. Nothing changed/);
+    a.equal(stored(merge.id).reason, 'You said merge in the chat');
+
+    // A card the user already answered stays as they answered it. Its answer's message goes, as ever.
+    setFocus(builder, chat);
+    const answered = askUser(builder, { title: 'Deploy?', options: ['Yes', 'No'] });
+    svc.answerQuestion(chat, answered.id, 'B');
+    a.equal((await post('B: No', answered.id)).status, 200);
+    wakes.length = 0;
+    a.match(askUser(builder, { close: answered.id, answer: 'Yes', reason: 'Changed my mind' }).note, /already answered that card.*Nothing changed/);
+    a.deepEqual([stored(answered.id).closed, stored(answered.id).answer, stored(answered.id).reason], [undefined, 'B', undefined]);
+
+    // No longer relevant: no answer, and the reason alone. Words that aren't an option show as words.
+    const stale = askUser(builder, { title: 'Rotate the key?', options: ['Yes', 'No'] });
+    askUser(builder, { close: stale.id, reason: 'x'.repeat(500) });
+    a.equal(stored(stale.id).answer, undefined);
+    a.equal(stored(stale.id).reason.length, 200);
+    const typed = askUser(builder, { title: 'Which day?', options: ['Monday'] });
+    askUser(builder, { close: typed.id, answer: 'Friday' });
+    a.deepEqual([stored(typed.id).answer, stored(typed.id).reason], ['Friday', undefined]);
+    a.match(lines(), /“Which day\\?” \\[Monday\\], closed by you, settled: Friday\\)/);
+
+    // Another bot reads that its asker closed it.
+    const there = askUser(builder, { title: 'Ship it?', options: ['Yes'], conversation: group });
+    askUser(builder, { close: there.id, reason: 'Shipped' });
+    a.match(lines(group, other), /“Ship it\\?” \\[Yes\\], closed by its asker \\(Shipped\\)\\)/);
+
+    // A card of several questions closes too, before it's submitted, and can't be submitted after.
+    const many = askUser(builder, { questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }, { title: 'When?' }] });
+    svc.answerSteps(chat, many.id, ['B', null], false);
+    askUser(builder, { close: many.id, answer: 'SQLite, nightly', reason: 'Settled in the chat' });
+    a.deepEqual([stored(many.id).closed, stored(many.id).answer, stored(many.id).submitted], ['bot', 'SQLite, nightly', undefined]);
+    a.throws(() => svc.answerSteps(chat, many.id, ['B', 'Nightly'], true), /That card was closed/);
+    a.equal((await post('1. Database? → SQLite\\n2. When? → Nightly', many.id)).status, 400);
+    a.deepEqual(wakes, []);
+    a.match(lines(), /2 in one card: 1\\. “Database\\?” \\[Postgres \\/ SQLite\\]; 2\\. “When\\?”, closed by you, settled: SQLite, nightly \\(Settled in the chat\\)\\)/);
+    // A submitted one stays as it is, and its answers' message goes as ever.
+    const done = askUser(builder, { questions: [{ title: 'One?' }, { title: 'Two?' }] });
+    svc.answerSteps(chat, done.id, ['1', '2'], true);
+    a.equal((await post('1. One? → 1\\n2. Two? → 2', done.id)).status, 200);
+    wakes.length = 0;
+    a.match(askUser(builder, { close: done.id }).note, /already answered/);
+    a.equal(stored(done.id).closed, undefined);
+    a.deepEqual(wakes, []);
+    process.exit(0);
+  `);
+}, 30_000);
+
+test("an answer and the message that delivers it are saved by one request, so a retry or a lost reply can't part them", async () => {
+  await isolated("deliver", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const runner = await import('./server/bots/runner.ts');
+    const routes = await import('./server/bots/routes.ts');
+    const { askUser, setFocus } = await import('./server/bots/agent.ts');
+    const builder = svc.createBot({ name: 'Builder' }).bot.id;
+    const chat = svc.directId(builder);
+    const wakes = [];
+    svc.setHooks({ wake: (id, w) => wakes.push(id), stop() {}, pendingAssignments: () => [], unseen: runner.unseen });
+    setFocus(builder, chat);
+    const stored = id => db.getMessage(id).message.question;
+    const replies = id => db.messages(chat, 100).map(r => r.message).filter(m => m.replyTo === id);
+    const patch = (id, question) => routes.patchMine(chat, id, { question });
+
+    // A card of one question: the answer, and the user's message delivering it, as tapping it reads.
+    const one = askUser(builder, { title: 'Merge #351 now?', options: ['Merge it', 'Wait for me'] });
+    const reply = crypto.randomUUID();
+    a.equal((await patch(one.id, { answer: 'A', reply })).status, 200);
+    a.equal(stored(one.id).answer, 'A');
+    a.deepEqual(replies(one.id).map(m => [m.id, m.author, m.text]), [[reply, 'me', 'A: Merge it']]);
+    a.deepEqual(wakes, [builder]);
+    // Sent again (a retry after a lost acknowledgement): nothing more is posted, and nobody is woken twice.
+    a.equal((await patch(one.id, { answer: 'A', reply })).status, 200);
+    a.equal(replies(one.id).length, 1);
+    a.deepEqual(wakes, [builder]);
+    // Words typed are the message as they are.
+    const typed = askUser(builder, { title: 'Which day?', options: ['Monday'] });
+    await patch(typed.id, { answer: 'Friday, after the release', reply: crypto.randomUUID() });
+    a.deepEqual(replies(typed.id).map(m => m.text), ['Friday, after the release']);
+
+    // A card of several: its answers' message goes with the submit alone, never with an answer kept on the way.
+    const many = askUser(builder, { questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }, { title: 'When?' }] });
+    const kept = crypto.randomUUID();
+    await patch(many.id, { answers: ['B', null], submit: false, reply: kept });
+    a.equal(replies(many.id).length, 0);
+    const sent = crypto.randomUUID();
+    const done = await patch(many.id, { answers: ['B', 'Nightly'], submit: true, reply: sent });
+    a.equal((await done.json()).question.submitted, true);
+    a.deepEqual(replies(many.id).map(m => [m.id, m.text]), [[sent, '1. Database? → SQLite\\n2. When? → Nightly']]);
+    await patch(many.id, { answers: ['B', 'Nightly'], submit: true, reply: sent });
+    a.equal(replies(many.id).length, 1);
+
+    // A stale tab answers again in between, then the first answer is retried: the retry was delivered
+    // already, so it changes nothing and can't put the older answer back over the newer one.
+    const twice = askUser(builder, { title: 'Ship it?', options: ['Yes', 'No'] });
+    const first = { answer: 'A', reply: crypto.randomUUID() }, second = { answer: 'B', reply: crypto.randomUUID() };
+    await patch(twice.id, first);
+    await patch(twice.id, second);
+    wakes.length = 0;
+    const retried = await patch(twice.id, first);
+    a.equal(retried.status, 200);
+    a.equal((await retried.json()).question.answer, 'B');
+    a.equal(stored(twice.id).answer, 'B');
+    a.deepEqual(replies(twice.id).map(m => [m.id, m.text]), [[first.reply, 'A: Yes'], [second.reply, 'B: No']]);
+    a.deepEqual(wakes, []);
+    // A card of several can't be: once submitted, its answers are final, and a later submit or retry changes nothing.
+    const final = askUser(builder, { questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }, { title: 'When?' }] });
+    const sub1 = { answers: ['B', 'Nightly'], submit: true, reply: crypto.randomUUID() }, sub2 = { answers: ['A', 'Hourly'], submit: true, reply: crypto.randomUUID() };
+    await patch(final.id, sub1);
+    await patch(final.id, sub2);
+    await patch(final.id, sub1);
+    a.deepEqual(stored(final.id).steps.map(s => s.answer), ['B', 'Nightly']);
+    a.deepEqual(replies(final.id).map(m => m.id), [sub1.reply]);
+    // An id another message already has is refused before the card changes.
+    const taken = askUser(builder, { title: 'Tag the release?', options: ['Yes'] });
+    a.equal((await patch(taken.id, { answer: 'A', reply: twice.id })).status, 400);
+    a.equal((await patch(taken.id, { answer: 'A', reply: first.reply })).status, 400);
+    a.deepEqual([stored(taken.id).answer, replies(taken.id).length], [undefined, 0]);
+    wakes.length = 0;
+
+    // A closed card refuses the answer, and so posts nothing.
+    const closed = askUser(builder, { title: 'Rotate the key?', options: ['Yes', 'No'] });
+    askUser(builder, { close: closed.id, reason: 'Rotated already' });
+    wakes.length = 0;
+    a.equal((await patch(closed.id, { answer: 'A', reply: crypto.randomUUID() })).status, 400);
+    a.equal(replies(closed.id).length, 0);
+    a.deepEqual(wakes, []);
+    // A message that can't be posted takes the answer back with it: neither is kept without the other.
+    const bad = askUser(builder, { title: 'Ship it?', options: ['Yes'] });
+    a.equal((await patch(bad.id, { answer: 'A', reply: 'no' })).status, 400);
+    a.deepEqual([stored(bad.id).answer, replies(bad.id).length], [undefined, 0]);
+
+    // A photo captioned like an option, in reply to a closed card, is a message like any other: answers never carry one.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    a.equal((await routes.postMine(chat, { id: crypto.randomUUID(), author: 'me', text: 'A: Yes', replyTo: closed.id, images: [png] })).status, 200);
+    a.equal((await routes.postMine(chat, { id: crypto.randomUUID(), author: 'me', text: 'A: Yes', replyTo: closed.id })).status, 400);
+    a.deepEqual(replies(closed.id).map(m => m.images?.length), [1]);
+    process.exit(0);
+  `);
+}, 30_000);

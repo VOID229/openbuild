@@ -3046,12 +3046,40 @@
   opacity: 0.45;
 }
 
-/* A card closed from its coding thread, where the question was settled first. */
+/* A closed card, whoever closed it (its bot, or its coding thread where the question was settled
+   first): marked under its choices, with where it was settled or why. */
 .bm-question-closed {
-  margin-top: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
   font-size: 13px;
   line-height: 1.45;
   color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.bm-question-closed svg {
+  flex: none;
+  /* On the first line's middle. */
+  margin-top: 3px;
+  color: var(--text-3);
+}
+
+.bm-question-closed-label {
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* A card of several questions closed before it was submitted: what it asked, quietly. */
+.bm-steps-closed .bm-answered {
+  gap: 4px;
+}
+
+.bm-steps-closed .bm-options {
+  margin-top: 8px;
 }
 
 .bm-own {

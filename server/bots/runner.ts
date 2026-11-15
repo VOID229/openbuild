@@ -1612,7 +1612,7 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     const text = m.event && eventText(m.event);
     const detail = m.event && eventDetail(m.event);
     // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
-    const rawBody = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.html ? `(showed a page: “${m.html.title}”)${m.text ? ` ${m.text.slice(0, 2000)}` : ""}` : m.question ? questionBody(m.question, !!c.friend) : m.text.slice(0, 2000);
+    const rawBody = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.html ? `(showed a page: “${m.html.title}”)${m.text ? ` ${m.text.slice(0, 2000)}` : ""}` : m.question ? questionBody(m.question, !!c.friend, m.author === botId) : m.text.slice(0, 2000);
     // Shared event wording can embed friend-controlled names and quoted content.
     const body = (c.friend && m.event) || parseFriendAuthor(m.author) ? untrustedData(rawBody) : rawBody;
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
@@ -1631,10 +1631,12 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
 }
 
 /** A question card in the transcript: what was asked, its choices, and whether the user has answered it yet. */
-function questionBody(q: Question, shared: boolean): string {
+function questionBody(q: Question, shared: boolean, mine: boolean): string {
   const options = q.options.map((o) => o.label).join(" / ");
   // In a shared chat the friend can answer too, in their own words.
   const typed = (text: string) => (shared ? untrustedData(text) : text);
+  // Closed by the bot that asked it: what it settled on, and why, as it said.
+  const closedByBot = (shown: string | undefined) => `closed by ${mine ? "you" : "its asker"}${shown === undefined ? "" : `, settled: ${shown}`}${q.reason ? ` (${q.reason})` : ""}`;
   // Several questions in one card: answers show only once it's submitted, all of them together.
   if (q.steps) {
     const each = q.steps.map((s, i) => {
@@ -1642,10 +1644,10 @@ function questionBody(q: Question, shared: boolean): string {
       const answer = !q.submitted || s.answer === undefined ? "" : ` → ${s.options.find((o) => o.key === s.answer)?.label ?? typed(s.answer)}`;
       return `${i + 1}. “${s.title}”${choices ? ` [${choices}]` : ""}${answer}`;
     });
-    return `(asked with question, ${q.steps.length} in one card: ${each.join("; ")}, ${q.submitted ? "answered" : "not answered yet"})`;
+    return `(asked with question, ${q.steps.length} in one card: ${each.join("; ")}, ${q.submitted ? "answered" : q.closed === "bot" ? closedByBot(q.answer) : "not answered yet"})`;
   }
   const shown = q.answer === undefined ? undefined : (q.options.find((o) => o.key === q.answer)?.label ?? typed(q.answer));
-  const answer = q.closed === "gone" ? "closed: its thread stopped waiting on it" : q.closed ? `closed: answered in its thread${shown === undefined ? "" : `: ${shown}`}` : shown === undefined ? "not answered yet" : `answered: ${shown}`;
+  const answer = q.closed === "bot" ? closedByBot(shown) : q.closed === "gone" ? "closed: its thread stopped waiting on it" : q.closed ? `closed: answered in its thread${shown === undefined ? "" : `: ${shown}`}` : shown === undefined ? "not answered yet" : `answered: ${shown}`;
   return `(asked with question: “${q.title}”${options ? ` [${options}]` : ""}, ${answer})`;
 }
 

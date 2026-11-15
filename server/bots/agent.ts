@@ -572,6 +572,7 @@ function askedStep(raw: unknown): QuestionStep {
 }
 
 export function askUser(botId: string, p: Record<string, unknown>) {
+  if (typeof p.close === "string" && p.close.trim()) return closeCard(botId, p);
   const conversationId = conversationFor(botId, p.conversation);
   const listed = Array.isArray(p.questions) ? p.questions : [];
   if (listed.length > QUESTION_STEPS) throw new svc.BotsError(`A card takes up to ${QUESTION_STEPS} questions. Ask the ${QUESTION_STEPS} that matter most now, and the rest once they're answered.`);
@@ -584,6 +585,25 @@ export function askUser(botId: string, p: Record<string, unknown>) {
   // Passing on a coding thread's question: linked, so the card closes if it's answered in the thread first.
   if (p.thread || p.thread_question) return threads.cardTarget(botId, p.thread, p.thread_question).then((thread) => postQuestion(botId, conversationId, [only], thread));
   return postQuestion(botId, conversationId, [only]);
+}
+
+/**
+ * question's close: a card this bot asked, by its id, in any chat it's in (or the one it names),
+ * closed so it can't be answered anymore. Nobody is woken. One already answered stays as it is.
+ */
+function closeCard(botId: string, p: Record<string, unknown>) {
+  if (p.title || (Array.isArray(p.questions) && p.questions.length)) throw new svc.BotsError("close goes on its own. To ask something new as well, call question again.");
+  const id = String(p.close).trim().replace(/^\[|\]$/g, "");
+  const chats = p.conversation ? [conversationFor(botId, p.conversation)] : db.listConversations().filter((c) => c.botIds.includes(botId)).map((c) => c.id);
+  const found = db.findMessages(id, chats).filter((r) => r.message.question);
+  if (found.length !== 1) throw new svc.BotsError(found.length ? "That id matches several question cards. Give more of it." : "There's no question card with that id in your chats.", found.length ? 400 : 404);
+  const card = found[0]!;
+  const q = card.message.question!;
+  const words = (v: unknown) => (typeof v === "string" ? v : undefined);
+  if (!svc.closeQuestion(card.conversationId, card.message.id, botId, { reason: words(p.reason), answer: words(p.answer) })) {
+    return { note: q.closed ? "That card was already closed. Nothing changed." : "The user already answered that card, so it stays as they answered it. Nothing changed." };
+  }
+  return { note: "Closed: the user sees it can't be answered anymore, with your reason. Nobody was told; say something only if the chat needs it." };
 }
 
 function postQuestion(botId: string, conversationId: string, steps: QuestionStep[], thread?: Question["thread"]) {

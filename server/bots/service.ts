@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1542,6 +1542,12 @@ export function postMessage(conversationId: string, message: BotMessage, { from 
     if (message.author === "me") throw new BotsError("Side chats are between bots. You can read along.");
     if (c.huddle.closedAt) throw new BotsError(`That side chat has closed.${message.author === c.huddle.by ? " Report back in the chat it came from." : ""}`);
   }
+  // An answer to a closed card, from a tab that hadn't heard it closed (or an older one that posts it
+  // even when the card refuses the answer): it would wake the bot as if the card had been answered.
+  // An answer never carries attachments, so a photo with a caption like one is just a reply.
+  const card = message.author === "me" && message.replyTo ? db.getMessage(message.replyTo) : undefined;
+  const asked = card?.conversationId === conversationId ? card.message.question : undefined;
+  if (asked?.closed && !message.images?.length && !message.files?.length && answersCard(asked, message.text)) throw new BotsError(asked.steps ? "That card was closed." : "That question was closed.");
   // The friend's side gets text: a photo or poll would be in this copy alone, so it isn't posted at all.
   if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.files?.length || message.poll || message.html)) throw new BotsError("Photos, files, polls and pages aren't shared with friends yet.");
   if (message.poll) {
@@ -1855,15 +1861,68 @@ export function toggleReaction(conversationId: string, messageId: string, emoji:
   return patched;
 }
 
-export function answerQuestion(conversationId: string, messageId: string, key: string) {
+/**
+ * The user's message that delivers a card's answer, posted by the same request that saves it: an
+ * answer saved whose acknowledgement was lost on the way back can't be left without the message
+ * that wakes the bot. The app picks its id, so a retry finds it already posted and wakes nobody
+ * again. If it can't be posted, the card goes back to how it was.
+ */
+function deliverAnswer(conversationId: string, card: BotMessage, before: Question, reply: string) {
+  const question = db.getMessage(card.id)!.message.question!;
+  try {
+    postMessage(conversationId, { id: reply, author: "me", at: Date.now(), text: answerText(question), replyTo: card.id });
+  } catch (err) {
+    patchMessage(conversationId, card.id, { question: before });
+    throw err;
+  }
+}
+
+/**
+ * Whether the message delivering an answer is already posted: the request is a replay (a retry after
+ * a lost acknowledgement), and that answer was saved and delivered then. The card is left as it is
+ * now, so a replay can't put an older answer back over a newer one. An id taken by any other message
+ * is refused before anything changes.
+ */
+function delivered(conversationId: string, messageId: string, reply: string | undefined): boolean {
+  const sent = reply ? db.getMessage(reply) : undefined;
+  if (!sent) return false;
+  if (sent.conversationId !== conversationId || sent.message.author !== "me" || sent.message.replyTo !== messageId) throw new BotsError("That message id already exists.");
+  return true;
+}
+
+/** `reply` is the id for the message that delivers the answer (deliverAnswer); without one, the app posts it. */
+export function answerQuestion(conversationId: string, messageId: string, key: string, reply?: string) {
   const row = db.getMessage(messageId);
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
-  if (question.closed) throw new BotsError("That question was settled in its thread.", 409);
+  if (delivered(conversationId, messageId, reply)) return row.message;
+  // Not a 409: that tells the app its workspace is gone.
+  if (question.closed) throw new BotsError(question.closed === "bot" ? "That question was closed." : "That question was settled in its thread.");
   if (question.steps) throw new BotsError("That card asks several questions: answer them together.");
   assertAnswerable(conversationId, row.message.author);
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
+  if (reply) deliverAnswer(conversationId, row.message, question, reply);
   return patched;
+}
+
+/**
+ * The bot that asked a question card closing it, once it was answered some other way (the user said
+ * so in a message) or stopped mattering: it can't be answered anymore, and says why if the bot did,
+ * with the answer it settled on checked. Only patched, so nobody is woken. A card already answered,
+ * submitted or closed stays as it is: false then.
+ */
+export function closeQuestion(conversationId: string, messageId: string, by: string, { reason, answer }: { reason?: string; answer?: string } = {}): boolean {
+  const row = db.getMessage(messageId);
+  const question = row?.conversationId === conversationId ? row.message.question : undefined;
+  if (!row || !question) throw new BotsError("That message isn't a question card.", 404);
+  if (row.message.author !== by) throw new BotsError("Only the bot that asked a question can close it.", 403);
+  if (question.closed || question.submitted || (!question.steps && question.answer !== undefined)) return false;
+  const why = reason?.replace(/\s+/g, " ").trim().slice(0, QUESTION_REASON_MAX);
+  const settled = answer?.replace(/\s+/g, " ").trim().slice(0, 2000);
+  // One of the card's own choices is checked; anything else shows as words.
+  const key = settled && !question.steps ? (question.options.find((o) => o.label.toLowerCase() === settled.toLowerCase())?.key ?? settled) : settled;
+  patchMessage(conversationId, messageId, { question: { ...question, closed: "bot", ...(key ? { answer: key } : {}), ...(why ? { reason: why } : {}) } });
+  return true;
 }
 
 /** A retired bot's question can't be answered: nobody would hear the answer. */
@@ -1879,12 +1938,13 @@ function assertAnswerable(conversationId: string, author: string) {
  * there's none yet). They're kept so a reload shows them, and stay the user's alone: the card counts
  * as answered only when it's submitted, which takes an answer to every question and is final.
  */
-export function answerSteps(conversationId: string, messageId: string, answers: unknown[], submit: boolean) {
+export function answerSteps(conversationId: string, messageId: string, answers: unknown[], submit: boolean, reply?: string) {
   const row = db.getMessage(messageId);
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question?.steps) throw new BotsError("That message isn't a card of several questions.", 404);
-  // Sent again after it landed (a retry): it stays as submitted.
-  if (question.submitted) return row.message;
+  // Sent again after it landed (a retry): it stays as submitted, and its answers' message was posted with it.
+  if (question.submitted || delivered(conversationId, messageId, reply)) return row.message;
+  if (question.closed) throw new BotsError("That card was closed.");
   assertAnswerable(conversationId, row.message.author);
   const steps = question.steps.map(({ answer: _, ...step }, i): QuestionStep => {
     const answer = typeof answers[i] === "string" ? (answers[i] as string).trim().slice(0, 2000) : "";
@@ -1892,7 +1952,9 @@ export function answerSteps(conversationId: string, messageId: string, answers: 
   });
   const left = steps.flatMap((s, i) => (s.answer === undefined ? [i + 1] : []));
   if (submit && left.length) throw new BotsError(`Question ${left.join(", ")} still needs an answer.`);
-  return patchMessage(conversationId, messageId, { question: { ...question, steps, ...(submit ? { submitted: true } : {}) } });
+  const patched = patchMessage(conversationId, messageId, { question: { ...question, steps, ...(submit ? { submitted: true } : {}) } });
+  if (submit && reply) deliverAnswer(conversationId, row.message, question, reply);
+  return submit && reply ? db.getMessage(messageId)!.message : patched;
 }
 
 /** A changed answer on a closed poll has to stay this long before the poll's author hears of it, so a slip stays quiet. */

@@ -489,8 +489,10 @@ export function postMine(conversationId: string, body: unknown): Response {
  */
 export function patchMine(conversationId: string, messageId: string, body: any): Response {
   try {
-    if (body?.question && typeof body.question.answer === "string") svc.answerQuestion(conversationId, messageId, body.question.answer);
-    if (Array.isArray(body?.question?.answers)) return json(svc.answerSteps(conversationId, messageId, body.question.answers, body.question.submit === true));
+    // With reply, the id of the message that delivers the answer: posted by this request too.
+    const reply = typeof body?.question?.reply === "string" ? body.question.reply : undefined;
+    if (body?.question && typeof body.question.answer === "string") svc.answerQuestion(conversationId, messageId, body.question.answer, reply);
+    if (Array.isArray(body?.question?.answers)) return json(svc.answerSteps(conversationId, messageId, body.question.answers, body.question.submit === true, reply));
     if (Array.isArray(body?.vote)) return json(svc.votePoll(conversationId, messageId, "me", body.vote.filter((key: unknown): key is string => typeof key === "string")));
     if (typeof body?.emoji === "string") {
       const to = typeof body.to === "string" ? body.to : undefined;
