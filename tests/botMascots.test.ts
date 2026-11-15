@@ -32,8 +32,11 @@ const open = async () => {
  */
 const OPEN = `((b) => 'blink' in b.dataset ? 1 : new DOMMatrix(getComputedStyle(b.querySelector('.bot-eye-fill')).transform).d)`;
 
-/** The colour of each bot under `selector`, by where it is: whether it dozes, whether it's busy, and how open its eyes are. */
-type Seen = { where: string; color: string; asleep: boolean; busy: boolean; eye: number };
+/**
+ * The colour of each bot under `selector`, by where it is: whether it dozes, whether it's busy or busy
+ * in another chat (away), how open its eyes are, and whether it's in the chat it's at work in (`dev`).
+ */
+type Seen = { where: string; color: string; asleep: boolean; busy: boolean; away: boolean; eye: number; dev: boolean };
 const seen = (page: Page) =>
   page.eval<Seen[]>(`(() => {
     const places = {
@@ -44,8 +47,10 @@ const seen = (page: Page) =>
       hero: [...document.querySelectorAll('.bots-details-avatar')],
       member: [...document.querySelector('.bots-details .bots-cards').querySelectorAll('.bots-member')],
     };
+    // The tiles and rows are each their own chat; the rest are OpenBuild Dev's, which is open.
+    const dev = (where, el) => !['tile', 'row'].includes(where) || el.textContent.includes('OpenBuild Dev');
     return Object.entries(places).flatMap(([where, els]) => els.flatMap((el) => [...el.querySelectorAll('.bot')].map((b) => (
-      { where, color: b.dataset.color, asleep: 'asleep' in b.dataset, busy: 'busy' in b.dataset, eye: ${OPEN}(b) }
+      { where, color: b.dataset.color, asleep: 'asleep' in b.dataset, busy: 'busy' in b.dataset, away: 'away' in b.dataset, eye: ${OPEN}(b), dev: dev(where, el) }
     ))));
   })()`);
 
@@ -81,10 +86,11 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     const bots = await seen(page);
     for (const where of ["tile", "row", "header", "message", "hero", "member"]) expect(bots.some((b) => b.where === where)).toBe(true);
     for (const b of bots) {
-      // Moss (green) is at work: awake, and busy but beside its messages (the line saying what it's
-      // doing has a busy mascot of its own). Everyone else dozes, eyes shut.
+      // Moss (green) is at work in OpenBuild Dev: awake, and busy there but beside its messages (the line
+      // saying what it's doing has a busy mascot of its own). In its other groups it's awake and calm,
+      // busy elsewhere. Everyone else dozes, eyes shut.
       const moss = b.color === "green";
-      expect({ ...b, eye: b.eye < 0.3 }).toEqual({ ...b, asleep: !moss, busy: moss && b.where !== "message", eye: !moss });
+      expect({ ...b, eye: b.eye < 0.3 }).toEqual({ ...b, asleep: !moss, busy: moss && b.dev && b.where !== "message", away: moss && !b.dev, eye: !moss });
     }
     // A bot's own chat doesn't doze, and has no "zzz" to show.
     expect(await page.eval<object>(`(() => { const b = [...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Dr Eggbot')).querySelector('.bot'); return { asleep: 'asleep' in b.dataset, zzz: !!b.querySelector('.bot-zzz'), open: ${OPEN}(b) > 0.9 }; })()`)).toEqual({ asleep: false, zzz: false, open: true });
@@ -97,11 +103,12 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     // Three members, and the other three as a count in the fourth seat.
     expect(await colors()).toEqual(["white", "green", "amber"]);
     expect(await page.eval<string>(`(${everyone}).querySelector('.bot-huddle-seat .bot-huddle-more').textContent`)).toBe("+3");
-    // Spark (teal), the sixth, starts work: it takes the last dozing member's place, awake.
+    // Spark (teal), the sixth, starts work: it takes the last dozing member's place, awake (calm, as
+    // its work is in another chat).
     await setWorking(page, ["moss", "spark"]);
     await page.settle();
     expect(await colors()).toEqual(["white", "green", "teal"]);
-    expect(await page.eval<boolean>(`'busy' in (${everyone}).querySelector('.bot[data-color="teal"]').dataset`)).toBe(true);
+    expect(await page.eval<object>(`(({ dataset: d }) => ({ asleep: 'asleep' in d, away: 'away' in d }))((${everyone}).querySelector('.bot[data-color="teal"]'))`)).toEqual({ asleep: false, away: true });
   });
 
   test("a bot wakes when it starts work and dozes off when it stops, eased both ways", async () => {

@@ -1,8 +1,8 @@
 // Pieces the OpenBots sidebar, chat and details panel share.
 import { Star } from "lucide-react";
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { busyBots, plainPhase, plainPhaseEnds, reading, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
+import { awayFrom, awayLines, busyBots, plainPhase, plainPhaseEnds, reading, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -128,6 +128,69 @@ export function useDots(botIds: readonly string[]): boolean[] {
   return useMemo(() => phases.map((phase) => phase === "dots"), [phases]);
 }
 
+/** Whether each of a conversation's bots is at work in another chat (`awayFrom`), and not typing here: its mascot is calmer here. */
+export const useAway = (conversation: Pick<Conversation, "id" | "botIds">): boolean[] =>
+  useBots(useShallow((s) => conversation.botIds.map((id) => awayFrom(s.status[id], conversation.id) && !s.typing[conversation.id]?.includes(id))));
+
+/**
+ * What a bot at work in another chat is doing there, in words for this one (activity.ts, awayLines),
+ * or undefined while it isn't. The same array while the words don't change.
+ */
+export function useAwayLines(conversationId: string, botId: string | undefined): string[] | undefined {
+  const key = useBots((s) => {
+    if (!botId || !awayFrom(s.status[botId], conversationId) || s.typing[conversationId]?.includes(botId)) return "";
+    return awayLines(conversationId, botId, s.status[botId], { conversations: s.conversations, bots: s.bots, typing: s.typing, shown: s.shown[botId] }).join("\n");
+  });
+  return useMemo(() => (key ? key.split("\n") : undefined), [key]);
+}
+
+/**
+ * A line of text, said the most exact way that fits its box: the first of `lines` that does, so a
+ * name is left out whole ("in another group") rather than cut off. The last one is shown however it
+ * fits. Its box clips: one line (overflow hidden, nowrap), or a few (a line clamp), and words that
+ * spill past it either way don't fit. `onFit` hears once it has settled on one, for a box placed by
+ * its size (a hover card). It looks again from the first when its words change,
+ * or when its box grows wider than it was when the words last didn't fit: a box that's as wide as its
+ * words narrows with shorter ones, and that's no reason to try the longer ones again. Such a box never
+ * grows with the room around it either: `within` names the closest ancestor whose width it's watched
+ * by instead.
+ */
+export function FitText({ lines, within, onFit, className, ...rest }: { lines: string[]; within?: string; onFit?: () => void; className?: string } & React.HTMLAttributes<HTMLSpanElement>) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const key = lines.join("\n");
+  const [fit, setFit] = useState({ key, i: 0, room: Infinity });
+  const now = fit.key === key ? fit : { key, i: 0, room: Infinity };
+  const i = Math.min(now.i, lines.length - 1);
+  const current = useRef(now);
+  current.current = now;
+  const told = useRef<string>(undefined);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (i < lines.length - 1 && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1)) return setFit({ key, i: i + 1, room: room(el) });
+    if (told.current === lines[i]) return;
+    told.current = lines[i];
+    onFit?.();
+  });
+  const room = (el: HTMLElement) => ((within && el.closest(within)) || el).clientWidth;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver !== "function") return;
+    const box = (within && el.closest(within)) || el;
+    const watch = new ResizeObserver(() => {
+      const now = current.current;
+      if (now.i > 0 && box.clientWidth > now.room + 1) setFit({ key, i: 0, room: Infinity });
+    });
+    watch.observe(box);
+    return () => watch.disconnect();
+  }, [key, within]);
+  return (
+    <span ref={ref} className={className} {...rest}>
+      {lines[i]}
+    </span>
+  );
+}
+
 /** Whether each of these bots is reading something right now (`reading`): its mascot reads along. */
 export const useReading = (botIds: string[]): boolean[] => useBots(useShallow((s) => botIds.map((id) => reading(s.status[id]))));
 
@@ -201,12 +264,15 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   const dots = still ? NO_DOTS : shared;
   if (still) [alive, busy, track, working] = [false, false, false, undefined];
   const reads = useReading(conversation.botIds);
+  // At work in another chat: calmer, here.
+  const aways = useAway(conversation);
+  const away = still ? undefined : aways;
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id));
   if (conversation.kind === "direct") {
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} reading={reads[0]} mood={mood} dots={dots[0]} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} away={away?.[0]} reading={reads[0]} mood={mood} dots={dots[0]} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />
@@ -217,15 +283,15 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   }
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
-  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} reading={reads} track={track} />;
+  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} away={away} dots={dots} reading={reads} track={track} />;
   if (conversation.kind === "side")
     return (
       <span className="bots-avatar-wrap bots-avatar-side">
-        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} reading={reads} track={track} zzz={zzz} pair />
+        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} away={away} dots={dots} reading={reads} track={track} zzz={zzz} pair />
         {badge && <DmMark size={size} />}
       </span>
     );
-  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} reading={reads} track={track} zzz={zzz} />;
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} away={away} dots={dots} reading={reads} track={track} zzz={zzz} />;
 });
 
 export { conversationName };

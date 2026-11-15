@@ -527,7 +527,7 @@ async function deliver(botId: string, conversationId: string, text: string, imag
     if (hit && db.messagesAfter(conversationId, hit.seq, 50).some((r) => r.message.author !== botId)) reply = hit.message.id;
   }
   const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: text.trim(), images: images.length ? images : undefined, replyTo: reply };
-  svc.postMessage(conversationId, message);
+  svc.postMessage(conversationId, message, { from: getFocus(botId) });
   svc.touchHeartbeat(botId);
   const c = db.getConversation(conversationId);
   const name = (id: string) => mentionName(db.getBot(id)?.name ?? "a bot");
@@ -878,7 +878,7 @@ export async function askBot(botId: string, p: Record<string, unknown>) {
         }
       }, { queue: false })
     : undefined;
-  svc.postMessage(sideId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text });
+  svc.postMessage(sideId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text }, { from: origin });
   return {
     conversation: sideId.slice(0, 8),
     note: watched?.state === "started"

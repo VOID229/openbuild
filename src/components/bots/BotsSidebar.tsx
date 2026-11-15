@@ -9,7 +9,7 @@ import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/st
 import { useWorkspace } from "../../lib/bots/workspace";
 import type { Bot, Conversation } from "../../lib/bots/types";
 import { TYPING } from "../../../shared/bots";
-import { waitingOnThreadsLine } from "../../lib/bots/activity";
+import { awayAlone, waitingOnThreadsLine } from "../../lib/bots/activity";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
@@ -21,7 +21,7 @@ import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
-import { betweenNames, ConversationAvatar, DmMark, previewOf, shortTime, useBusyBots } from "./common";
+import { betweenNames, ConversationAvatar, DmMark, FitText, previewOf, shortTime, useAwayLines, useBusyBots } from "./common";
 
 type Dialog =
   | { kind: "bot" }
@@ -101,12 +101,16 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => (peek ? (s.typing[peek.id]?.length ?? 0) : 0)) > 0;
   const waiting = useBots((s) => (conversation ? waitingOnThreadsLine(conversation, s.status) : undefined));
+  const away = useAwayLines(conversation?.id ?? "", conversation?.kind === "direct" ? conversation.botIds[0] : undefined);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
+  // Placed by its size, so again once a busy bot's line has settled on the words that fit (FitText).
+  const [fitted, setFitted] = useState(0);
+  const refit = useCallback(() => setFitted((n) => n + 1), []);
   useLayoutEffect(() => {
     if (!peek || !ref.current) return setPos(undefined);
     setPos(place(peek, ref.current.offsetWidth, ref.current.offsetHeight));
-  }, [peek]);
+  }, [peek, fitted]);
   if (!peek || !conversation) return null;
   const [title, tag] = conversationName(conversation, bots).split(" · ");
   return createPortal(
@@ -124,7 +128,12 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           Between {betweenNames(conversation, bots)}
         </span>
       )}
-      <span className="bots-peek-preview">{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
+      {/* Busy elsewhere: as much of what it's doing as its two lines hold, a long name left out whole (FitText). */}
+      {!typing && !waiting && away ? (
+        <FitText className="bots-peek-preview bots-peek-away" lines={awayAlone(away)} onFit={refit} />
+      ) : (
+        <span className="bots-peek-preview">{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
+      )}
     </div>,
     document.body,
   );
@@ -181,6 +190,9 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   // Between turns, waiting on threads it started from here: that, as the chat and its header say it.
   const waiting = useBots((s) => waitingOnThreadsLine(conversation, s.status));
+  // A bot's own row is the bot: at work in another chat, it says what it's doing there, in place of
+  // the last message, as its chat does (activity.ts, awayLines).
+  const away = useAwayLines(conversation.id, conversation.kind === "direct" ? conversation.botIds[0] : undefined);
   const select = useSelect();
   const longPress = useLongPress((x, y) => onMenu({ id: conversation.id, x, y }));
   const name = conversationName(conversation, bots);
@@ -203,7 +215,11 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
             <span className="bots-row-title">{title}</span>
             {tag && <span className="bots-row-tag">· {tag}</span>}
           </span>
-          <span className={cx("bots-row-preview", typing && "bots-row-typing", !typing && waiting && "bots-row-waiting")}>{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
+          {!typing && !waiting && away ? (
+            <FitText className="bots-row-preview bots-row-waiting bots-row-away" lines={awayAlone(away)} />
+          ) : (
+            <span className={cx("bots-row-preview", typing && "bots-row-typing", !typing && waiting && "bots-row-waiting")}>{typing ? TYPING : (waiting ?? previewOf(conversation, bots))}</span>
+          )}
         </span>
         <span className="bots-row-side">
           {retired ? <span className="bots-pill bots-retired-pill">Retired</span> : <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>}

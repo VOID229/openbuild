@@ -8,7 +8,7 @@
 // none of those, and "Writing a reply" shows while the model streams text. The runner (runner.ts)
 // turns this into BotStatus.
 import { appById } from "../../shared/apps";
-import { workingPhrase, WRITING_REPLY } from "../../shared/bots";
+import { ROUTINE_START, workingPhrase, WRITING_REPLY } from "../../shared/bots";
 import type { PiRecord } from "../pi/rpc";
 
 export interface Step {
@@ -54,7 +54,7 @@ export const newLive = (start?: string): Live => ({ steps: [], streaming: false,
  */
 export function startLine(kinds: string[], direct: boolean): string {
   if (kinds.includes("messages")) return direct ? "Reading your message" : "Reading the new messages";
-  if (kinds.includes("routine")) return "Getting started on a routine";
+  if (kinds.includes("routine")) return ROUTINE_START;
   if (kinds.includes("note")) return "Reading a note";
   if (kinds.includes("heartbeat")) return "Checking in on things";
   return "Looking at a reaction";

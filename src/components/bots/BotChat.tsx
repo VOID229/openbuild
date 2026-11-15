@@ -5,7 +5,7 @@ import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bookmark, Check, ChevronLe
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { elsewhere, liveBot, liveLine, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
+import { awayAlone, awayOf, elsewhere, liveBot, liveLine, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -47,7 +47,7 @@ import { BotProfileHover } from "./BotProfileCard";
 const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
-import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots, usePlainPhases, useReading } from "./common";
+import { authorName, ConversationAvatar, dividerTime, FitText, messageLine, messageText, useAwayLines, useBusyBots, usePlainPhases, useReading } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -1377,14 +1377,36 @@ function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direc
 }
 
 /**
+ * A bot at work in another chat, as this one shows it: its mascot, calmer than at work here (BotAvatar's
+ * `away`), and what it's doing there in words for this chat (activity.ts, awayLines), in the bot's own
+ * chat as a line of its own, in a group by its name. Quiet: no sweep through the words, as nothing is
+ * going on here. Gone once its turn there ends, or it comes here.
+ */
+function AwayRow({ conversation, bot }: { conversation: Conversation; bot: Bot }) {
+  const direct = conversation.kind === "direct";
+  const lines = useAwayLines(conversation.id, bot.id);
+  if (!lines) return null;
+  const said = direct ? awayAlone(lines) : awayOf(bot.name, lines);
+  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} away />;
+  return (
+    <div className="bm-working bm-away" role="status" aria-label={said[0]}>
+      {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
+      <FitText key={said[0]} className="bm-away-text" lines={said} aria-hidden />
+    </div>
+  );
+}
+
+/**
  * The bots live in the chat, one row each: at work here (their mascot and what they're up to), or
  * typing (their mascot and "Typing…"). Going from one to the other is the same row, so the mascot
- * never leaves; only the words it's writing, once there are some, take its place as a bubble.
+ * never leaves; only the words it's writing, once there are some, take its place as a bubble. After
+ * them, the ones at work in another chat, saying what they're doing there (AwayRow).
  */
 function Live({ conversation, working, typing, bots }: { conversation: Conversation; working: string[]; typing: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
   const shown = useBots((s) => s.shown);
   const drafts = useBots((s) => s.drafts);
+  const away = useBots(useShallow((s) => elsewhere(conversation, s.status, s.typing).map((a) => a.botId)));
   const direct = conversation.kind === "direct";
   return (
     <>
@@ -1394,6 +1416,10 @@ function Live({ conversation, working, typing, bots }: { conversation: Conversat
         const draft = typing.includes(id) ? drafts.find((d) => d.conversationId === conversation.id && d.botId === id)?.text : undefined;
         if (draft) return <Draft key={id} conversation={conversation} bot={bot} bots={bots} text={draft} />;
         return <WorkingRow key={id} bot={bot} direct={direct} typing={typing.includes(id)} activity={workingLine(conversation.id, id, statuses[id], shown[id])} />;
+      })}
+      {away.map((id) => {
+        const bot = bots.find((b) => b.id === id);
+        return bot ? <AwayRow key={`away:${id}`} conversation={conversation} bot={bot} /> : null;
       })}
     </>
   );
@@ -2688,21 +2714,19 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   // Three dots in place of the words exactly while that bot's mascot is three dots, here and in the sidebar.
   const lineBot = useBots((s) => (s.typing[conversation.id]?.length ? undefined : liveBot(conversation, s.status)));
   const [linePhase] = usePlainPhases(lineBot ? [lineBot] : []);
-  // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does; a group's others doze.
+  // Its mascot fidgets while it's busy here, and is calmer while it's busy elsewhere, as the sidebar's
+  // is (ConversationAvatar); a group's others doze.
   const working = useBusyBots(conversation);
   const busy = working.length > 0;
-  // Busy in another chat: said as that, never as thinking here.
-  const away = useBots((s) => {
-    const first = elsewhere(conversation, s.status)[0];
-    if (!first) return undefined;
-    const there = s.conversations.find((c) => c.id === first.conversationId);
-    const where = there && !there.hidden ? `Busy in ${conversationName(there, s.bots)}` : "Busy in another chat";
-    if (conversation.kind === "direct") return where;
-    const bot = s.bots.find((b) => b.id === first.botId);
-    // In a group, a bot busy in its own 1:1 would read "Researcher: busy in Researcher".
-    if (there?.kind === "direct") return `${bot ? firstName(bot) : "A bot"} is busy in another chat`;
-    return `${bot ? firstName(bot) : "A bot"}: ${where[0]!.toLowerCase()}${where.slice(1)}`;
-  });
+  // Busy in another chat: what it's doing there, never as thinking here (activity.ts, awayLines). In
+  // a group, said of the bot by name. Each place shows the most exact way of saying it that fits.
+  const awayBot = useBots((s) => elsewhere(conversation, s.status, s.typing)[0]?.botId);
+  const awayWords = useAwayLines(conversation.id, awayBot);
+  const away = useMemo(() => {
+    if (!awayWords) return undefined;
+    if (conversation.kind === "direct") return awayAlone(awayWords);
+    return awayOf(bots.find((b) => b.id === awayBot)?.name ?? "A bot", awayWords);
+  }, [awayWords, awayBot, bots, conversation.kind]);
   // Waiting elsewhere, on the back button.
   const unread = useBots((s) => s.conversations.filter((c) => c.unread && c.id !== conversation.id && !c.hidden).length);
   const mobile = useMediaQuery("(max-width: 768px)");
@@ -2714,7 +2738,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
   // Retired: its chat stays to read, marked so in the header, with the way back where the composer was.
   const retired = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0] && b.retiredAt) : undefined;
-  const sub = retired ? "Retired" : (activity ?? away ?? members);
+  const sub = retired ? "Retired" : (activity ?? away?.[0] ?? members);
   const repo = useStore((s) => conversationRepo(conversation, s.chats));
   return (
     <div className="bots-chat">
@@ -2738,6 +2762,8 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                     <i />
                     <i />
                   </span>
+                ) : !retired && !activity && away ? (
+                  <FitText className="bots-head-sub bots-head-sub-away" lines={away} within=".bots-head-pill" />
                 ) : (
                   sub && <span className={cx("bots-head-sub", activity && !retired && "bots-head-sub-live")}>{linePhase === "settling" && !retired ? "" : sub}</span>
                 )}
@@ -2755,7 +2781,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                 <span>
                   <span>
                     <span className="bots-head-name">{name}</span>
-                    {!activity && away && <span className="bots-head-away">{away}</span>}
+                    {!activity && away && <FitText className="bots-head-away" lines={away} within=".bots-head" />}
                   </span>
                 </span>
               </span>

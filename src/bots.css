@@ -781,6 +781,8 @@
   .bot[data-dots="out"] .bot-dots {
     display: none;
   }
+  /* (Where the eyes are is written frame by frame, and with motion reduced it's simply put there.) */
+  .bot .bot-eye,
   .bot .bot-eye-fill,
   .bot .bot-doze,
   .bot .bot-nap,
@@ -2751,6 +2753,19 @@
 
 .bm-working .bm-avatar {
   margin-bottom: 0;
+}
+
+/* At work in another chat: what it's doing there, quiet, with no sweep through the words, since
+   nothing is going on here. The most exact way of saying it that fits (FitText). */
+.bm-away-text {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  color: var(--text-3);
 }
 
 /* The live step, here and under the name in a phone's header: the words sit a step dimmer and a soft
