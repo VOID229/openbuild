@@ -150,6 +150,27 @@ export function nextBlink(): Step[] {
   return [[null, rand(2000, 5000)], [Math.random() < 0.12 ? "blink2" : "blink", 300]];
 }
 
+/**
+ * Busy in another chat: calm, its mind on the work over there. It rests small-eyed, as an idle bot
+ * does, and now and then turns slowly to look off to one side a good while, as if over at that chat,
+ * or up and away, thinking it over, and comes back; a blink between. None of the work's big eyes,
+ * clips, flips or spins: those are for the chat it's working in.
+ */
+export function nextAway(): Step[] {
+  const s = side();
+  const off: Pose = { x: s * rand(0.5, 0.7), y: rand(-0.2, 0.05), roll: -s * rand(6, 12), eyes: "open" };
+  const up: Pose = { x: s * rand(0.25, 0.45), y: rand(-0.7, -0.5), roll: -s * rand(8, 14), eyes: "open" };
+  const look = Math.random() < 0.65 ? off : up;
+  return [
+    [null, rand(2600, 4200)],
+    [{ sweep: look }, rand(900, 1300)],
+    [look, rand(1600, 2600)],
+    ...(Math.random() < 0.5 ? ([["blink", 300]] as Step[]) : []),
+    [null, 300],
+    [Math.random() < 0.15 ? "blink2" : "blink", 300],
+  ];
+}
+
 /** Thinking (while typing): looking up a little, head cocked, its eyes narrowed to dashes (in CSS). */
 export const THINKING: Pose = { x: 0.12, y: -0.5, roll: -10 };
 

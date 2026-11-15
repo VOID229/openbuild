@@ -4,8 +4,8 @@ import { providerName } from "../models";
 import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
-import { betweenTurns, statusLine, TYPING, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
-import type { BotStatus, Conversation } from "./types";
+import { betweenTurns, ROUTINE_START, statusLine, TYPING, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
+import type { Bot, BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
 
@@ -128,14 +128,125 @@ export function busyBots(conversation: Pick<Conversation, "id" | "botIds">, stat
 }
 
 /**
- * The conversation's bots working in another chat, and which, unless this chat's message is next (that's
- * `holding`). One that's only waiting on its background jobs (BotStatus.jobs) is free, not busy elsewhere.
+ * In a turn in another chat, as this one sees it. Not when this chat's message is next: then it's
+ * holding on here (`holding`). Nor between turns, only waiting on the jobs or threads it started
+ * (BotStatus.jobs, .threads): it's free, and that wait shows in the chat it's for. Its mascot plays a
+ * calmer routine here (BotAvatar's `away`), and this chat says what it's doing there (`awayLines`).
  */
-export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses): { botId: string; conversationId?: string }[] {
-  return conversation.botIds
-    .filter((id) => visiblyWorking(status[id]) && !betweenTurns(status[id]) && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
-    .map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
+export const awayFrom = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && !betweenTurns(st) && st!.conversationId !== conversationId && !holding(st, conversationId);
+
+/** The conversation's bots at work in another chat (`awayFrom`), and where, but not one typing here. */
+export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: Record<string, string[] | undefined> = {}): { botId: string; conversationId?: string }[] {
+  const here = typing[conversation.id] ?? [];
+  return conversation.botIds.filter((id) => !here.includes(id) && awayFrom(status[id], conversation.id)).map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
 }
+
+/** What `awayLines` needs to know of the chats and bots the viewer can see. */
+export interface AwayKnown {
+  conversations: Pick<Conversation, "id" | "kind" | "name" | "botIds" | "hidden" | "huddle">[];
+  bots: Pick<Bot, "id" | "name">[];
+  typing?: Record<string, string[] | undefined>;
+  /** The bot's `shown` (trackShown): its last line of its own, kept through plain words. */
+  shown?: Shown;
+}
+
+/** The last resort, which every place fits: where isn't said, nor what. */
+export const AWAY_PRIVATE = "busy in another chat";
+const AWAY_SHORT = "busy elsewhere";
+
+/** A bot's name as a sentence says it: without its " · tag". */
+const botName = (bots: Pick<Bot, "id" | "name">[], id: string) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "a deleted bot";
+
+/** Names as a sentence lists them: "Pip", "Pip and Tally", "Pip, Tally and Scout". */
+const listed = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? ""));
+
+/** Where a group is, after "in": "the OpenBuild Dev group", or "the Release chat" for a name that already says what it is. */
+function groupPlace(name: string | undefined): string {
+  const n = (name?.trim() || "Untitled group").replace(/^the\s+/i, "");
+  return /\b(?:group|chat|team)$/i.test(n) ? `the ${n}` : `the ${n} group`;
+}
+
+/** A status line as the middle of a sentence: "Running the tests" → "running the tests", keeping "PR", "CI" and the like. */
+function midSentence(line: string): string {
+  const text = line.trim().replace(/[.…]+$/, "");
+  return /^[A-Z][a-z]/.test(text) ? text[0]!.toLowerCase() + text.slice(1) : text;
+}
+
+/** A step as something a bot is doing: "running the tests", or for a line that isn't one, "working on PR review". */
+function doing(line: string): string {
+  const text = midSentence(line);
+  return /^\S+ing\b/i.test(text) ? text : `working on ${text}`;
+}
+
+/**
+ * What a bot busy in another chat is doing there, in words for this chat (`viewedId`), as phrases that
+ * follow "Scout is …": the most exact first, then shorter ones, for the place showing it to take the
+ * first that fits (FitText). A name is only ever dropped whole, for "another group" and the like.
+ *
+ * What it's doing is the turn's live step there, as that chat's own working row says it, or what kind
+ * of thing it is: writing a message ("posting in…", "messaging Pip"), a routine, plain work. Where is
+ * the place by a name the viewer knows: a group's name, "its chat with you", the bots in a side chat
+ * ("talking with Pip and Tally"). Work that came from this chat (a handoff, or a post about it, or a
+ * side chat opened from here: BotStatus.from) says so: "posting about this in…". A chat the viewer
+ * can't see (hidden, or not theirs) shows neither its name nor what's going on there: only that it's
+ * busy in another chat.
+ */
+export function awayLines(viewedId: string, botId: string, st: BotStatus | undefined, known: AwayKnown): string[] {
+  const there = known.conversations.find((c) => c.id === st?.conversationId);
+  if (!st || !there || there.hidden) return [AWAY_PRIVATE];
+  const fromHere = st.from === viewedId || there.huddle?.from === viewedId;
+  const line = shownLine(st, known.shown);
+  const writing = line === WRITING_REPLY || line === TYPING || !!known.typing?.[there.id]?.includes(botId);
+  const routine = !writing && !!st.routine && (plainWork(line) || line === ROUTINE_START);
+  const plain = !writing && !routine && plainWork(line);
+  const step = writing || routine || plain ? undefined : doing(line);
+  /** What it's doing, the exact way first and then the plain one, before where. */
+  const acts = (generic: string, here: boolean): string[] => {
+    if (routine) return [`running its “${st.routine!.trim()}” routine`, "running a routine"];
+    if (step) return [`${step}${here ? " for this" : ""}`, generic];
+    return [generic];
+  };
+  const out: string[] = [];
+  const add = (...lines: string[]) => {
+    for (const l of lines) if (!out.includes(l)) out.push(l);
+  };
+  // Said as about this chat first, when it is, and then without that, where it's too long to fit.
+  for (const here of fromHere ? [true, false] : [false]) {
+    if (there.kind === "group") {
+      const named = `in ${groupPlace(there.name)}`;
+      const anon = "in another group";
+      const [exact, generic] = writing ? [`posting${here ? " about this" : ""}`] : acts(here ? "working on this" : "doing something", here);
+      add(`${exact} ${named}`, `${exact} ${anon}`);
+      if (generic) add(`${generic} ${named}`, `${generic} ${anon}`);
+    } else if (there.kind === "direct") {
+      const [exact, generic] = writing ? ["messaging you"] : acts(here ? "working on this" : "doing something", here);
+      add(writing ? exact! : `${exact} in its chat with you`);
+      if (generic) add(`${generic} in its chat with you`);
+    } else {
+      const others = there.botIds.filter((id) => id !== botId);
+      const one = others.length === 1;
+      const names = listed(others.map((id) => botName(known.bots, id)));
+      const about = here ? " about this" : "";
+      const talking = `talking with ${names}${about}`;
+      if (writing && one) add(`messaging ${names}${about}`);
+      else if (step || routine) {
+        const [exact] = acts("", here);
+        add(`${exact} ${one ? `in its chat with ${names}` : `in a side chat with ${names}`}`);
+      }
+      add(talking);
+      if (!one) add(`talking with ${others.length} bots${about}`);
+      add(`in a side chat${about}`);
+    }
+  }
+  add(AWAY_SHORT);
+  return out;
+}
+
+/** The phrases of `awayLines` said of the bot by name, for a chat with several: "Scout is running the tests in…". */
+export const awayOf = (name: string, lines: string[]) => lines.map((l) => `${name.split(" ·")[0]} is ${l}`);
+
+/** Or as a line of its own, for the bot's own chat: "Running the tests in…". */
+export const awayAlone = (lines: string[]) => lines.map((l) => l[0]!.toUpperCase() + l.slice(1));
 
 /**
  * The bots with a working line in the chat: at work on it, not typing ("Typing…" shows that), and not

@@ -14,7 +14,7 @@ import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
 import { joinLife, type Life } from "../../lib/bots/life";
 import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, sizeOf, snap, spreadOf, step, turnAt, warm, type EyeLook, type Pose, type Target } from "../../lib/bots/rig";
-import { AFTER_DOTS, beats, nextBlink, nextIdle, READING_STILL, readingAt, THINKING, type Step } from "../../lib/bots/routines";
+import { AFTER_DOTS, beats, nextAway, nextBlink, nextIdle, READING_STILL, readingAt, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
 export type { Action, Mood };
@@ -137,6 +137,13 @@ export interface BotAvatarProps {
   /** Busy at something: brisk, rocking and peering about. */
   busy?: boolean;
   /**
+   * Busy in another chat than the one it shows in (activity.ts, awayFrom): calmer than at work. It
+   * rests small-eyed and now and then looks slowly off to one side a while, as if over at that chat
+   * (routines.ts, nextAway): no big eyes, clips, dots or reading, and it pays the pointer no mind.
+   * It wins over `busy`.
+   */
+  away?: boolean;
+  /**
    * Busy reading something (a file, a page, messages, search results): eyes lowered, it reads line
    * by line, slowly along each and quickly back to the start of the next (READING), for as long as
    * it's set. Only while it's busy, and not while it's thinking what to type.
@@ -162,7 +169,11 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, trackWithin, playful: wantPlayful = false, plain = false, busy = false, reading = false, asleep, zzz = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, trackWithin, playful: wantPlayful = false, plain = false, busy: atWork = false, away: awayProp = false, reading = false, asleep, zzz = false, dots: wantDots = false, pulse, className, label }: BotAvatarProps) {
+  // Busy elsewhere is its own calm life: none of the work's routines, dots or reading here.
+  const away = awayProp && !asleep;
+  const busy = atWork && !away;
+  const stayDots = wantDots && !away;
   const [pose, setPose] = useState<Pose>();
   const lively = wantLively && !plain;
   const playful = wantPlayful && !plain;
@@ -209,7 +220,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const sleeping = dozing && !flash;
   const held = pose ?? (shown === "thinking" ? THINKING : undefined);
   // At work, the pointer is no business of its: the working routine plays on as if it weren't there.
-  const following = track && !busy;
+  const following = track && !busy && !away;
   // Reading takes over from the working routine; three dots or a thought of what to type, it doesn't.
   const reads = reading && busy && !dozing && !stayDots && mood !== "thinking";
   // A face it pulls shows over the reading, but the swell of a new step (a plain face) doesn't lift its eyes from the page.
@@ -411,13 +422,13 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   useEffect(() => {
     const el = ref.current;
     const b = body.current!;
-    if (!(alive || busy) || dozing || !el || calm()) {
+    if (!(alive || busy || away) || dozing || !el || calm()) {
       b.sweep = undefined;
       setPose(undefined);
       return;
     }
-    const kind = reads ? "read" : busy ? "busy" : plain ? "plain" : `idle${lively ? " lively" : ""}${following ? " following" : ""}`;
-    const make = reads ? readBlinks : busy ? beats() : plain ? nextBlink : () => nextIdle(lively, following);
+    const kind = reads ? "read" : busy ? "busy" : away ? "away" : plain ? "plain" : `idle${lively ? " lively" : ""}${following ? " following" : ""}`;
+    const make = reads ? readBlinks : busy ? beats() : away ? nextAway : plain ? nextBlink : () => nextIdle(lively, following);
     const joined = joinLife(`${lifeKey} ${kind}`, make, performance.now());
     life.current = joined.life;
     let timer: ReturnType<typeof setTimeout>;
@@ -471,7 +482,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       if (life.current === joined.life) life.current = undefined;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, busy, lively, plain, following, dozing, reads, lifeKey]);
+  }, [alive, busy, away, lively, plain, following, dozing, reads, lifeKey]);
 
   // Back from three dots at work, it comes round-eyed and leans back a moment before it gets on (AFTER_DOTS).
   const wasDots = useRef(stayDots);
@@ -521,6 +532,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-action={action}
       data-looking={held ? "" : undefined}
       data-busy={busy || undefined}
+      data-away={away || undefined}
       data-reading={reads ? "" : undefined}
       data-asleep={sleeping ? "" : undefined}
       data-eyes={form}
@@ -604,9 +616,9 @@ export const HUDDLE_SEAT_MIN = 32;
  * alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every member
  * is awake and `alive` and `busy` go for all of them. `pair` seats two members side by side rather than
  * on the diagonal: a side chat between two bots, which mustn't read as a group. `reading` picks, by
- * member, who is reading.
+ * member, who is reading, and `away` who is at work in another chat (calmer: BotAvatar's `away`).
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, dots, reading, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; reading?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, away, dots, reading, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; away?: boolean[]; dots?: boolean[]; reading?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
   const seats = me ? 3 : 4;
   const over = looks.length > seats;
   const seated = over && size >= HUDDLE_SEAT_MIN;
@@ -634,7 +646,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
     // A touch smaller than its seat when it has neighbours: the shapes reach wide (a sparkle's arms,
     // a wedge's corners), and seated side by side they'd touch each other and the count.
     const s = (layout[n + (me ? 1 : 0)]?.[2] ?? 0.5) * (count > 1 ? 0.92 : 1);
-    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} dots={dots?.[i]} reading={reading?.[i]} track={track} />]);
+    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} away={away?.[i]} asleep={active && !active[i]} dots={dots?.[i]} reading={reading?.[i]} track={track} />]);
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
   const dozing = !!active && members.some((i) => !active[i]);
@@ -674,7 +686,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
  * (the chat's header at rest). Up to `max` show, those at work first as in a huddle, and the rest as a
  * count after them ("+2" after four). `active` picks who is at work, and `reading` who reads, as in BotHuddle; the rest doze, without a "zzz" each.
  */
-export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, dots, reading, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; reading?: boolean[]; track?: boolean; max?: number }) {
+export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, away, dots, reading, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; away?: boolean[]; dots?: boolean[]; reading?: boolean[]; track?: boolean; max?: number }) {
   const room = max;
   const order = looks.map((_, i) => i);
   const members = (active ? [...order.filter((i) => active[i]), ...order.filter((i) => !active[i])] : order).slice(0, room).sort((a, b) => a - b);
@@ -682,7 +694,7 @@ export const BotLineup = memo(function BotLineup({ looks, size, alive = true, bu
   return (
     <span className="bot-lineup" aria-hidden>
       {members.map((i) => (
-        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} dots={dots?.[i]} reading={reading?.[i]} track={track} />
+        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} away={away?.[i]} asleep={active && !active[i]} zzz={false} dots={dots?.[i]} reading={reading?.[i]} track={track} />
       ))}
       {extra > 0 && <span className="bot-lineup-more">+{extra}</span>}
     </span>
