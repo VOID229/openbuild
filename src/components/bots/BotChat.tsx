@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only, and so is a retired bot's.
-import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, Plus, SmilePlus, Square, TextSelect, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, SmilePlus, Square, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
@@ -24,7 +24,7 @@ import { LinkText, Linkify, WebLink } from "../Linkify";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
-import { Avatar, IconButton, Popover, Sheet } from "../primitives";
+import { Avatar, IconButton, Popover } from "../primitives";
 import { StashTray } from "../StashTray";
 import { uid } from "../../lib/id";
 import { AttachmentError, fitDataUrl, fitImage, fitsMessage, formatBytes } from "../../lib/files";
@@ -2176,8 +2176,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const dictation = useFieldDictation({ value: text, setValue: setText, field: input, onError: setNotice, fallback: true });
   const file = useRef<HTMLInputElement>(null);
   const touch = useMediaQuery("(pointer: coarse)");
-  const phone = useMediaQuery("(max-width: 768px)");
-  const [adding, setAdding] = useState(false);
   // A chat shared with a friend carries text only: photos and polls would stay on this side.
   const textOnly = !!conversation.friend;
   const name = conversationName(conversation, bots);
@@ -2476,28 +2474,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   return (
     <div className="bots-dock">
       {polling && <PollDialog conversationId={conversation.id} onClose={() => setPolling(false)} />}
-      <Sheet open={adding} onClose={() => setAdding(false)} label="Add to message">
-        <button
-          type="button"
-          className="sheet-item"
-          onClick={() => {
-            setAdding(false);
-            file.current?.click();
-          }}
-        >
-          <Paperclip size={20} /> Add files
-        </button>
-        <button
-          type="button"
-          className="sheet-item"
-          onClick={() => {
-            setAdding(false);
-            setPolling(true);
-          }}
-        >
-          <ListChecks size={20} /> New poll
-        </button>
-      </Sheet>
       {stashed.length > 0 && (
         <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={stash.remove} />
       )}
@@ -2570,17 +2546,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           </div>
         )}
         <div className="bots-composer-row">
-          {textOnly ? null : phone ? (
-            // One button, so the text gets the width. Only a group has more than images to offer.
-            <IconButton
-              label={conversation.kind === "group" ? "Add to message" : "Add files"}
-              tooltip={false}
-              className="bots-composer-btn bots-composer-add"
-              onClick={() => (conversation.kind === "group" ? setAdding(true) : file.current?.click())}
-            >
-              <Plus size={22} />
-            </IconButton>
-          ) : (
+          {textOnly ? null : (
             <>
               <IconButton label="Add files" tooltip="Add files" tooltipSide="top" className="bots-composer-btn" onClick={() => file.current?.click()}>
                 <Paperclip size={18} />

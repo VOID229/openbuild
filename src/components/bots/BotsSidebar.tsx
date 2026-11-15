@@ -18,7 +18,6 @@ import { useScrollRestore } from "../../lib/scrollRestore";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ModeSwitch, ReleaseLabel, ScrollThumb } from "../Sidebar";
 import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
-import { OpenBuildMark } from "../OpenBuildMark";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
@@ -684,38 +683,36 @@ export function BotsSidebar() {
         {!rail && (
           <div className="sidebar-inner bots-sidebar-inner">
             <div className="brand-row">
-              {/* On a phone the list is a screen of its own, with the search always at hand. */}
+              {/* On a phone the list is a screen of its own, which a row or the chat's back arrow leaves. */}
               {!mobile && (
                 <IconButton label="Close sidebar" onClick={() => useStore.getState().setBotsSidebarOpen(false)}>
                   <PanelIcon />
                 </IconButton>
               )}
-              {mobile ? <span className="wordmark bots-wordmark"><OpenBuildMark size={28} />OpenBots</span> : <ModeSwitch />}
-              {!mobile && (
-                <IconButton
-                  label="Search"
-                  aria-pressed={searching}
-                  className={cx(searching && "filter-active")}
-                  // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
-                  // it and then a click that opens it again.
-                  onMouseDown={(e) => searching && e.preventDefault()}
-                  onClick={() => {
-                    setSearching(!searching);
-                    setQuery("");
-                  }}
-                >
-                  <SearchIcon />
-                </IconButton>
-              )}
+              <ModeSwitch />
+              <IconButton
+                label="Search"
+                aria-pressed={searching}
+                className={cx(searching && "filter-active")}
+                // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
+                // it and then a click that opens it again.
+                onMouseDown={(e) => searching && e.preventDefault()}
+                onClick={() => {
+                  setSearching(!searching);
+                  setQuery("");
+                }}
+              >
+                <SearchIcon />
+              </IconButton>
               {!remote && <NewMenu onDialog={setDialog} />}
             </div>
-            {(searching || mobile) && (
+            {searching && (
               <label className="search bots-search">
                 <Search size={16} />
-                <input ref={searchField} type="text" value={query} placeholder={mobile ? "Search" : "Search bots and messages…"} aria-label="Search bots and messages" autoFocus={!mobile} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
+                <input ref={searchField} type="text" value={query} placeholder="Search bots and messages…" aria-label="Search bots and messages" autoFocus onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
                   // Clicking away from an empty search closes it; with something typed, it stays.
                   onBlur={(e) => {
-                    if (!mobile && !e.currentTarget.value.trim() && !e.currentTarget.closest(".bots-search")?.contains(e.relatedTarget)) setSearching(false);
+                    if (!e.currentTarget.value.trim() && !e.currentTarget.closest(".bots-search")?.contains(e.relatedTarget)) setSearching(false);
                   }}
                 />
                 {query && (
@@ -798,8 +795,6 @@ export function BotsSidebar() {
                   <Store size={19} />
                 </IconButton>
               )}
-              {/* On a desktop the header's switch does this; the rail and a phone keep it. */}
-              {mobile && <BotsToggle />}
             </div>
           </div>
         )}
