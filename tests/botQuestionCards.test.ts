@@ -267,3 +267,69 @@ test("a bot closes a card it asked: it can't be answered anymore, shows why, and
     process.exit(0);
   `);
 }, 30_000);
+
+test("an answer and the message that delivers it are saved by one request, so a retry or a lost reply can't part them", async () => {
+  await isolated("deliver", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const runner = await import('./server/bots/runner.ts');
+    const routes = await import('./server/bots/routes.ts');
+    const { askUser, setFocus } = await import('./server/bots/agent.ts');
+    const builder = svc.createBot({ name: 'Builder' }).bot.id;
+    const chat = svc.directId(builder);
+    const wakes = [];
+    svc.setHooks({ wake: (id, w) => wakes.push(id), stop() {}, pendingAssignments: () => [], unseen: runner.unseen });
+    setFocus(builder, chat);
+    const stored = id => db.getMessage(id).message.question;
+    const replies = id => db.messages(chat, 100).map(r => r.message).filter(m => m.replyTo === id);
+    const patch = (id, question) => routes.patchMine(chat, id, { question });
+
+    // A card of one question: the answer, and the user's message delivering it, as tapping it reads.
+    const one = askUser(builder, { title: 'Merge #351 now?', options: ['Merge it', 'Wait for me'] });
+    const reply = crypto.randomUUID();
+    a.equal((await patch(one.id, { answer: 'A', reply })).status, 200);
+    a.equal(stored(one.id).answer, 'A');
+    a.deepEqual(replies(one.id).map(m => [m.id, m.author, m.text]), [[reply, 'me', 'A: Merge it']]);
+    a.deepEqual(wakes, [builder]);
+    // Sent again (a retry after a lost acknowledgement): nothing more is posted, and nobody is woken twice.
+    a.equal((await patch(one.id, { answer: 'A', reply })).status, 200);
+    a.equal(replies(one.id).length, 1);
+    a.deepEqual(wakes, [builder]);
+    // Words typed are the message as they are.
+    const typed = askUser(builder, { title: 'Which day?', options: ['Monday'] });
+    await patch(typed.id, { answer: 'Friday, after the release', reply: crypto.randomUUID() });
+    a.deepEqual(replies(typed.id).map(m => m.text), ['Friday, after the release']);
+
+    // A card of several: its answers' message goes with the submit alone, never with an answer kept on the way.
+    const many = askUser(builder, { questions: [{ title: 'Database?', options: ['Postgres', 'SQLite'] }, { title: 'When?' }] });
+    const kept = crypto.randomUUID();
+    await patch(many.id, { answers: ['B', null], submit: false, reply: kept });
+    a.equal(replies(many.id).length, 0);
+    const sent = crypto.randomUUID();
+    const done = await patch(many.id, { answers: ['B', 'Nightly'], submit: true, reply: sent });
+    a.equal((await done.json()).question.submitted, true);
+    a.deepEqual(replies(many.id).map(m => [m.id, m.text]), [[sent, '1. Database? → SQLite\\n2. When? → Nightly']]);
+    await patch(many.id, { answers: ['B', 'Nightly'], submit: true, reply: sent });
+    a.equal(replies(many.id).length, 1);
+
+    // A closed card refuses the answer, and so posts nothing.
+    const closed = askUser(builder, { title: 'Rotate the key?', options: ['Yes', 'No'] });
+    askUser(builder, { close: closed.id, reason: 'Rotated already' });
+    wakes.length = 0;
+    a.equal((await patch(closed.id, { answer: 'A', reply: crypto.randomUUID() })).status, 400);
+    a.equal(replies(closed.id).length, 0);
+    a.deepEqual(wakes, []);
+    // A message that can't be posted takes the answer back with it: neither is kept without the other.
+    const bad = askUser(builder, { title: 'Ship it?', options: ['Yes'] });
+    a.equal((await patch(bad.id, { answer: 'A', reply: 'no' })).status, 400);
+    a.deepEqual([stored(bad.id).answer, replies(bad.id).length], [undefined, 0]);
+
+    // A photo captioned like an option, in reply to a closed card, is a message like any other: answers never carry one.
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    a.equal((await routes.postMine(chat, { id: crypto.randomUUID(), author: 'me', text: 'A: Yes', replyTo: closed.id, images: [png] })).status, 200);
+    a.equal((await routes.postMine(chat, { id: crypto.randomUUID(), author: 'me', text: 'A: Yes', replyTo: closed.id })).status, 400);
+    a.deepEqual(replies(closed.id).map(m => m.images?.length), [1]);
+    process.exit(0);
+  `);
+}, 30_000);

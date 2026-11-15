@@ -18,7 +18,7 @@ import { botModels } from "../pi";
 import { useStore } from "../store";
 import { trackShown, type Shown } from "./activity";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { castVote, cleanRole, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
+import { answerText, castVote, cleanRole, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
@@ -430,24 +430,16 @@ export const useBots = create<BotsState>()(
         conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.map((m) => (m.id === messageId ? { ...m, ...patch(m) } : m)) })),
       }));
     },
-    answerQuestion: async (conversationId, messageId, key) => {
-      get().patchMessage(conversationId, messageId, (m) => (m.question ? { question: { ...m.question, answer: key } } : {}));
-      return !!(await send("PATCH", messagePath(conversationId, messageId), { question: { answer: key } }, { label: "Answer", check: { kind: "answer", conversationId, messageId, answer: key } }));
-    },
-    answerSteps: async (conversationId, messageId, answers, submit) => {
-      set((s) => ({
-        conversations: mapConversation(s.conversations, conversationId, (c) => ({
-          ...c,
-          messages: c.messages.map((m) => {
-            const q = m.id === messageId ? m.question : undefined;
-            if (!q?.steps || q.submitted) return m;
-            const steps = q.steps.map(({ answer: _, ...step }, i) => (answers[i] ? { ...step, answer: answers[i]! } : step));
-            return { ...m, question: { ...q, steps, ...(submit ? { submitted: true } : {}) } };
-          }),
-        })),
-      }));
-      return !!(await send("PATCH", messagePath(conversationId, messageId), { question: { answers, submit } }, { label: submit ? "Answers" : "Answer", check: { kind: "answers", conversationId, messageId, answers, submit } }));
-    },
+    answerQuestion: (conversationId, messageId, key) => answerCard(conversationId, messageId, (q) => ({ ...q, answer: key }), true, { answer: key }, { label: "Answer", check: { kind: "answer", conversationId, messageId, answer: key } }),
+    answerSteps: (conversationId, messageId, answers, submit) =>
+      answerCard(
+        conversationId,
+        messageId,
+        (q) => (!q.steps || q.submitted ? q : { ...q, steps: q.steps.map(({ answer: _, ...step }, i) => (answers[i] ? { ...step, answer: answers[i]! } : step)), ...(submit ? { submitted: true } : {}) }),
+        submit,
+        { answers, submit },
+        { label: submit ? "Answers" : "Answer", check: { kind: "answers", conversationId, messageId, answers, submit } },
+      ),
     deleteMessage: (conversationId, messageId) => {
       set((s) => ({ conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== messageId) })) }));
       void send("DELETE", messagePath(conversationId, messageId), undefined, { label: "Deleted message", check: { kind: "delete", conversationId, messageId } });
@@ -661,6 +653,30 @@ function retry(entryId: string) {
 }
 
 // ------------------------------------------------------------------ writes
+
+/**
+ * Answer a question card. A final answer goes with the id of the user's message that delivers it,
+ * which the workspace posts in the same request (server/bots/service.ts deliverAnswer): an answer
+ * saved whose acknowledgement is lost still reaches the bot, a retry posts nothing twice, and one
+ * the card refuses (closed meanwhile) posts nothing. The message shows here at once, as a sent one
+ * does; the workspace's own copy replaces it. True once the workspace confirmed the answer.
+ */
+async function answerCard(conversationId: string, messageId: string, change: (q: Question) => Question, final: boolean, body: Record<string, unknown>, write: Write): Promise<boolean> {
+  const reply = final ? uid() : undefined;
+  useBots.setState((s) => ({
+    ...(reply ? { sending: [...s.sending, reply] } : {}),
+    conversations: mapConversation(s.conversations, conversationId, (c) => {
+      const card = c.messages.find((m) => m.id === messageId);
+      if (!card?.question) return c;
+      const question = change(card.question);
+      const messages = c.messages.map((m) => (m.id === messageId ? { ...m, question } : m));
+      return { ...c, messages: reply ? [...messages, { id: reply, author: "me", at: Date.now(), text: answerText(question), replyTo: messageId }] : messages };
+    }),
+  }));
+  const sent = await send("PATCH", messagePath(conversationId, messageId), { question: { ...body, ...(reply ? { reply } : {}) } }, write);
+  if (reply) useBots.setState((s) => ({ sending: s.sending.filter((id) => id !== reply) }));
+  return !!sent;
+}
 
 /**
  * How long a write, or a read the tab waits on, gets for its headers and body. A request that ignores

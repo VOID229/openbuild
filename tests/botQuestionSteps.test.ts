@@ -3,7 +3,7 @@
 // every answer in one message. A card of one question stays as it was.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
-import type { BotMessage, Question, QuestionStep } from "../shared/bots";
+import { answerText, type BotMessage, type Question, type QuestionStep } from "../shared/bots";
 
 const lettered = (labels: string[]) => labels.map((label, i) => ({ key: String.fromCharCode(65 + i), label }));
 const STEPS: QuestionStep[] = [
@@ -16,7 +16,11 @@ const bot = { id: "builder", name: "Builder", look: { shape: "ghost", color: "bl
 /** The workspace: its messages, and every write the page made to it, in order. */
 let stored: BotMessage[] = [];
 let writes: { method: string; body: any }[] = [];
-const posts = () => writes.filter((w) => w.method === "POST").map((w) => w.body as BotMessage);
+/** The user's messages that reached the workspace: posted, or delivering an answer with it (`reply`). */
+let delivered: BotMessage[] = [];
+const posts = () => delivered;
+/** How the next answer's request goes wrong on the way: saved with its acknowledgement lost, or dropped before it's saved. */
+let trouble: "lost-ack" | "dropped" | undefined;
 const card = (id: string) => stored.find((m) => m.id === id)!.question!;
 
 const headers = { "x-openbuild-server": "srv" };
@@ -30,20 +34,32 @@ async function workspace(req: Request): Promise<Response> {
   if (req.method === "POST" && rest.endsWith("/messages")) {
     const body = (await req.json()) as BotMessage;
     writes.push({ method: "POST", body });
-    if (!stored.some((m) => m.id === body.id)) stored.push(body);
+    if (!stored.some((m) => m.id === body.id)) stored.push(body), delivered.push(body);
     return Response.json(body, { headers });
   }
   const id = /\/messages\/([^/]+)$/.exec(rest)?.[1];
   if (req.method === "PATCH" && id) {
-    const body = (await req.json()) as { question?: { answer?: string; answers?: (string | null)[]; submit?: boolean } };
+    const body = (await req.json()) as { question?: { answer?: string; answers?: (string | null)[]; submit?: boolean; reply?: string } };
     writes.push({ method: "PATCH", body });
+    const lost = trouble;
+    trouble = undefined;
+    // A gateway's 502: from the way there, so the page can't tell whether it ran.
+    const gateway = () => Response.json({ error: "Bad gateway" }, { status: 502 });
+    if (lost === "dropped") return gateway();
     const m = stored.find((x) => x.id === id)!;
-    // As the server keeps them (server/bots/service.ts answerQuestion and answerSteps): a closed card refuses them.
+    // As the server keeps them (server/bots/service.ts answerQuestion and answerSteps): a closed card
+    // refuses them, and a final answer's message is posted with it, once whatever the retries.
     const q = m.question!;
     if (q.closed) return Response.json({ error: q.steps ? "That card was closed." : "That question was closed." }, { status: 400, headers });
     if (typeof body.question?.answer === "string") m.question = { ...q, answer: body.question.answer };
     if (body.question?.answers && q.steps && !q.submitted) m.question = { ...q, steps: q.steps.map(({ answer: _, ...s }, i) => (body.question!.answers![i] ? { ...s, answer: body.question!.answers![i]! } : s)), ...(body.question.submit ? { submitted: true } : {}) };
-    return Response.json(m, { headers });
+    const reply = body.question?.reply;
+    if (reply && (typeof body.question?.answer === "string" || body.question?.submit) && !stored.some((x) => x.id === reply)) {
+      const message: BotMessage = { id: reply, author: "me", at: Date.now(), text: answerText(m.question!), replyTo: m.id };
+      stored.push(message);
+      delivered.push(message);
+    }
+    return lost === "lost-ack" ? gateway() : Response.json(m, { headers });
   }
   return Response.json({ ok: true }, { headers });
 }
@@ -70,6 +86,8 @@ beforeEach(() => {
     { id: "many", author: "builder", at: 3, text: STEPS[0]!.title, question: { ...STEPS[0]!, steps: STEPS.map((s) => ({ ...s })) } },
   ];
   writes = [];
+  delivered = [];
+  trouble = undefined;
 });
 
 class Chat extends Page {
@@ -277,6 +295,7 @@ describe.skipIf(!browser)("a card of several questions", () => {
     // Typed, then picked: the pick is the answer.
     stored.find((m) => m.id === "one")!.question = { title: "Use the staging key?", options: lettered(["Yes", "No"]) };
     writes = [];
+    delivered = [];
     page = await open();
     await page.click(`${one} .bm-own input`);
     await page.send("Input.insertText", { text: "Maybe" });
@@ -294,7 +313,8 @@ describe.skipIf(!browser)("a card of several questions", () => {
     await page.until(`document.querySelector('[data-id="one"] .bm-option-on .bm-option-label')?.textContent === "No"`);
     expect(posts().map((m) => ({ text: m.text, replyTo: m.replyTo }))).toEqual([{ text: "B: No", replyTo: "one" }]);
     expect(card("one").answer).toBe("B");
-    expect(writes.filter((w) => w.method === "PATCH").map((w) => w.body)).toEqual([{ question: { answer: "B" } }]);
+    // One request: the answer, with the id of the message that delivers it. The page posts nothing itself.
+    expect(writes.map((w) => [w.method, w.body])).toEqual([["PATCH", { question: { answer: "B", reply: posts()[0]!.id } }]]);
   }, 30_000);
 });
 
@@ -367,6 +387,7 @@ describe.skipIf(!browser)("a closed card", () => {
     // The bot closes a card; the page doesn't know yet.
     const close = (id: string) => (stored.find((m) => m.id === id)!.question = { ...card(id), closed: "bot", reason: "You said so in the chat" });
     writes = [];
+    delivered = [];
 
     // Submitting the card of several is refused, nothing is posted, and the card shows closed.
     close("many");
@@ -395,4 +416,83 @@ describe.skipIf(!browser)("a closed card", () => {
     page = await open();
     expect(await shown(page, "one")).toMatchObject({ closed: "Closed · You said yes in the chat", usable: 0, own: false });
   }, 30_000);
+});
+
+describe.skipIf(!browser)("an answer on a bad connection", () => {
+  /** Waits for the workspace to have had every write, and the page its snapshot after the last. */
+  const quiet = async (page: Chat) => {
+    await page.settle();
+    await Bun.sleep(400);
+    await page.settle();
+  };
+
+  test("saved with its acknowledgement lost, a single card's answer still reaches the bot, once", async () => {
+    const page = await open();
+    trouble = "lost-ack";
+    await page.pick("one", "Yes");
+    await quiet(page);
+    // Saved, and its message with it: the bot is woken, though the page never heard back.
+    expect(card("one").answer).toBe("A");
+    expect(posts().map((m) => ({ text: m.text, replyTo: m.replyTo }))).toEqual([{ text: "A: Yes", replyTo: "one" }]);
+    expect(writes.map((w) => w.method)).toEqual(["PATCH"]);
+    // The page shows it all as the workspace has it, with nothing left to send again.
+    await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+    expect(await page.eval<string | null>(`document.querySelector('[data-id="one"] .bm-option-on .bm-option-label')?.textContent ?? null`)).toBe("Yes");
+    expect(await page.eval<boolean>(`[...document.querySelectorAll('.bm-row')].some((r) => r.dataset.id === ${JSON.stringify(posts()[0]!.id)})`)).toBe(true);
+  }, 30_000);
+
+  test("submitted with its acknowledgement lost, a card of several's answers still reach the bot, once", async () => {
+    const page = await open();
+    await page.pick("many", "SQLite");
+    await page.at("2 of 3");
+    await page.pick("many", "Every night");
+    await page.at("3 of 3");
+    await page.pick("many", "Yes");
+    await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+    await quiet(page);
+    writes = [];
+    trouble = "lost-ack";
+    await page.click('[data-id="many"] .bm-steps-submit');
+    await quiet(page);
+    expect(card("many").submitted).toBe(true);
+    const text = "1. Which database should it use? → SQLite\n2. When should the backup run? → Every night\n3. Deploy to Dev when it's green? → Yes";
+    expect(posts().map((m) => ({ text: m.text, replyTo: m.replyTo }))).toEqual([{ text, replyTo: "many" }]);
+    expect(writes.map((w) => w.method)).toEqual(["PATCH"]);
+    await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+    await page.until(`!!document.querySelector('[data-id="many"] .bm-answered')`);
+    // The message shows as the answers' short list, as one sent from here does.
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('.bm-echo-row')].map((r) => r.textContent)`)).toEqual(["1SQLite", "2Every night", "3Yes"]);
+  }, 30_000);
+
+  for (const kind of ["one", "many"] as const) {
+    test(`dropped before it's saved, ${kind === "one" ? "a single card's answer" : "a card of several's answers"} can be sent again, and reach the bot once`, async () => {
+      const page = await open();
+      if (kind === "many") {
+        // Answered to the last question first, as the user would.
+        for (const [label, at] of [["SQLite", "2 of 3"], ["Every night", "3 of 3"]] as const) {
+          await page.pick("many", label);
+          await page.at(at);
+        }
+        await page.pick("many", "Yes");
+        await page.until(`!document.querySelector('[data-id="many"] .bm-steps-submit').disabled`);
+        await quiet(page);
+        writes = [];
+      }
+      trouble = "dropped";
+      if (kind === "one") await page.pick("one", "Yes");
+      else await page.click('[data-id="many"] .bm-steps-submit');
+      // Nothing saved, nothing delivered, and the change waits with its Retry.
+      await page.until(`!!document.querySelector('.bots-unconfirmed-row button:not([aria-label])')`);
+      expect(posts()).toEqual([]);
+      expect(kind === "one" ? card("one").answer : card("many").submitted).toBeUndefined();
+      await page.click(".bots-unconfirmed-row button:not([aria-label])");
+      await page.until(`!document.querySelector('.bots-unconfirmed-row')`);
+      await quiet(page);
+      // Sent again as it was, message id and all: delivered now, once.
+      expect(writes.map((w) => w.method)).toEqual(["PATCH", "PATCH"]);
+      expect(writes[1]!.body).toEqual(writes[0]!.body);
+      expect(posts().map((m) => [m.id, m.replyTo])).toEqual([[writes[0]!.body.question.reply, kind]]);
+      expect(kind === "one" ? card("one").answer : card("many").submitted).toBe(kind === "one" ? "A" : true);
+    }, 30_000);
+  }
 });

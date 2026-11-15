@@ -601,14 +601,9 @@ function QuestionSteps({ conversation, message }: { conversation: Conversation; 
     const final = answers.map((s) => s.answer ?? null);
     setPicked(Object.fromEntries(final.map((a, i) => [i, a])));
     setOwn({});
-    const text = answersText(answers);
-    // The message that delivers the answers wakes the bot, so it goes only once the card has taken
-    // them: one closed meanwhile refuses them, and then shows as closed.
-    void st.answerSteps(conversation.id, message.id, final, true).then((taken) => {
-      if (!taken) return;
-      useBots.getState().post(conversation.id, { author: "me", text, replyTo: message.id });
-      noticeAnswer(conversation.id, message.author, "");
-    });
+    // The message that delivers the answers (and wakes the bot) goes with them, posted by the
+    // workspace once the card takes them: one closed meanwhile refuses them, and then shows as closed.
+    void st.answerSteps(conversation.id, message.id, final, true).then((taken) => taken && noticeAnswer(conversation.id, message.author, ""));
   };
   return (
     <div
@@ -705,14 +700,10 @@ function SingleQuestion({ conversation, message }: { conversation: Conversation;
   const [own, setOwn] = useState("");
   // Answered here, or closed: by the bot that asked it, or from the coding thread whose question it passed on.
   const settled = q.answer !== undefined || !!q.closed;
-  const answer = (key: string, text: string, label: string) => {
+  const answer = (key: string, label: string) => {
     if (settled) return;
-    // As with a card of several: the answer's message goes only once the card has taken it.
-    void useBots.getState().answerQuestion(conversation.id, message.id, key).then((taken) => {
-      if (!taken) return;
-      useBots.getState().post(conversation.id, { author: "me", text, replyTo: message.id });
-      noticeAnswer(conversation.id, message.author, label);
-    });
+    // As with a card of several: the answer's message goes with the answer, posted by the workspace.
+    void useBots.getState().answerQuestion(conversation.id, message.id, key).then((taken) => taken && noticeAnswer(conversation.id, message.author, label));
   };
   return (
     <div className="bm-question">
@@ -725,7 +716,7 @@ function SingleQuestion({ conversation, message }: { conversation: Conversation;
             type="button"
             className={cx("bm-option", q.answer === o.key && "bm-option-on", settled && q.answer !== o.key && "bm-option-off")}
             disabled={settled}
-            onClick={() => answer(o.key, `${o.key}: ${o.label}`, o.label)}
+            onClick={() => answer(o.key, o.label)}
           >
             <span className="bm-option-key">{q.answer === o.key ? <Check size={13} strokeWidth={3} /> : o.key}</span>
             <span className="bm-option-label">{o.label}</span>
@@ -746,7 +737,7 @@ function SingleQuestion({ conversation, message }: { conversation: Conversation;
           className="bm-own"
           onSubmit={(e) => {
             e.preventDefault();
-            if (own.trim()) answer(own.trim(), own.trim(), own.trim());
+            if (own.trim()) answer(own.trim(), own.trim());
           }}
         >
           <input className="input input-sm" value={own} maxLength={2000} placeholder="Type your own answer…" aria-label="Your own answer" onChange={(e) => setOwn(e.target.value)} />

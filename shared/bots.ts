@@ -374,6 +374,16 @@ export const answerLabel = (q: Pick<QuestionStep, "options" | "answer">): string
 export const answersText = (steps: QuestionStep[]): string => steps.map((s, i) => `${i + 1}. ${s.title} → ${answerLabel(s) ?? ""}`).join("\n");
 
 /**
+ * The user's message that delivers a card's answer, in reply to it: the option picked ("A: label")
+ * or the words typed, or every answer of a card of several (answersText).
+ */
+export function answerText(q: Question): string {
+  if (q.steps) return answersText(q.steps);
+  const picked = q.options.find((o) => o.key === q.answer);
+  return picked ? `${picked.key}: ${picked.label}` : (q.answer ?? "");
+}
+
+/**
  * Whether a message of the user's, in reply to a card, is what answering the card sends: an option's
  * "A: label" for a card of one question, or every answer of a card of several (answersText). Words
  * typed as an answer read like any other reply, so they can't be told apart and don't count.
