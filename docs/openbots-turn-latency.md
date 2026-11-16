@@ -158,7 +158,8 @@ that requests are few.
 The larger number is the history. A request in these sessions carries 67,000 prompt tokens at the
 median (117,000 at the 90th percentile), against about 6,000 for the always-on part: sessions grow
 until they compact at 131,072 tokens. Compacting sooner would cut that and costs a model call and
-detail each time; it isn't changed here.
+detail each time; it isn't changed here. (It was in the next pass: see
+[the context diet](openbots-context-diet.md).)
 
 ## The Claude Code bridge: a process on standby
 

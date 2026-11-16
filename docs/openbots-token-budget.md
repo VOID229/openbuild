@@ -21,8 +21,9 @@ available. Old generations are retained for operator inspection, not exposed as 
 Bot-only `.pi/settings.json` enables automatic compaction. Pi compacts once context exceeds
 `contextWindow - reserveTokens`, and uses reserveTokens for nothing else, so the runner sets a
 per-model override (`compaction.modelOverrides["provider/id"]`) that triggers compaction at 3/4 of
-the window or 131,072 tokens, whichever is smaller: a 1M-window model compacts at 128k rather
-than about 984k. Keep-recent is 1/16 of the window, capped at 8,000. Models without a known
+the window or 80,000 tokens, whichever is smaller: a 1M-window model compacts at 80k rather
+than about 984k. It was 131,072 until 2026-11-16; [the context diet](openbots-context-diet.md)
+has why it moved, and what writes the summary now. Keep-recent is 1/16 of the window, capped at 8,000. Models without a known
 window use a 16,384 reserve and 8,000 keep-recent. Pi defaults at inspection were 16,384/20,000.
 Context windows are kept in the bots database (`model-windows`) and asked of each bot's own Pi
 after a turn, at most every 10 minutes, so starting a Pi never waits on a second one started only
