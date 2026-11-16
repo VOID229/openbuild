@@ -119,6 +119,8 @@ describe.skipIf(!browser)("phone layout", () => {
     expect(await page.eval<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(false);
     // With a mouse, the desktop's 34px tools and 36px send.
     expect(await targets(page)).toEqual({ buttons: [34, 34, 34], send: 36 });
+    // One line of it is a pill: its corners are half its height.
+    expect(await pill(page)).toEqual({ height: 50, radius: 25 });
     // A phone with a touch screen.
     await resize(page, PHONE.width, PHONE.height);
     await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
@@ -128,8 +130,18 @@ describe.skipIf(!browser)("phone layout", () => {
     const touch = await targets(page);
     expect(touch.buttons.length).toBe(3);
     for (const size of [...touch.buttons, touch.send]) expect(size).toBeGreaterThanOrEqual(40);
+    // Still a pill around the bigger buttons.
+    const round = await pill(page);
+    expect(round.radius * 2).toBe(round.height);
   }, 60_000);
 });
+
+/** The bot composer's height and its corners' radius. */
+const pill = (page: Page) =>
+  page.eval<{ height: number; radius: number }>(`(() => {
+    const el = document.querySelector('.bots-composer');
+    return { height: Math.round(el.getBoundingClientRect().height), radius: parseFloat(getComputedStyle(el).borderTopLeftRadius) };
+  })()`);
 
 /** The smaller side of each of the bot composer's buttons (files, poll, mic) and of its send button. */
 const targets = (page: Page) =>

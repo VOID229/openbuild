@@ -2768,8 +2768,7 @@ select.input {
     --radius-composer: 43.2px;
   }
 
-  .composer,
-  .bots-composer {
+  .composer {
     corner-shape: squircle;
   }
 }
