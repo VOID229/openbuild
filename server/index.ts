@@ -25,6 +25,7 @@ import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSear
 import { piRoutes } from "./pi/routes";
 import { terminalRoutes } from "./terminals";
 import { attachmentRoutes } from "./attachments";
+import { startStashFileSweep, stashRoutes } from "./stashes";
 import { usageRoutes } from "./usage/routes";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
@@ -716,6 +717,9 @@ function serve(port: number, hostname: string) {
 
       ...attachmentRoutes(api),
 
+      // Composer stashes, the same for every address and device (stashes.ts).
+      ...stashRoutes(api),
+
       ...usageRoutes(api),
 
       ...computerRoutes(api),
@@ -787,6 +791,8 @@ sessionImport.startDiscovery();
 startPullRequestSweep(() => refreshChats(15_000));
 // Closed threads' worktrees, a day after they closed (when the setting is on). A paired device's goes through its proxy.
 startClosedWorktreeSweep(removeRemoteWorktree);
+// Files of stashes used or removed long enough ago that no composer is still waiting to send them.
+startStashFileSweep();
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 // Only listening on the LAN warrants it: loopback stays on this computer, the tailnet is gated by Tailscale accounts.

@@ -63,6 +63,16 @@ function open(): Database {
     updated_at INTEGER NOT NULL
   )`);
   db.run("CREATE TABLE IF NOT EXISTS chat_summaries (id TEXT PRIMARY KEY, version TEXT NOT NULL, data TEXT NOT NULL)");
+  // Composer stashes (server/stashes.ts), one row each; a used or removed one keeps a tombstone.
+  db.run(`CREATE TABLE IF NOT EXISTS stashes (
+    id TEXT PRIMARY KEY,
+    store TEXT NOT NULL,
+    data TEXT,
+    fingerprint TEXT,
+    created_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  )`);
+  db.run("CREATE INDEX IF NOT EXISTS stashes_listing ON stashes(store, deleted_at, created_at)");
   // Summaries now list the pull requests a thread opened: rebuild the ones that may have some, once.
   if (!db.query("SELECT 1 FROM kv WHERE key = 'summaries-opened-prs'").get()) {
     db.run("DELETE FROM chat_summaries WHERE id IN (SELECT id FROM chats WHERE instr(data, 'gh pr create') > 0)");
@@ -236,6 +246,56 @@ export function listValues(prefix: string): [string, string][] {
 
 export function setValue(key: string, value: string) {
   db.query("INSERT INTO kv (key, value, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(key) DO UPDATE SET value = ?2, updated_at = ?3").run(key, value, Date.now());
+}
+
+// ---------------------------------------------------------------- stashes
+
+export interface StashRow {
+  id: string;
+  store: string;
+  data: string;
+  fingerprint: string;
+  createdAt: number;
+}
+
+/** A store's current stashes, newest first: ids only, so a browser fetches just the ones it lacks. */
+export function stashIds(store: string): string[] {
+  return db.query<{ id: string }, [string]>("SELECT id FROM stashes WHERE store = ?1 AND deleted_at IS NULL ORDER BY created_at DESC").all(store).map((r) => r.id);
+}
+
+/** The given current stashes of a store as stored JSON. */
+export function stashesById(store: string, ids: string[]): { id: string; data: string }[] {
+  const find = db.query<{ data: string }, [string, string]>("SELECT data FROM stashes WHERE id = ?1 AND store = ?2 AND deleted_at IS NULL");
+  return ids.flatMap((id) => {
+    const row = find.get(id, store);
+    return row ? [{ id, data: row.data }] : [];
+  });
+}
+
+/** Every stash's stored JSON, removed ones included as null (to tell which stashed files are still wanted). */
+export function allStashes(): { id: string; data: string | null; deletedAt: number | null }[] {
+  return db.query<{ id: string; data: string | null; deleted_at: number | null }, []>("SELECT id, data, deleted_at FROM stashes").all()
+    .map((r) => ({ id: r.id, data: r.data, deletedAt: r.deleted_at }));
+}
+
+/**
+ * Keep a stash. "kept" when it's stored (now or already), "deleted" when it was used or removed
+ * (it stays that way), "duplicate" when `dedupe` is set and the store already has one just like it.
+ */
+export function putStash(row: StashRow, dedupe = false): "kept" | "deleted" | "duplicate" {
+  return db.transaction(() => {
+    const found = db.query<{ deleted_at: number | null }, [string]>("SELECT deleted_at FROM stashes WHERE id = ?1").get(row.id);
+    if (found) return found.deleted_at ? "deleted" : "kept";
+    if (dedupe && db.query("SELECT 1 FROM stashes WHERE store = ?1 AND fingerprint = ?2 AND deleted_at IS NULL").get(row.store, row.fingerprint)) return "duplicate";
+    db.query("INSERT INTO stashes (id, store, data, fingerprint, created_at) VALUES (?1, ?2, ?3, ?4, ?5)").run(row.id, row.store, row.data, row.fingerprint, row.createdAt);
+    return "kept";
+  })();
+}
+
+/** Drop a stash's content, keeping a tombstone so a browser that still has it can't bring it back. */
+export function deleteStash(id: string, store: string) {
+  db.query("INSERT INTO stashes (id, store, data, fingerprint, created_at, deleted_at) VALUES (?1, ?2, NULL, NULL, ?3, ?3) ON CONFLICT(id) DO UPDATE SET data = NULL, fingerprint = NULL, deleted_at = coalesce(deleted_at, ?3)")
+    .run(id, store, Date.now());
 }
 
 /** Snapshot the database into backups/ unless a recent snapshot exists; prune old ones. */
