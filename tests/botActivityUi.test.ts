@@ -334,6 +334,32 @@ test("activity lines in a row fold into one quiet toggle, opened on a click; an 
   for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(true);
 });
 
+test("a bot that couldn't reply, mid-run, splits the run and shows on its own, with why; a minute on, the run joins up", async () => {
+  const { shownReplyError } = await import("../shared/bots");
+  // The line as the runner posts it (runner.ts, when a reply fails): a random id, the bot as author, no text.
+  const failed = { id: crypto.randomUUID(), author: "scout", at: 5, text: "", event: { kind: "error", text: "Couldn't reply", detail: shownReplyError("Codex error: The usage limit has been reached") } };
+  const closed = (id: string) => event(id, "scout", { kind: "thread", text: "Closed a thread", detail: "Fix the build", threadId: "t1" });
+  // Opened a second before the failure's minute is up (ERROR_SHOWN_MS), so it's still in the chat.
+  clock = 5 + 59_000;
+  await show([{ id: "m1", author: "me", at: 1, text: "Tidy up, please." }, closed("e2"), closed("e3"), closed("e4"), failed, closed("e6"), closed("e7")]);
+  // Good news either side folds, and counts only itself: the failure isn't "1 more" in either label.
+  const runs = () => [...document.querySelectorAll(".bm-events")].map((r) => r.querySelector(".bm-events-toggle")!.textContent);
+  expect(runs()).toEqual(["Closed 3 threads", "Closed 2 threads"]);
+  // The failure is between them, outside both, in view, with what went wrong.
+  const error = line(failed.id);
+  expect(error.closest(".bm-events")).toBeNull();
+  expect(error.hidden).toBe(false);
+  expect(error.textContent).toContain("Scout couldn't reply");
+  expect(error.textContent).toContain("Codex error: The usage limit has been reached");
+  expect(lines().map((l) => l.getAttribute("data-id"))).toEqual(["e2", "e3", "e4", failed.id, "e6", "e7"]);
+  // Its minute up, it goes, and what's left of the run is one run again.
+  clock = 5 + 60_000;
+  await act(async () => void (await new Promise((r) => setTimeout(r, 1_300))));
+  await frames();
+  expect(line(failed.id)).toBeNull();
+  expect(runs()).toEqual(["Closed 5 threads"]);
+}, 10_000);
+
 test("a mention followed by the rest of the bot's full name reads as the name alone, and copies whole", async () => {
   await show([{ id: "m1", author: "me", at: 1, text: "@Scout · Primary hey" }], [{ ...scout, name: "Scout · Primary" }, juniper]);
   const mention = document.querySelector(".bm-mention")!;

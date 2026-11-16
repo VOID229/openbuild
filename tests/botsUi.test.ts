@@ -236,15 +236,6 @@ test("a folded run of activity says what was done, with a count, most done first
   expect(runLabel([closed, closed, huddle])).toBe("Closed 2 threads, 1 more");
   expect(runLabel(times(3, huddle))).toBe("3 background actions");
   expect(runLabel([huddle, { kind: "model", text: "Switched to GPT 6" }])).toBe("2 background actions");
-  // A bot that couldn't reply is news: it says so, and comes first, ahead of however much good news.
-  const failed = { kind: "error", text: "Couldn't reply", detail: "rate limited" };
-  expect(runLabel([failed])).toBe("Couldn't reply once");
-  expect(runLabel(times(2, failed))).toBe("Couldn't reply 2 times");
-  expect(runLabel([...times(14, closed), failed])).toBe("Couldn't reply once, closed 14 threads");
-  expect(runLabel([...times(4, closed), ...times(3, started), failed, { kind: "thread", text: "Added a project" }])).toBe("Couldn't reply once, closed 4 threads, 4 more");
-  expect(runLabel([huddle, huddle, failed])).toBe("Couldn't reply once, 2 more");
-  // Followed up counts times too, but it's not "the same noun" as a failure before it.
-  expect(runLabel([failed, { kind: "routine", text: "Followed up" }, { kind: "routine", text: "Followed up" }])).toBe("Couldn't reply once, followed up 2 times");
   // A text that only looks like a key of the table isn't one.
   expect(runLabel([{ kind: "thread", text: "constructor" }, { kind: "thread", text: "toString" }])).toBe("2 background actions");
 });
