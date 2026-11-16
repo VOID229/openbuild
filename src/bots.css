@@ -2170,6 +2170,26 @@
     margin-right: 0;
     margin-left: var(--bm-actions-w);
   }
+
+  /* That room counts as the message: a pointer beside the bubble, where its actions come up, is
+     already hovering it. As tall as the bubble and as wide as the room kept for the actions, so it
+     never reaches another message or anything else in the conversation, and moves nothing. It's the
+     bubble's own, so a drag selecting text that ends there ends in the bubble, as it did beside it;
+     placed against the line, which is the bubble's box, without making the bubble a positioned box.
+     The actions come after it, so their buttons paint over it and take their own clicks. */
+  .bm-line:has(> .bm-actions) > .bm-bubble::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 100%;
+    width: var(--bm-actions-w);
+  }
+
+  .bm-mine .bm-line:has(> .bm-actions) > .bm-bubble::after {
+    right: 100%;
+    left: auto;
+  }
 }
 
 .bm-line:hover .bm-actions,
