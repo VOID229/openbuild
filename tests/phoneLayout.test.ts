@@ -19,7 +19,10 @@ afterAll(async () => {
   await server?.stop();
 });
 
-const READY = "window.store?.getState().chatsLoaded && window.bots?.getState().loaded";
+// Loaded is not enough: the app mounts a little later, and its routing starts then by applying the URL
+// ("/": no thread, OpenBots closed), undoing a thread or OpenBots a test opened before it. Routing has
+// run once "/" reads "/new".
+const READY = `window.store?.getState().chatsLoaded && window.bots?.getState().loaded && location.pathname === "/new"`;
 const PHONE = { width: 390, height: 844 };
 
 const resize = (page: Page, width: number, height: number) =>
