@@ -20,6 +20,7 @@ export class AttachmentError extends Error {
 // Not from handlers.ts: the bots' service loads this file, and shouldn't load the chat proxy with it.
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
+/** Where a file store keeps its files: message attachments here, stashed files in their own folder (server/stashes.ts). */
 const root = () => join(dataDir(), "attachments");
 export const isAttachmentId = (id: unknown): id is string => typeof id === "string" && /^[A-Za-z0-9_-]{6,64}$/.test(id);
 
@@ -47,12 +48,12 @@ interface Meta {
   total: number;
 }
 
-const metaPath = (id: string) => join(root(), `${id}.json`);
-const filePath = (id: string, name: string) => join(root(), id, name);
+const metaPath = (id: string, dir: string) => join(dir, `${id}.json`);
+const filePath = (id: string, name: string, dir: string) => join(dir, id, name);
 
-function readMeta(id: string): Meta | undefined {
+function readMeta(id: string, dir: string): Meta | undefined {
   try {
-    const m = JSON.parse(readFileSync(metaPath(id), "utf8"));
+    const m = JSON.parse(readFileSync(metaPath(id, dir), "utf8"));
     return typeof m?.name === "string" && typeof m.total === "number" ? m : undefined;
   } catch {
     return undefined;
@@ -60,11 +61,11 @@ function readMeta(id: string): Meta | undefined {
 }
 
 /** A stored file as it is now. `done` once every byte the sender promised is here. */
-export function stored(id: string): (StoredFile & { done: boolean }) | undefined {
+export function stored(id: string, dir = root()): (StoredFile & { done: boolean }) | undefined {
   if (!isAttachmentId(id)) return undefined;
-  const meta = readMeta(id);
+  const meta = readMeta(id, dir);
   if (!meta) return undefined;
-  const path = filePath(id, meta.name);
+  const path = filePath(id, meta.name, dir);
   let size = 0;
   try {
     size = statSync(path).size;
@@ -78,23 +79,23 @@ export function stored(id: string): (StoredFile & { done: boolean }) | undefined
  * Add a piece of a file at `offset`. A piece sent again (its answer was lost) lands where it did the
  * first time: whatever was kept from `offset` on is replaced, so a retry never doubles anything.
  */
-export function writeChunk(id: string, at: { name: string; mime?: string | null; offset: number; total: number }, bytes: Uint8Array): StoredFile & { done: boolean } {
+export function writeChunk(id: string, at: { name: string; mime?: string | null; offset: number; total: number }, bytes: Uint8Array, dir = root()): StoredFile & { done: boolean } {
   if (!isAttachmentId(id)) throw new AttachmentError("Bad file id.");
   const { offset, total } = at;
   if (!Number.isSafeInteger(total) || total < 0) throw new AttachmentError("Bad file size.");
   if (total > MAX_ATTACHMENT_BYTES) throw new AttachmentError(`Files can be up to ${MAX_ATTACHMENT_BYTES / 1024 ** 3} GB.`, 413);
   if (!Number.isSafeInteger(offset) || offset < 0 || offset + bytes.byteLength > total) throw new AttachmentError("That piece doesn't fit the file.");
   if (bytes.byteLength > ATTACHMENT_CHUNK * 2) throw new AttachmentError("That piece is too large.", 413);
-  let meta = readMeta(id);
+  let meta = readMeta(id, dir);
   if (!meta) {
     if (offset !== 0) throw new AttachmentError("That file's upload has to start over.", 409);
     const name = safeName(at.name);
     meta = { name, mime: mimeOf(name, at.mime), total };
-    mkdirSync(join(root(), id), { recursive: true, mode: 0o700 });
-    writeFileSync(filePath(id, name), "");
-    writeFileSync(metaPath(id), JSON.stringify(meta), { mode: 0o600 });
+    mkdirSync(join(dir, id), { recursive: true, mode: 0o700 });
+    writeFileSync(filePath(id, name, dir), "");
+    writeFileSync(metaPath(id, dir), JSON.stringify(meta), { mode: 0o600 });
   } else if (meta.total !== total) throw new AttachmentError("That id already holds another file.", 409);
-  const path = filePath(id, meta.name);
+  const path = filePath(id, meta.name, dir);
   const have = existsSync(path) ? statSync(path).size : 0;
   if (offset > have) throw new AttachmentError("A piece before this one is missing.", 409);
   const fd = openSync(path, "r+");
@@ -109,18 +110,18 @@ export function writeChunk(id: string, at: { name: string; mime?: string | null;
   return { id, name: meta.name, mime: meta.mime, size, path, done: size === total };
 }
 
-export function remove(id: string) {
+export function remove(id: string, dir = root()) {
   if (!isAttachmentId(id)) return;
-  rmSync(join(root(), id), { recursive: true, force: true });
-  rmSync(metaPath(id), { force: true });
+  rmSync(join(dir, id), { recursive: true, force: true });
+  rmSync(metaPath(id, dir), { force: true });
 }
 
 /** Types a browser may show in place. Everything else is only ever downloaded. */
 const INLINE = /^(audio\/|video\/|image\/(png|jpeg|gif|webp|avif)$|application\/pdf$|text\/plain$)/;
 
 /** The file itself, whole or the range asked for (a player seeking through a video). */
-export function serve(req: Request, id: string): Response {
-  const file = stored(id);
+export function serve(req: Request, id: string, dir = root()): Response {
+  const file = stored(id, dir);
   if (!file?.done) return bad("No such file", 404);
   const inline = INLINE.test(file.mime);
   const headers: Record<string, string> = {
@@ -146,15 +147,15 @@ export function serve(req: Request, id: string): Response {
 }
 
 /** A PUT of one piece: where it goes is in the query, the bytes are the body. */
-export async function receive(req: Request, id: string): Promise<Response> {
-  return receiveBytes(req.url, id, new Uint8Array(await req.arrayBuffer()));
+export async function receive(req: Request, id: string, dir = root()): Promise<Response> {
+  return receiveBytes(req.url, id, new Uint8Array(await req.arrayBuffer()), dir);
 }
 
 /** The same with the body already read: it's written before this returns, with nothing awaited. */
-export function receiveBytes(url: string, id: string, bytes: Uint8Array): Response {
+export function receiveBytes(url: string, id: string, bytes: Uint8Array, dir = root()): Response {
   const q = new URL(url).searchParams;
   try {
-    return Response.json(writeChunk(id, { name: q.get("name") ?? "", mime: q.get("type"), offset: Number(q.get("offset") ?? 0), total: Number(q.get("total") ?? NaN) }, bytes));
+    return Response.json(writeChunk(id, { name: q.get("name") ?? "", mime: q.get("type"), offset: Number(q.get("offset") ?? 0), total: Number(q.get("total") ?? NaN) }, bytes, dir));
   } catch (err) {
     if (err instanceof AttachmentError) return bad(err.message, err.status);
     throw err;
