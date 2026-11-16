@@ -55,6 +55,8 @@ export interface StashOptions {
 const RETRY_MIN = 2000;
 const RETRY_MAX = 60_000;
 const POLL_EVERY = 30_000;
+/** A timer that doesn't hold a script open where there's no page (a test's stand-in window). */
+const background = <T>(timer: T): T => ((timer as { unref?: () => void }).unref?.(), timer);
 
 const isStashed = (v: unknown): v is Stashed => {
   const s = v as Stashed;
@@ -197,10 +199,10 @@ export function createStash(name: string, remote: "threads" | "bots", options: S
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   function retry() {
     if (!options.auto || retryTimer) return;
-    retryTimer = setTimeout(() => {
+    retryTimer = background(setTimeout(() => {
       retryTimer = undefined;
       void sync();
-    }, delay);
+    }, delay));
     delay = Math.min(delay * 2, RETRY_MAX);
   }
   const changed = () => {
@@ -216,7 +218,7 @@ export function createStash(name: string, remote: "threads" | "bots", options: S
       refresh();
     });
     document.addEventListener?.("visibilitychange", () => document.visibilityState === "visible" && refresh());
-    setInterval(() => document.visibilityState === "visible" && void sync(), POLL_EVERY);
+    background(setInterval(() => document.visibilityState === "visible" && void sync(), POLL_EVERY));
     void ready.then(sync);
   }
 

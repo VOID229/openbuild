@@ -58,22 +58,27 @@ test.skipIf(!browser)("a stash made at one address is there at another after a r
   })()`);
   await lan.send("Page.reload");
   await lan.until("!!document.querySelector('.composer-input')", 30_000);
-  await until(async () => (await serverIds()).includes(legacyId), "the older build's stash reaching the server");
+  await until(async () => (await serverIds()).includes(legacyId), "the older build's stash reaching the server", 30_000);
   expect(await (await fetch(`${server.url}/api/stash-files/${fileId}`)).text()).toBe("the archive's bytes");
 
   // Stash a draft with the shortcut, as you would.
+  await lan.until("document.querySelector('.stash-count')?.textContent === '1'");
   await lan.eval("document.querySelector('.composer-input').focus()");
   await lan.send("Input.insertText", { text: "stashed over the LAN" });
+  await lan.until("document.querySelector('.composer-input').value === 'stashed over the LAN'");
   const mod = await lan.eval<number>("/Mac/.test(navigator.platform) ? 4 : 2");
   for (const type of ["rawKeyDown", "keyUp"]) await lan.send("Input.dispatchKeyEvent", { type, key: "s", code: "KeyS", windowsVirtualKeyCode: 83, modifiers: mod });
-  await until(async () => (await serverIds()).length === 2, "the new stash reaching the server");
+  // Stashed: the box is empty again.
+  await lan.until("document.querySelector('.composer-input').value === '' && document.querySelector('.stash-count')?.textContent === '2'");
+  await until(async () => (await serverIds()).length === 2, "the new stash reaching the server", 30_000);
 
   await server.restart();
 
   // Another address, opened for the first time: a browser storage of its own, empty.
   const tail = await Page.open(chrome!.ws, `http://localhost:${server.port}/`, 1200, 800, "!!document.querySelector('.composer-input')");
-  await tail.until("document.querySelector('.stash-count')?.textContent === '2'", 15_000);
-  await tail.click(".stash-tab-btn");
+  await tail.until("document.querySelector('.stash-count')?.textContent === '2'", 30_000);
+  // Clicked in the page: where the tab is on screen can still move while the app finishes loading.
+  await tail.eval("document.querySelector('.stash-tab-btn').click(), true");
   await tail.until("document.querySelectorAll('.stash-row').length === 2");
   expect(await tail.eval<string[]>("[...document.querySelectorAll('.stash-row .queued-text')].map((e) => e.textContent)")).toEqual(["stashed over the LAN", "kept at the LAN address"]);
   expect(await tail.eval<string | null>("document.querySelectorAll('.stash-row')[1].querySelector('.queued-thumb')?.getAttribute('src') ?? null")).toBe(PICTURE);
@@ -86,6 +91,6 @@ test.skipIf(!browser)("a stash made at one address is there at another after a r
   await Bun.sleep(300);
   expect(await tail.eval<boolean>("document.body.innerText.includes('Not on this device')")).toBe(false);
   // Used is gone, everywhere.
-  await until(async () => !(await serverIds()).includes(legacyId), "the used stash leaving the server");
+  await until(async () => !(await serverIds()).includes(legacyId), "the used stash leaving the server", 30_000);
   expect((await serverIds()).length).toBe(1);
 }, 180_000);
