@@ -104,6 +104,8 @@ const PROVIDER_NAMES: Record<string, string> = {
   "kimi-coding": "Kimi",
   moonshot: "Moonshot",
   zai: "Z.ai",
+  // fx's providers
+  vercel: "Vercel AI Gateway",
   [CUSTOM_PROVIDER]: "Custom",
 };
 

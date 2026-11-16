@@ -11,10 +11,12 @@ export class FxError extends Error {}
 
 /** The program to run; errors name it, since they reach the thread as they are. */
 export interface AcpProgram { name: string; command: string[]; env: Record<string, string> }
-function fxProgram(): AcpProgram {
+/** `fx acp`, starting its sessions on `provider` (one of fx's own or one its settings define) when there's one. */
+export function fxProgram(provider?: string): AcpProgram {
   const bin = fxBin();
   if (!bin) throw new FxError("Fx isn't installed on this device. Install it with: curl -fsSL https://fx.sh/setup.sh | bash");
-  return { name: "Fx", command: [bin, "acp"], env: fxEnv() };
+  // The variable rather than --provider, which an older fx would refuse to start with.
+  return { name: "Fx", command: [bin, "acp"], env: { ...fxEnv(), ...(provider ? { FX_PROVIDER: provider } : {}) } };
 }
 
 export class AcpProcess {

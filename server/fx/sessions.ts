@@ -14,7 +14,8 @@ import type { Effort, PiChatRequest, StreamEvent, Usage } from "../../shared/typ
 import * as storage from "../storage";
 import { unsupportedSteer } from "../steerErrors";
 import { clip, contentOf, unified } from "../acpContent";
-import { AcpProcess, FxError, type AcpMessage } from "./acp";
+import { AcpProcess, FxError, fxProgram, type AcpMessage } from "./acp";
+import { forgetProviders, providerNames, providerProblem, splitModel } from "./install";
 import { elicit, elicitationMethods, QUESTION_NOTE, type QuestionReply } from "./questions";
 
 /** Close a thread's fx process after this long without use (its session stays on disk). */
@@ -125,7 +126,7 @@ async function fxPermissionMode(): Promise<string | undefined> {
   })());
 }
 
-function ensure(threadId: string, cwd: string): Live {
+function ensure(threadId: string, cwd: string, provider?: string): Live {
   const existing = live.get(threadId);
   if (existing && !existing.proc.exited && existing.proc.cwd === cwd) return existing;
   if (existing) {
@@ -133,7 +134,7 @@ function ensure(threadId: string, cwd: string): Live {
     existing.proc.close();
     live.delete(threadId);
   }
-  const proc = new AcpProcess(cwd);
+  const proc = new AcpProcess(cwd, fxProgram(provider));
   const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), options: [], asks: new Map(), questions: new Map(), ready: Promise.resolve("") };
   // fx asks before an action its permission mode doesn't allow on its own: show it as a question.
   proc.on((m) => {
@@ -253,6 +254,7 @@ export function release(threadId: string) {
 export function restartIdle() {
   for (const [id, l] of live) if (!l.busy) release(id);
   configuredMode = undefined;
+  forgetProviders();
 }
 
 // ------------------------------------------------------------------ fx tools as OpenBuild tools
@@ -401,7 +403,11 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         controller.close();
       };
       try {
-        l = ensure(req.threadId, req.cwd);
+        // The provider the picked model is from (fx's own, or one its settings define).
+        const { provider, model: modelId } = splitModel(req.model, await providerNames());
+        const problem = await providerProblem(provider);
+        if (problem) throw new FxError(problem);
+        l = ensure(req.threadId, req.cwd, provider);
         if (l.busy) await Promise.race([l.idle, new Promise((r) => setTimeout(r, 15_000))]);
         if (l.busy) throw new FxError("fx is still working on this thread's previous message.");
         l.busy = true;
@@ -417,11 +423,15 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         }
         if (req.forkFrom) send({ t: "notice", message: "fx can't copy another thread's session; this thread starts fresh." });
 
-        // Model and reasoning effort for this turn.
-        const modelId = req.model.startsWith("fx/") ? req.model.slice(3) : req.model;
+        // Provider, model and reasoning effort for this turn. The provider comes first: fx lists its models.
+        const providers = l.options.find((o) => o.id === "provider");
+        if (provider && providers && providers.currentValue !== provider) {
+          if (providers.options && !providers.options.some((o) => o.value === provider)) throw new FxError(`fx has no ${provider} provider set up anymore. Pick another model.`);
+          await setOption(l, sessionId, "provider", provider);
+        }
         const model = l.options.find((o) => o.id === "model");
         if (model && model.currentValue !== modelId) {
-          if (model.options && !model.options.some((o) => o.value === modelId)) throw new FxError(`fx can't use ${modelId} with its current sign-in. Pick another model.`);
+          if (model.options && !model.options.some((o) => o.value === modelId)) throw new FxError(provider ? `fx's ${provider} provider doesn't offer ${modelId} anymore. Pick another model.` : `fx can't use ${modelId} with its current sign-in. Pick another model.`);
           await setOption(l, sessionId, "model", modelId);
         }
         const effort = l.options.find((o) => o.id === "effort" || o.category === "thought_level");
