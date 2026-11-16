@@ -91,7 +91,9 @@ prompt for what a bot needs to carry on (what it's in the middle of, what it's w
 it would otherwise have to ask for again, a line each for the rest), at most 750 words, told to
 fold the last notes in and drop what's settled. The summarizer reads the session as a transcript
 with each tool result cut to its start and end. If the model fails, runs out of room or writes
-something that isn't notes, Pi's own summary takes over, as before.
+something that isn't notes, Pi's own summary takes over, as before. `OPENBOTS_SUMMARY_TRACE` names
+a file that's told why (the reason only); it's best-effort, and a path that can't be written never
+gets in the way of that hand-over.
 
 Six of this installation's real compactions, replayed on copies of the session files cut right
 before each one, and a made-up 100,000-token session with eight facts planted in it:
@@ -213,10 +215,12 @@ until it compacted: 4% of what a request carried. The bot already has what it ju
 call that wrote it.
 
 A section now stays as the session last got it while the only difference is something that same
-session added (`server/bots/agent.ts`, `steady`). Anything else sends it afresh, at once: a memory
-written in another chat's turn, one changed, replaced or forgotten, a routine paused, removed or
-run, the user's edits. So does a Pi that just started or just summarized its session, which may no
-longer hold those calls.
+session added, and still is exactly as it added it (`server/bots/agent.ts`, `steady`). Only the add
+is held back, not the item: anything else sends the section afresh, at once. That's a memory
+written in another chat's turn, one changed, replaced or forgotten, a routine paused, resumed,
+removed or run, the user's edits, and all of those just the same when the memory or routine is one
+the session added itself (pausing a routine it just added sends the section with `[paused]`). So
+does a Pi that just started or just summarized its session, which may no longer hold those calls.
 
 ### 7. Smaller things
 
