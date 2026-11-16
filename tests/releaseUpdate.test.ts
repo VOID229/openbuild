@@ -100,6 +100,20 @@ const tap = async (page: Page, at: string | [number, number]) => {
   await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await page.settle();
 };
+/** The card's "Show more" / "Show less", if it has one. */
+const toggle = (page: Page) =>
+  page.eval<{ text: string; expanded: string | null } | undefined>(`(() => { const b = document.querySelector(${JSON.stringify(CARD)})?.querySelector('.release-card-more-toggle'); return b ? { text: b.textContent, expanded: b.getAttribute('aria-expanded') } : undefined; })()`);
+interface Box { left: number; right: number; top: number; bottom: number; width: number; height: number }
+const box = (page: Page, selector: string) =>
+  page.eval<Box>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; })()`);
+/** Each listed change: its text, and whether it's cut off at its two lines. */
+const lines = (page: Page) =>
+  page.eval<{ text: string; clamped: boolean }[]>(`[...document.querySelector(${JSON.stringify(CARD)}).querySelectorAll('.release-card-changes li')].map((li) => ({ text: li.textContent, clamped: li.scrollHeight > li.clientHeight + 1 }))`);
+/** A changelog that's long both ways: more changes than a card lists, and one too long for its two lines. */
+const LONG = [
+  "fix(bots): a reply that runs on and on, past what two lines of the card can hold, so it has to be cut short somewhere with an ellipsis and read in full only once the card is opened out (#399)",
+  ...Array.from({ length: 38 }, (_, i) => `fix(app): change number ${398 - i} (#${398 - i})`),
+];
 const calls = (page: Page) => page.eval<{ checks: number; fresh: number; updates: number; restarts: number }>("release.calls");
 /** The app coming back to a tab that was offline: one of the moments it checks by itself. */
 const online = (page: Page) => page.eval("(window.dispatchEvent(new Event('online')), true)");
@@ -303,11 +317,138 @@ describe.skipIf(!browser)("updating OpenBuild from the sidebar", () => {
     expect(listed).toHaveLength(7);
     expect(listed[0]).toBe("Bots close their own question cards");
     expect(listed[5]).toBe("Keep the thread list still while a reply streams");
-    expect(listed[6]).toBe("and 2 more");
+    // Cut short, it says so.
+    expect(listed[6]).toBe("… and 2 more");
+    expect(await toggle(page)).toMatchObject({ text: "Show more", expanded: "false" });
     // Moving off it puts the card away.
     await leave(page);
     await noCard(page);
   }, 30_000);
+
+  test("a changelog that's cut short says so, and \"Show more\" opens the card out to all of it, inside the window; a click still installs", async () => {
+    const page = await open();
+    // Short enough to fit: nothing to show more of.
+    await page.eval(`(release.publish('0.3.53-nightly', ["fix(app): one (#1)", "fix(app): two (#2)"]), true)`);
+    await online(page);
+    await view(page, "available");
+    await hover(page);
+    await titled(page, "Nightly 0.3.53 is available");
+    expect(await toggle(page)).toBeUndefined();
+    await leave(page);
+    await noCard(page);
+
+    // Only one change, but too long for its two lines: it ends in an ellipsis, and there's more to show.
+    await page.eval(`(release.publish('0.3.54-nightly', ${JSON.stringify(LONG.slice(0, 1))}), true)`);
+    await online(page);
+    await page.until("window.update.getState().info?.latest === '0.3.54-nightly'");
+    await hover(page);
+    await titled(page, "Nightly 0.3.54 is available");
+    await page.until(`!!document.querySelector(${JSON.stringify(CARD)} + ' .release-card-more-toggle')`);
+    const clamp = await page.eval<{ clamp: string; overflow: string }>(`(() => { const s = getComputedStyle(document.querySelector(${JSON.stringify(CARD)} + ' .release-card-changes li')); return { clamp: s.webkitLineClamp, overflow: s.overflow }; })()`);
+    expect(clamp).toEqual({ clamp: "2", overflow: "hidden" });
+    expect((await lines(page))[0]!.clamped).toBe(true);
+    expect(await toggle(page)).toMatchObject({ text: "Show more", expanded: "false" });
+    await leave(page);
+    await noCard(page);
+
+    // Long both ways: six changes, the first cut off, and the rest counted after an ellipsis.
+    await page.eval(`(release.publish('0.3.60-nightly', ${JSON.stringify(LONG)}), true)`);
+    await online(page);
+    await page.until("window.update.getState().info?.latest === '0.3.60-nightly'");
+    await hover(page);
+    await titled(page, "Nightly 0.3.60 is available");
+    await page.finished(CARD);
+    const short = await lines(page);
+    expect(short).toHaveLength(7);
+    expect(short[0]!.clamped).toBe(true);
+    expect(short[6]!.text).toBe("… and 33 more");
+    expect(await toggle(page)).toMatchObject({ text: "Show more", expanded: "false" });
+    const small = await box(page, CARD);
+    const button = await box(page, BUTTON);
+
+    // Shown more: every change, none cut, in a card much taller and a bit wider, still above the
+    // button and inside the window, its list scrolling past what that holds.
+    await page.click(`${CARD} .release-card-more-toggle`);
+    await page.until(`document.querySelector(${JSON.stringify(CARD)})?.hasAttribute('data-more')`);
+    await page.finished(CARD);
+    const all = await lines(page);
+    expect(all).toHaveLength(39);
+    expect(all.some((line) => line.clamped)).toBe(false);
+    expect(all[0]!.text).toStartWith("A reply that runs on and on");
+    expect(all[38]!.text).toBe("Change number 361");
+    expect(await toggle(page)).toMatchObject({ text: "Show less", expanded: "true" });
+    const big = await box(page, CARD);
+    expect(big.height).toBeGreaterThan(small.height * 1.5);
+    expect(big.width).toBeGreaterThan(small.width);
+    expect(big.width).toBeLessThanOrEqual(400);
+    expect(big.left).toBeGreaterThanOrEqual(8);
+    expect(big.right).toBeLessThanOrEqual(1100 - 8);
+    expect(big.top).toBeGreaterThanOrEqual(8);
+    expect(big.bottom).toBeLessThanOrEqual(button.top);
+    const list = await page.eval<{ scroll: number; client: number }>(`(() => { const ul = document.querySelector(${JSON.stringify(CARD)} + ' .release-card-changes'); return { scroll: ul.scrollHeight, client: ul.clientHeight }; })()`);
+    expect(list.scroll).toBeGreaterThan(list.client);
+    // The toggle and the hint are still in the card, under the list.
+    const [shown, hint] = [await box(page, `${CARD} .release-card-more-toggle`), await box(page, `${CARD} .release-card-hint`)];
+    expect(shown.bottom).toBeLessThanOrEqual(big.bottom);
+    expect(hint.bottom).toBeLessThanOrEqual(big.bottom);
+    // Opened out to be read, it stays when the pointer moves off it.
+    await leave(page);
+    await Bun.sleep(400);
+    expect((await card(page))?.title).toBe("Nightly 0.3.60 is available");
+
+    // Shown less: back to six, the same size as before, and still there to read.
+    await page.click(`${CARD} .release-card-more-toggle`);
+    await page.until(`!document.querySelector(${JSON.stringify(CARD)})?.hasAttribute('data-more')`);
+    await page.finished(CARD);
+    expect(await lines(page)).toHaveLength(7);
+    expect(await toggle(page)).toMatchObject({ text: "Show more", expanded: "false" });
+    const again = await box(page, CARD);
+    expect(Math.abs(again.height - small.height)).toBeLessThanOrEqual(1);
+    expect(Math.abs(again.width - small.width)).toBeLessThanOrEqual(1);
+
+    // Neither installed anything; a click on the button still does.
+    expect((await calls(page)).updates).toBe(0);
+    await page.click(`${CARD} .release-card-more-toggle`);
+    await page.until(`document.querySelector(${JSON.stringify(CARD)})?.hasAttribute('data-more')`);
+    await page.click(BUTTON);
+    await view(page, "installing");
+    expect((await calls(page)).updates).toBe(1);
+  }, 40_000);
+
+  test("on a phone \"Show more\" opens the card out inside the window, and its button still installs", async () => {
+    const page = await open("", { phone: true });
+    await page.eval(`(release.publish('0.3.60-nightly', ${JSON.stringify(LONG)}), true)`);
+    await online(page);
+    await view(page, "available");
+    await tap(page, BUTTON);
+    await titled(page, "Nightly 0.3.60 is available");
+    await page.finished(CARD);
+    expect(await toggle(page)).toMatchObject({ text: "Show more", expanded: "false" });
+    // A finger's worth of target.
+    expect((await box(page, `${CARD} .release-card-more-toggle`)).height).toBeGreaterThanOrEqual(32);
+    const small = await box(page, CARD);
+    const button = await box(page, BUTTON);
+
+    await tap(page, `${CARD} .release-card-more-toggle`);
+    await page.until(`document.querySelector(${JSON.stringify(CARD)})?.hasAttribute('data-more')`);
+    await page.finished(CARD);
+    expect(await lines(page)).toHaveLength(39);
+    const big = await box(page, CARD);
+    expect(big.height).toBeGreaterThan(small.height * 1.5);
+    expect(big.width).toBeGreaterThanOrEqual(small.width);
+    expect(big.left).toBeGreaterThanOrEqual(8);
+    expect(big.right).toBeLessThanOrEqual(390 - 8);
+    expect(big.top).toBeGreaterThanOrEqual(8);
+    expect(big.bottom).toBeLessThanOrEqual(button.top);
+    // The button that installs is in the card, inside the window.
+    const action = await box(page, `${CARD} .release-card-action`);
+    expect(action.bottom).toBeLessThanOrEqual(big.bottom);
+    expect((await calls(page)).updates).toBe(0);
+
+    await tap(page, `${CARD} .release-card-action`);
+    await view(page, "installing");
+    expect((await calls(page)).updates).toBe(1);
+  }, 40_000);
 
   test("installed: a click restarts the server, the icon turning, and the page reloads on the new release when it's back", async () => {
     const page = await open("ready");

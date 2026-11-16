@@ -2341,14 +2341,18 @@ select.input {
 }
 
 /* What the button says, above it: a tooltip in looks, with the changelog, the step or the error in it,
-   and on a touch screen the button that acts. */
+   and on a touch screen the button that acts. No taller than the room beside the button (--room, set
+   as it's placed): a changelog that would be scrolls. */
 .release-card {
   position: fixed;
   z-index: 300;
   left: 0;
   top: 0;
+  display: flex;
+  flex-direction: column;
   width: max-content;
   max-width: min(288px, calc(100vw - 16px));
+  max-height: var(--room, calc(100vh - 16px));
   padding: 8px 10px 9px;
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -2382,6 +2386,16 @@ select.input {
   margin: 0;
 }
 
+.release-card > * {
+  flex: none;
+}
+
+/* The whole changelog: much taller, a bit wider, still inside the window. */
+.release-card[data-more] {
+  max-width: min(400px, calc(100vw - 16px));
+  max-height: min(var(--room, calc(100vh - 16px)), 640px);
+}
+
 .release-card-title {
   font-weight: 600;
 }
@@ -2394,10 +2408,28 @@ select.input {
 
 .release-card-changes {
   display: grid;
+  flex: 0 1 auto;
+  /* Each change keeps its height when the list is held to less and scrolls. */
+  grid-auto-rows: max-content;
   gap: 4px;
+  min-height: 0;
   margin: 6px 0 0;
   padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   list-style: none;
+}
+
+.release-card[data-more] .release-card-changes {
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.release-card[data-more] .release-card-changes li {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: none;
+  line-clamp: none;
 }
 
 .release-card-changes li {
@@ -2425,6 +2457,31 @@ select.input {
 .release-card-hint {
   margin-top: 7px !important;
   font-size: 11px;
+}
+
+/* "Show more" / "Show less": quiet, under the changelog. */
+.release-card-more-toggle {
+  align-self: flex-start;
+  margin: 4px 0 -2px;
+  padding: 2px 0;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.release-card-more-toggle:hover,
+.release-card-more-toggle:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (hover: none) {
+  .release-card-more-toggle {
+    min-height: 32px;
+    margin: 2px 0 -4px;
+  }
 }
 
 /* The update's own words: as long as they are, and no wider or taller than the card can be. */
