@@ -101,3 +101,45 @@ test.skipIf(!browser)("the hover card's two lines say as much as they hold, a lo
   expect(long.lines).toBeLessThanOrEqual(2);
   expect(long.inView).toBe(true);
 }, 30_000);
+
+/** How the line of the row at the chat's end is drawn. */
+const lineAndGap = (page: Page, text: string) =>
+  page.eval<{ anim: string; clip: string; color: string; rest: string; textW: number; rowW: number }>(`(() => {
+    const scroller = document.querySelector(".bots-messages");
+    scroller.scrollTop = scroller.scrollHeight;
+    const el = document.querySelector(${JSON.stringify(text)}), cs = getComputedStyle(el);
+    const row = el.closest(".bm-working").getBoundingClientRect();
+    return { anim: cs.animationName.split(",")[0].trim(), clip: cs.backgroundClip, color: cs.color, rest: cs.getPropertyValue("--bots-glow-rest").trim(), textW: el.getBoundingClientRect().width, rowW: row.width };
+  })()`);
+/** Scout's chat, long enough to scroll. */
+const fill = (page: Page) =>
+  page.eval(`(window.bots.setState((s) => ({ conversations: s.conversations.map((c) => c.id !== "dm" ? c : { ...c, messages: Array.from({ length: 24 }, (_, i) => ({ id: "fill-" + i, author: i % 2 ? "scout" : "me", at: Date.now() - 60000 + i, text: "Message " + i + " about the build" })) }) })), true)`);
+
+for (const [label, width] of [["a laptop", 900], ["a phone", 390]] as const) {
+  test.skipIf(!browser)(`on ${label}, busy elsewhere glows as work here does`, async () => {
+    const page = await open(width);
+    await fill(page);
+    await work(page, "dm", "Running the test suite");
+    await page.until("!!document.querySelector('.bm-working-text')");
+    await page.finish(".bots-chat");
+    const working = await lineAndGap(page, ".bm-working-text");
+    await work(page, "dev", "Running the test suite");
+    await page.until("!!document.querySelector('.bm-away-text')");
+    await page.finish(".bots-chat");
+    const away = await lineAndGap(page, ".bm-away-text");
+    // The same sweep, painting the words, from the same resting colour.
+    expect(working.anim).toBe("bots-glow");
+    expect(away).toMatchObject({ anim: "bots-glow", clip: "text", color: "rgba(0, 0, 0, 0)", rest: working.rest });
+    // As wide as its words, as the working line is, so the band crosses them at the same pace.
+    expect(away.textW).toBeLessThan(away.rowW - 40);
+    if (width < 768) {
+      // Under the name in a phone's header too, as the live step there does.
+      const head = await page.eval<{ anim: string; clip: string }>(`(() => { const cs = getComputedStyle(document.querySelector(".bots-head-sub-away")); return { anim: cs.animationName, clip: cs.backgroundClip }; })()`);
+      expect(head).toEqual({ anim: "bots-glow", clip: "text" });
+    }
+    // With motion reduced it holds still, like the working line.
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await page.settle();
+    expect(await page.eval<string[]>(`[".bm-away-text", ".bots-head-sub-away"].flatMap((s) => [...document.querySelectorAll(s)].map((el) => getComputedStyle(el).animationName))`)).toEqual(width < 768 ? ["none", "none"] : ["none"]);
+  }, 30_000);
+}
