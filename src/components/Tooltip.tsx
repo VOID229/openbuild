@@ -10,8 +10,10 @@ interface Tip {
   rect: DOMRect;
 }
 
-const GAP = 8;
-const MARGIN = 8;
+/** Between a box and what it belongs to. */
+export const GAP = 8;
+/** Kept clear at the window's edges. */
+export const MARGIN = 8;
 const DELAY = 450;
 
 /** Where a floating box of `w`×`h` goes beside `rect`, flipped and clamped to stay on screen. */

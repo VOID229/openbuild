@@ -10,13 +10,15 @@
 // The card over the button says the same in words: the changelog, the step, what went wrong. With a
 // mouse it's a tooltip and the click acts. A touch screen has no hover, so there a tap opens the card
 // first (so the changelog can be read before installing) and the card carries the button that acts.
+// A changelog that doesn't all fit says where it's cut ("…"), and "Show more" opens the card out,
+// taller and a bit wider, to the whole of it (scrolling past what the window can hold).
 // State and requests are lib/releaseUpdate.ts; the styles are styles.css (.release-update, .release-card).
 import { Download, RefreshCw, RotateCw } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { changeText, tagLabel, tagVersion, UPDATE_STEPS, UPDATE_STEP_LABEL } from "../../shared/releaseUpdate";
 import { checkRelease, dismissUpdateFailure, installRelease, restartServer, updateView, useReleaseUpdate, useReleaseWatch, type UpdateView } from "../lib/releaseUpdate";
-import { place } from "./Tooltip";
+import { GAP, MARGIN, place } from "./Tooltip";
 
 /** As long as any other tooltip waits (Tooltip.tsx). */
 const HOVER_DELAY = 450;
@@ -24,7 +26,7 @@ const HOVER_DELAY = 450;
 const LEAVE_DELAY = 140;
 /** How long "You're up to date" stays after a check, unless it's being read. */
 const ANSWER_MS = 2600;
-/** The most changes a card lists; the rest are counted. */
+/** The most changes a card lists until it's shown more; the rest are counted. */
 const CHANGES_LISTED = 6;
 const SPIN_MS = 800;
 /** The slope a `SPIN_EASE` curve starts with: how much longer than a steady turn a turn that eases to rest takes. */
@@ -94,6 +96,11 @@ export function ReleaseUpdate() {
   const [pinned, setPinned] = useState(false);
   const [touch, setTouch] = useState(false);
   const open = hovered || focused || pinned;
+  // The changelog in full ("Show more"), and whether the short one is cut: changes left out, or one
+  // that doesn't fit its two lines. Shown short again each time the card opens.
+  const [more, setMore] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  useEffect(() => { if (!open) setMore(false); }, [open]);
   const id = useId();
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hover = (on: boolean) => {
@@ -142,7 +149,11 @@ export function ReleaseUpdate() {
     if (!open || !el || !anchor) return;
     const put = () => {
       if (!shown()) return void delete el.dataset.state;
-      const at = place({ side: "top", rect: anchor.getBoundingClientRect() }, el.offsetWidth, el.offsetHeight);
+      const rect = anchor.getBoundingClientRect();
+      // No taller than the room above the button, or below it if there's more there: it never covers it.
+      el.style.setProperty("--room", `${Math.max(rect.top, innerHeight - rect.bottom) - GAP - MARGIN}px`);
+      if (!el.hasAttribute("data-more")) setClamped([...el.querySelectorAll(".release-card-changes li")].some((li) => li.scrollHeight > li.clientHeight + 1));
+      const at = place({ side: "top", rect }, el.offsetWidth, el.offsetHeight);
       el.style.left = `${at.left}px`;
       el.style.top = `${at.top}px`;
       el.dataset.side = at.side;
@@ -176,15 +187,30 @@ export function ReleaseUpdate() {
       case "checking": return { title: "Checking for updates…" };
       case "available": {
         const changes = info?.changes;
-        const listed = changes?.changes.slice(0, CHANGES_LISTED) ?? [];
+        const listed = (more ? changes?.changes : changes?.changes.slice(0, CHANGES_LISTED)) ?? [];
+        const left = (changes?.total ?? 0) - listed.length;
+        // Cut short: what's left out is counted after an ellipsis, and a change too long for its two
+        // lines ends in one of its own.
+        const cut = !more && (left > 0 || clamped);
         return {
           title: `${latest} is available`,
           sub: listed.length && info?.current ? `What's new since ${tagVersion(info.current)}` : undefined,
           body: listed.length > 0 && (
-            <ul className="release-card-changes">
-              {listed.map((change, i) => <li key={i}>{changeText(change)}</li>)}
-              {changes!.total > listed.length && <li className="release-card-more">and {changes!.total - listed.length} more</li>}
-            </ul>
+            <>
+              <ul className="release-card-changes">
+                {listed.map((change, i) => <li key={i}>{changeText(change)}</li>)}
+                {left > 0 && <li className="release-card-more">{more ? "" : "… "}and {left} more</li>}
+              </ul>
+              {(cut || more) && (
+                <button type="button" className="release-card-more-toggle" aria-expanded={more} onClick={() => {
+                  setMore(!more);
+                  // Being read, it stays until put away (a press elsewhere, Escape), like a card a tap opened.
+                  setPinned(true);
+                }}>
+                  {more ? "Show less" : "Show more"}
+                </button>
+              )}
+            </>
           ),
           action: { hint: "Click to install", label: "Install update" },
         };
@@ -251,7 +277,7 @@ export function ReleaseUpdate() {
         <span className="release-update-dot" aria-hidden />
       </button>
       {open && createPortal(
-        <div ref={card} id={id} className="release-card" role="status" data-view={view} data-failed={failed ? "" : undefined} {...over}>
+        <div ref={card} id={id} className="release-card" role="status" data-view={view} data-failed={failed ? "" : undefined} data-more={more && view === "available" ? "" : undefined} {...over}>
           <p className="release-card-title">{says.title}</p>
           {says.sub && <p className="release-card-sub">{says.sub}</p>}
           {says.body}
