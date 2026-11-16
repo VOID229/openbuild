@@ -73,7 +73,8 @@ bot: all 28 machines sections sent in those two days said "not checked yet".
 
 Now the note is said from what each device last answered, and they're asked again behind the turn
 (`server/bots/machines.ts`): at most once a minute, given 150 ms, and the server asks once as it
-starts. Only the first note after a start, with nothing known yet, can wait. How bots are kept
+starts. A round of asking is given up on after 20 seconds, so a device that takes a request and
+never answers doesn't keep the next round from starting. Only the first note after a start, with nothing known yet, can wait. How bots are kept
 apart on a machine and which devices are paired are still read at the moment of the note.
 
 | With a paired device that doesn't answer | Before | After |
@@ -179,7 +180,8 @@ app's answer could be 60,000.
 - **The shell**: output up to 13,200 characters comes back whole. A longer one comes back as its
   first 4,000 and last 8,000 characters (where a command says how it went), and all of it (up to
   200,000) is kept in `~/.outputs/bash-N.txt` in the bot's own home on that machine, where it can
-  `grep` it. Twenty files per bot, reused in turn.
+  `grep` it. Twenty files per bot, reused in turn. Keeping it is given 5 seconds: a machine slow
+  to write it never holds the command's result, which then says how to ask for less instead.
 - **Its result is plain text**: what the command printed, then only what isn't the usual (a failing
   exit code, something left running, another machine). It was JSON around the output, with every
   newline and quote escaped and `"exitCode": 0` each time: 4% more characters over 631 real results.
