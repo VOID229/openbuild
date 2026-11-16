@@ -388,12 +388,13 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     a.ok(long.output.length < SHELL_SHOWN.head + SHELL_SHOWN.tail + 400, String(long.output.length));
     a.ok(long.output.startsWith('FIRST LINE\\n'));
     a.ok(long.output.endsWith('LAST LINE: 3 tests failed\\n'));
-    a.match(long.output, /\\[… [\\d,]+ characters left out here\\. All [\\d,]+ characters are in ~\\/\\.outputs\\/bash-1\\.txt: grep it, or read the part you need/);
-    a.equal(files.get('~/.outputs/bash-1.txt'), printed);
+    a.match(long.output, /\\[… [\\d,]+ characters left out here\\. All [\\d,]+ characters are in ~\\/\\.outputs\\/bash-1\\.txt: grep it, or read the part you need \\(sed -n, or read with path \\.outputs\\/bash-1\\.txt, offset and limit\\)/);
+    // Written from its home, which is where a host's files and a container's both start.
+    a.equal(files.get('.outputs/bash-1.txt'), printed);
     a.equal(long.truncated, false);
     // The next long one gets a file of its own; the names go round, so they never pile up.
     await bash('make again');
-    a.equal(files.get('~/.outputs/bash-2.txt'), printed);
+    a.equal(files.get('.outputs/bash-2.txt'), printed);
     for (let i = 0; i < 25; i++) await bash('make ' + i);
     a.equal(files.size, 20);
 
@@ -412,7 +413,9 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     a.ok(fitted.text.length < APP_SHOWN.head + APP_SHOWN.tail + 400);
     a.ok(fitted.text.startsWith('ISSUE 1\\n') && fitted.text.endsWith('ISSUE LAST'));
     a.match(fitted.text, /are in ~\\/\\.outputs\\/app-1\\.txt/);
-    a.equal(files.get('~/.outputs/app-1.txt'), listing.text);
+    a.equal(files.get('.outputs/app-1.txt'), listing.text);
+    // The bot reads the part it needs with the path the note gave it.
+    a.match(await agent.seams.handle(bot, 'read', { path: '.outputs/app-1.txt', offset: 8, limit: 32 }), /^an issue with a long description\\n\\n\\[… [\\d,]+ more characters\\. Read on with offset 40/);
     a.deepEqual([fitted.images, fitted.isError], [[], false]);
 
     // A file read without a limit is its first part, and says how much is left and where to carry on.

@@ -1353,15 +1353,17 @@ export function fitOutput(text: string, shown: { head: number; tail: number }, k
   // A few characters over isn't worth a file and a note.
   if (text.length <= (shown.head + shown.tail) * 1.1) return text;
   const left = text.length - shown.head - shown.tail;
-  const where = kept ? `All ${text.length.toLocaleString("en-US")} characters are in ${kept}: grep it, or read the part you need (read with offset and limit, or sed -n).` : "Ask again for less: a narrower query, a filter, or one page at a time.";
+  // Said both ways: `~/…` is what a shell takes, the path from its home what read takes, on the host and in a container alike.
+  const where = kept ? `All ${text.length.toLocaleString("en-US")} characters are in ~/${kept}: grep it, or read the part you need (sed -n, or read with path ${kept}, offset and limit).` : "Ask again for less: a narrower query, a filter, or one page at a time.";
   return `${text.slice(0, shown.head)}\n\n[… ${left.toLocaleString("en-US")} characters left out here. ${where} …]\n\n${text.slice(-shown.tail)}`;
 }
 
-/** Keeps a long output whole in a file in the bot's home on the machine `api` is, and says where. Undefined when it couldn't be written. */
+/** Keeps a long output whole in a file in the bot's home on the machine `api` is, and says where, from that home. Undefined when it couldn't be written. */
 async function keepOutput(api: { call: (id: string, op: string, body?: Record<string, unknown>) => Promise<unknown> }, id: string, kind: string, text: string): Promise<string | undefined> {
   const n = ((keptCount.get(`${id}:${kind}`) ?? 0) % KEPT_OUTPUTS) + 1;
   keptCount.set(`${id}:${kind}`, n);
-  const path = `~/.outputs/${kind}-${n}.txt`;
+  // From its home, not `~/…`: a container's files take a leading ~ for a folder's name.
+  const path = `.outputs/${kind}-${n}.txt`;
   try {
     await api.call(id, "fs", { op: "write", path, data: Buffer.from(text).toString("base64") });
     return path;
