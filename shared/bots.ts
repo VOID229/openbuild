@@ -1079,6 +1079,89 @@ export function authoredEventText(event: { kind: string; text: string; detail?: 
   return AUTHORED_PHRASES[text] ?? (/^\p{Lu}\p{Lu}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1));
 }
 
+/** A kind of activity as a run's label counts it: what was done, to how many of what. */
+type RunWording = { verb: string; one: string; many: string };
+const wording = (verb: string, one: string, many = `${one}s`): RunWording => ({ verb, one, many });
+const THREADS = { started: wording("Started", "thread"), stopped: wording("Stopped", "thread"), closed: wording("Closed", "thread") };
+const PROMPTS = { wrote: wording("Wrote", "prompt"), queued: wording("Queued", "prompt") };
+const SET_ROUTINE = wording("Set", "routine");
+const RAN_ROUTINE = wording("Ran", "routine");
+const SET_FOLLOW_UP = wording("Set", "follow-up");
+const FOLLOWED_UP = wording("Followed up", "time");
+const BOTS = { added: wording("Added", "bot"), removed: wording("Removed", "bot") };
+const MESSAGES = { sent: wording("Sent", "message"), received: wording("Received", "message") };
+
+/** Activity texts as a run counts them, older wordings of the same thing included. */
+const RUN_WORDINGS: Record<string, RunWording> = {
+  "Started a thread": THREADS.started,
+  "Stopped a thread": THREADS.stopped,
+  "Closed a thread": THREADS.closed,
+  "Wrote a prompt in": PROMPTS.wrote,
+  "Queued a prompt for": PROMPTS.queued,
+  "Answered a thread's question": wording("Answered", "question"),
+  "Answered a permission prompt": wording("Answered", "permission prompt"),
+  "Merged a pull request": wording("Merged", "pull request"),
+  "Added a project": wording("Added", "project"),
+  "Set a routine": SET_ROUTINE,
+  "Created routine": SET_ROUTINE,
+  "Ran a routine": RAN_ROUTINE,
+  "Ran routine": RAN_ROUTINE,
+  "Set a follow-up": SET_FOLLOW_UP,
+  "Follow-up set": SET_FOLLOW_UP,
+  "Followed up": FOLLOWED_UP,
+  "Follow-up": FOLLOWED_UP,
+  "Poll closed": wording("Closed", "poll"),
+  "Side chat closed": wording("Closed", "side chat"),
+  "New bot": wording("Made", "new bot"),
+};
+
+/** How a run counts one activity line, or undefined when it has no wording of its own. */
+function runWording(event: { kind: string; text: string; detail?: string }): RunWording | undefined {
+  const text = eventText(event);
+  // "Routine" was both setting one and running one, once; only setting one had a schedule.
+  if (text === "Routine") return event.detail?.includes(" · ") ? SET_ROUTINE : RAN_ROUTINE;
+  // A bot added to a group or taken out of one, by a bot or by the user.
+  if (event.kind === "joined" && text === "Added") return BOTS.added;
+  if (event.kind === "left" && text === "Removed") return BOTS.removed;
+  if (event.kind === "message" && text.startsWith("Sent a message to ")) return MESSAGES.sent;
+  if (event.kind === "message" && text.startsWith("Received a message from ")) return MESSAGES.received;
+  return Object.hasOwn(RUN_WORDINGS, text) ? RUN_WORDINGS[text] : undefined;
+}
+
+/** How many kinds a run's label names before the rest go as "N more". */
+const RUN_KINDS_SHOWN = 2;
+
+/**
+ * What a folded run of activity lines says it did: "Closed 14 threads" when every line did the same
+ * kind of thing, else the kinds done most, first done first among equals ("Closed 3 threads, started
+ * 1"), with a noun or verb that's the same as the one before it left out, and whatever's left as
+ * "N more". Lines with no wording of their own count only among those; when none has one, it's "N
+ * background actions".
+ */
+export function runLabel(events: { kind: string; text: string; detail?: string }[]): string {
+  const kinds = new Map<RunWording, number>();
+  let other = 0;
+  for (const event of events) {
+    const w = runWording(event);
+    if (w) kinds.set(w, (kinds.get(w) ?? 0) + 1);
+    else other++;
+  }
+  if (!kinds.size) return `${events.length} background actions`;
+  // Map keeps first-seen order, and the sort is stable, so equals stay in the order they were first done.
+  const ranked = [...kinds].sort((a, b) => b[1] - a[1]);
+  // A third kind that ends the list reads better than "1 more" in its place.
+  const shown = ranked.length === RUN_KINDS_SHOWN + 1 && !other ? ranked : ranked.slice(0, RUN_KINDS_SHOWN);
+  const more = events.length - shown.reduce((sum, [, n]) => sum + n, 0);
+  const parts = shown.map(([w, n], i) => {
+    const prev = shown[i - 1]?.[0];
+    const count = w === FOLLOWED_UP ? (n === 1 ? "once" : `${n} times`) : prev && prev.one === w.one ? `${n}` : `${n} ${n === 1 ? w.one : w.many}`;
+    if (!prev) return `${w.verb} ${count}`;
+    return prev.verb === w.verb ? count : `${w.verb.charAt(0).toLowerCase()}${w.verb.slice(1)} ${count}`;
+  });
+  if (more) parts.push(`${more} more`);
+  return parts.join(", ");
+}
+
 /**
  * A routine or follow-up being set, from its activity line: what it's called and when it runs, as the
  * line's detail put them ("Standup · Weekdays at 9:00"). Undefined for any other line, and for one ran.

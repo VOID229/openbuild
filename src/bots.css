@@ -2583,6 +2583,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  max-width: 100%;
   height: 24px;
   padding: 0 8px 0 6px;
   border-radius: var(--radius-sm);
@@ -2602,6 +2603,15 @@
 
 .bm-events-toggle .bm-mascots {
   display: inline-flex;
+  flex: none;
+}
+
+/* What the run did, most first: on a narrow screen a long list ends in an ellipsis. */
+.bm-events-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bm-events-toggle .bm-mascot + .bm-mascot {

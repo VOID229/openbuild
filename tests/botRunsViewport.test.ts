@@ -22,16 +22,16 @@ afterAll(async () => {
 const READY = "window.store?.getState().chatsLoaded && window.bots?.getState().loaded";
 const TOGGLE = ".bots-messages .bm-events-toggle";
 
-/** The group chat, long, with a run of 24 background actions `after` messages from its end. */
-async function open(after: number) {
-  const page = await Page.open(chrome!.ws, `${server!.url.href}bots`, 1280, 800, READY);
+/** The group chat, long, with a run of 24 background actions `after` messages from its end; each is `ran` (a JS expression of `i`) when given. */
+async function open(after: number, { width = 1280, height = 800, ran: each }: { width?: number; height?: number; ran?: string } = {}) {
+  const page = await Page.open(chrome!.ws, `${server!.url.href}bots`, width, height, READY);
   await page.eval(`(() => {
     const s = bots.getState();
     const chat = s.conversations.find((c) => c.kind === 'group');
     const bot = chat.botIds[0];
     const t0 = Date.now() - 3_600_000;
     const said = (i) => ({ id: 'm' + i, author: i % 2 ? bot : 'me', at: t0 + i * 1000, text: 'Message ' + i + ' about the build, long enough to take a line or two in the chat.' });
-    const ran = (i) => ({ id: 'e' + i, author: bot, at: t0 + 60_000 + i * 1000, text: '', event: { kind: 'routine', text: 'Ran a routine', detail: 'Routine ' + (i % 3) } });
+    const ran = (i) => ({ id: 'e' + i, author: bot, at: t0 + 60_000 + i * 1000, text: '', event: ${each ?? "{ kind: 'routine', text: 'Ran a routine', detail: 'Routine ' + (i % 3) }"} });
     const messages = [...Array.from({ length: 40 }, (_, i) => said(i)), ...Array.from({ length: 24 }, (_, i) => ran(i)), ...Array.from({ length: ${after} }, (_, i) => ({ ...said(100 + i), at: t0 + 120_000 + i * 1000 }))];
     bots.setState({ conversations: s.conversations.map((c) => (c.id === chat.id ? { ...c, messages, more: false } : c)), activeId: chat.id });
     store.setState({ botsOpen: true, botsSidebarOpen: true });
@@ -106,5 +106,22 @@ describe.skipIf(!browser)("a run of background actions holds the view", () => {
       const after = await page.eval<number>(`document.querySelector(${JSON.stringify(TOGGLE)}).getBoundingClientRect().top`);
       expect({ step, moved: Math.round(after - before) }).toEqual({ step, moved: step });
     }
+  }, 60_000);
+
+  test("its label says what was done, and on a phone a long one ends in an ellipsis inside the chat", async () => {
+    const page = await open(2, { ran: "{ kind: 'thread', text: 'Closed a thread', detail: 'Thread ' + i, threadId: 't' + i }" });
+    expect(await page.eval<string>(`document.querySelector(${JSON.stringify(TOGGLE)}).textContent`)).toBe("Closed 24 threads");
+
+    // Answered, merged and stopped, all with long nouns: too long for a phone's line.
+    const mixed = "[{ kind: 'thread', text: 'Answered a permission prompt' }, { kind: 'thread', text: 'Merged a pull request', detail: '#' + i }, { kind: 'thread', text: 'Stopped a thread', detail: 'T' }][i % 3]";
+    const phone = await open(2, { width: 360, height: 720, ran: mixed });
+    const fit = await phone.eval<{ text: string; one: boolean; clipped: boolean; inside: boolean }>(`(() => {
+      const toggle = document.querySelector(${JSON.stringify(TOGGLE)});
+      const label = toggle.querySelector('.bm-events-label');
+      const chat = document.querySelector('.bots-messages').getBoundingClientRect();
+      const box = toggle.getBoundingClientRect();
+      return { text: label.textContent, one: box.height <= 24.5, clipped: label.scrollWidth > label.clientWidth, inside: box.left >= chat.left && box.right <= chat.right };
+    })()`);
+    expect(fit).toEqual({ text: "Answered 8 permission prompts, merged 8 pull requests, stopped 8 threads", one: true, clipped: true, inside: true });
   }, 60_000);
 });
