@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, JOURNAL_RECENT, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -117,6 +117,16 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
   switch (method) {
     case "context": {
       const sections = contextSections(botId);
+      // What the bot added itself in this session isn't sent to it again as a changed section (see steady).
+      const bot = requireBot(botId);
+      const session = sessionKey(botId);
+      const fresh = p.fresh === true;
+      const memories = new Map(bot.memory.map((m) => [m.id, `${m.kind}\n${m.text}`]));
+      const journal = bot.memory.filter((m) => m.kind !== "profile").slice(0, JOURNAL_RECENT);
+      const inPrompt = new Map([...bot.memory.filter((m) => m.kind === "profile"), ...journal].map((m) => [m.id, memories.get(m.id)!]));
+      sections.openbots_memory = steady(`${session}:memory`, sections.openbots_memory ?? "", inPrompt, memories, fresh);
+      const routines = new Map(bot.routines.map((r) => [r.id, `${r.title}\n${r.schedule}\n${r.enabled}\n${r.task ?? ""}`]));
+      sections.openbots_routines = steady(`${session}:routines`, sections.openbots_routines ?? "", routines, routines, fresh);
       // How to search the web and how to use apps ride with their tools: a bot that hasn't loaded
       // them gets a line saying what's there, and the rest when it loads one (tool_notes). A Pi that
       // doesn't say what it has loaded gets it all, as before.
@@ -151,7 +161,7 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
     case "apps":
       return p.action === "connect" ? offerApp(botId, p) : apps.appsTool(p);
     case "use_app":
-      return apps.useApp(p, botId);
+      return fitApp(botId, await apps.useApp(p, botId));
     case "routine":
       return routine(botId, p);
     case "ask_bot":
@@ -253,6 +263,46 @@ function requireBot(id: string): Bot {
   return bot;
 }
 
+/**
+ * A section of a bot's context as its session keeps it. Pi re-sends a whole section into the
+ * conversation whenever its text changes, and a bot's own writes changed two of them all the time:
+ * every memory it saved sent its memory section again (2,800 characters, 121 times in two days of
+ * real sessions) and every routine it added its routines (120 times), each staying in the session
+ * until it compacted. The bot already has what it just wrote, as the call that wrote it. So a
+ * section stays as the session last got it while the only difference is something that session
+ * added itself. Anything else (a memory another chat's turn wrote, one changed, replaced or
+ * forgotten, a routine paused, removed or run, the user's edits) sends it afresh, as does a Pi
+ * that just started or just compacted (`fresh`), whose session may no longer hold those calls.
+ */
+interface Kept {
+  text: string;
+  /** What the section showed, by id, each with a mark of its content. */
+  items: Map<string, string>;
+  /** What this session has added since. */
+  own: Set<string>;
+}
+const keptSections = ((globalThis as { openbotsKeptSections?: Map<string, Kept> }).openbotsKeptSections ??= new Map<string, Kept>());
+/** A bot's session: one per conversation it works in. */
+const sessionKey = (botId: string) => `${botId}:${getFocus(botId) ?? ""}`;
+
+/** `shows` is what the section lists now, `all` everything it could list, both by id with a mark of the content. */
+export function steady(key: string, text: string, shows: Map<string, string>, all: Map<string, string>, fresh = false): string {
+  const before = keptSections.get(key);
+  const unchanged = !!before && !fresh
+    // Everything it was shown is still there as it was (it may have moved out of the latest few)...
+    && [...before.items].every(([id, mark]) => all.get(id) === mark)
+    // ...and everything new is this session's own.
+    && [...shows.keys()].every((id) => before.items.has(id) || before.own.has(id));
+  if (unchanged) return before!.text;
+  keptSections.set(key, { text, items: new Map(shows), own: new Set() });
+  return text;
+}
+
+/** The bot added this itself, in the session it's working in: that session needn't be shown it again. */
+function ownAddition(botId: string, section: "memory" | "routines", id: string) {
+  keptSections.get(`${sessionKey(botId)}:${section}`)?.own.add(id);
+}
+
 export function contextFor(botId: string): string {
   return Object.values(contextSections(botId)).filter(Boolean).join("\n\n");
 }
@@ -272,7 +322,7 @@ export const RESPONSIVE =
  * needn't ask to be @mentioned back or set a routine to check.
  */
 export const HEARING =
-  "You can write to any conversation you're in at any time. In a group, another bot reads your message only if it @names them (@all for everyone) or quotes theirs with reply_to. Their answer wakes you whether or not it names you, and you're told if they never read it, so don't poll for it. To end a turn without a message, make [silent] your whole final reply.";
+  "You can write to any conversation you're in at any time. In a group, another bot reads your message only if it @names them (@all for everyone) or quotes theirs with reply_to. Their answer wakes you whether or not it names you, and you're told if they never read it, so don't poll for it. A turn ends on its last call when that call says done true (send_message, react, memory, todo and routine take it), so say it there. With nothing left to do or say, make [silent] your whole reply.";
 
 /** Questions the user has to answer are cards, not messages: a tap answers one, and it stays visible as unanswered. */
 export const ASKING =
@@ -295,7 +345,8 @@ export function contextSections(botId: string): Record<string, string> {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update, retire and rehire bots, their instructions and roles included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run on the host (the default) or in a container is set per machine by the user, in Settings → Devices, not by you."
+      ? // What each manage_bot action takes is in the tool's own description, which a bot reads when it loads the tool: here, only what it can do.
+      "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update, retire and rehire bots, their instructions and roles included, make group chats with existing bots (manage_bot create_group), and add or remove their members. Only you can set a bot's model, effort and fallbacks, yours included, and with manage_bot defaults the ones for bots without their own; change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run on the host (the default) or in a container is set per machine by the user, in Settings → Devices, not by you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions and role; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions or role while you have none.`,
     "Talk like a person texting: short, warm, plain; no headings or bullet lists unless asked. One send_message call is one bubble, and several short bubbles beat one long one.",
     HEARING,
@@ -734,6 +785,7 @@ export function memory(botId: string, p: Record<string, unknown>) {
   if (action !== "write") throw new svc.BotsError("action is write or forget.");
   if (p.kind !== undefined && p.kind !== "profile" && p.kind !== "journal") throw new svc.BotsError("kind is profile or journal.");
   const wrote = svc.addMemory(botId, String(p.text ?? ""), { by: botId, kind: p.kind, replaces: typeof p.replaces === "string" ? p.replaces : undefined });
+  ownAddition(botId, "memory", wrote.item.id);
   return {
     id: wrote.item.id.slice(0, 8),
     kind: wrote.item.kind,
@@ -836,6 +888,7 @@ export function routine(botId: string, p: Record<string, unknown>) {
     conversationId: typeof p.conversation === "string" ? conversationFor(botId, p.conversation) : getFocus(botId),
     by: botId,
   });
+  ownAddition(botId, "routines", saved.id);
   const where = saved.conversationId || getFocus(botId);
   if (where) {
     svc.postMessage(where, {
@@ -1278,6 +1331,45 @@ function lookOf(value: unknown): Bot["look"] | undefined {
 
 // ------------------------------------------------------------------ the computers, one per machine
 
+/**
+ * How much of a tool's output a bot's context takes. What a tool returns stays in the session until
+ * it compacts and is read again by every request, and in two days of real sessions tool results were
+ * 38% of what a request carried: the shell's alone 22%, half of that from the one call in eight that
+ * printed more than 10,000 characters. A long output is shown as its start and its end (where a
+ * command says how it went), and the whole of it is kept in a file in the bot's own home on that
+ * machine, where its shell can search it.
+ */
+export const SHELL_SHOWN = { head: 4_000, tail: 8_000 };
+/** An app's answer is a list or a document: its start says more than its end. */
+export const APP_SHOWN = { head: 13_000, tail: 3_000 };
+/** A file read without a limit. */
+export const READ_SHOWN = 24_000;
+/** Outputs kept per bot and kind: the file names go round, so they never pile up. */
+const KEPT_OUTPUTS = 20;
+const keptCount = new Map<string, number>();
+
+/** `text` as a bot's context takes it: whole when it fits, else its two ends with the middle left out and where the whole is, or how to get the rest. */
+export function fitOutput(text: string, shown: { head: number; tail: number }, kept?: string): string {
+  // A few characters over isn't worth a file and a note.
+  if (text.length <= (shown.head + shown.tail) * 1.1) return text;
+  const left = text.length - shown.head - shown.tail;
+  const where = kept ? `All ${text.length.toLocaleString("en-US")} characters are in ${kept}: grep it, or read the part you need (read with offset and limit, or sed -n).` : "Ask again for less: a narrower query, a filter, or one page at a time.";
+  return `${text.slice(0, shown.head)}\n\n[… ${left.toLocaleString("en-US")} characters left out here. ${where} …]\n\n${text.slice(-shown.tail)}`;
+}
+
+/** Keeps a long output whole in a file in the bot's home on the machine `api` is, and says where. Undefined when it couldn't be written. */
+async function keepOutput(api: { call: (id: string, op: string, body?: Record<string, unknown>) => Promise<unknown> }, id: string, kind: string, text: string): Promise<string | undefined> {
+  const n = ((keptCount.get(`${id}:${kind}`) ?? 0) % KEPT_OUTPUTS) + 1;
+  keptCount.set(`${id}:${kind}`, n);
+  const path = `~/.outputs/${kind}-${n}.txt`;
+  try {
+    await api.call(id, "fs", { op: "write", path, data: Buffer.from(text).toString("base64") });
+    return path;
+  } catch {
+    return undefined;
+  }
+}
+
 async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSignal) {
   const { api, id, on } = await computerOn(botId, p.machine);
   const command = String(p.command ?? "");
@@ -1289,10 +1381,20 @@ async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSig
     if (size < 200_000) chunks.push(d);
     size += d.length;
   }, signal);
-  const output = Buffer.concat(chunks).toString("utf8").slice(0, 100_000);
+  const whole = Buffer.concat(chunks).toString("utf8").slice(0, 200_000);
+  const long = whole.length > (SHELL_SHOWN.head + SHELL_SHOWN.tail) * 1.1;
+  const output = long ? fitOutput(whole, SHELL_SHOWN, await keepOutput(api, id, "bash", whole)) : whole;
   // It left something running: said, so the bot doesn't take the output for all there will be.
   const background = result.background ? { note: "The command returned, and something it started is still running in the background. Its later output isn't captured here. For a program that keeps running, use process: it can be read and stopped." } : {};
-  return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 100_000, ...background, ...(on && { ranOn: on }) };
+  return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 200_000, ...background, ...(on && { ranOn: on }) };
+}
+
+/** An app's answer as the bot's context takes it: a long one as its two ends, the whole kept in the bot's home on this server when its computer is there to keep it. */
+export async function fitApp<T>(botId: string, out: T): Promise<T> {
+  const answer = out as { text?: unknown } | null;
+  if (!answer || typeof answer !== "object" || typeof answer.text !== "string" || answer.text.length <= (APP_SHOWN.head + APP_SHOWN.tail) * 1.1) return out;
+  const kept = await computerOn(botId, undefined).then(({ api, id }) => keepOutput(api, id, "app", answer.text as string), () => undefined);
+  return { ...answer, text: fitOutput(answer.text, APP_SHOWN, kept) } as T;
 }
 
 async function read(botId: string, p: Record<string, unknown>) {
@@ -1300,8 +1402,10 @@ async function read(botId: string, p: Record<string, unknown>) {
   const res = (await api.call(id, "fs", { op: "read", path: String(p.path ?? "") })) as { data: string };
   const text = Buffer.from(res.data, "base64").toString("utf8");
   const offset = Math.max(0, Number(p.offset) || 0);
-  const limit = Math.min(Number(p.limit) || 80_000, 80_000);
-  return text.slice(offset, offset + limit);
+  const limit = Math.min(Number(p.limit) || READ_SHOWN, 80_000);
+  const end = offset + limit;
+  // A file that goes on says so, and where to carry on from: a part of one was never told apart from all of it.
+  return end < text.length ? `${text.slice(offset, end)}\n\n[… ${(text.length - end).toLocaleString("en-US")} more characters. Read on with offset ${end}, or grep the file for what you need. …]` : text.slice(offset, end);
 }
 
 async function write(botId: string, p: Record<string, unknown>) {

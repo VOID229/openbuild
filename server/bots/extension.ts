@@ -141,9 +141,9 @@ function withStatus(name: string, parameters: object) {
   return NO_STATUS.has(name) ? parameters : { ...schema, properties: { status, ...schema.properties }, required: ["status", ...(schema.required ?? [])] };
 }
 
-/** The tool's own parameters, without the status meant for the user. */
+/** The tool's own parameters, without the status meant for the user and the `done` meant for Pi. */
 function own(params: Params | undefined): Params {
-  const { status: _, ...rest } = params ?? {};
+  const { status: _, done: __, ...rest } = params ?? {};
   return rest;
 }
 
@@ -184,9 +184,48 @@ export function sentBrief(value: unknown): string | undefined {
   return `Sent as [${sent.id.slice(0, 8)}] in conversation ${sent.conversation}.${reached}${typeof sent.note === "string" && sent.note ? ` ${sent.note}` : ""}`;
 }
 
+/**
+ * A shell command's result as its bot reads it: what it printed, as it printed it, then only what
+ * isn't the usual (a failing exit code, something left running, another machine). It used to be the
+ * JSON around it, which escapes every newline and quote of the output and says "exitCode": 0 each time.
+ */
+export function shellText(value: unknown): string | undefined {
+  const ran = value as { exitCode?: unknown; output?: unknown; truncated?: unknown; note?: unknown; ranOn?: unknown } | null;
+  if (!ran || typeof ran !== "object" || typeof ran.output !== "string" || !("exitCode" in ran)) return undefined;
+  // Anything else in there (a job number, say) is said in full.
+  if (Object.keys(ran).some((key) => !["exitCode", "output", "truncated", "note", "ranOn"].includes(key))) return undefined;
+  const after = [
+    ran.exitCode === 0 ? "" : `[exit code ${ran.exitCode ?? "unknown"}]`,
+    ran.truncated ? "[It printed more than this: only the first 200,000 characters were kept.]" : "",
+    typeof ran.note === "string" && ran.note ? `[${ran.note}]` : "",
+    typeof ran.ranOn === "string" && ran.ranOn ? `[ran on ${ran.ranOn}]` : "",
+  ].filter(Boolean);
+  return [ran.output, ...after].join("\n");
+}
+
 /** What send_message's `done` tells the bot. */
 export const DONE =
-  "true only on the last message of your turn, when the work is finished or there's nothing more for you to do: the turn ends the moment it's sent, and nothing after it runs. Leave it out on any message you'll follow with more work or another message, such as a note that you're starting on something.";
+  "true only on the last message of your turn, and then every time: the turn ends the moment it's sent, nothing after it runs, and without it ending the turn takes another round. Leave it out on any message you'll follow with more work or another message, such as a note that you're starting on something.";
+
+/**
+ * What `done` tells the bot on a tool that isn't a message. Two turns in five ended on a request
+ * that said nothing but [silent]: half of them after a reaction, a memory or a routine that was the
+ * turn's last act, which had no way to say so.
+ */
+export const LAST = "true when this call is the last thing you do this turn: the turn ends with it.";
+const done = { type: "boolean", description: LAST };
+
+/** A result came with something for the bot to read: an @tag that reached nobody, a memory much like another. That turn isn't over. */
+const noted = (result: { details?: unknown } | undefined): boolean => {
+  const details = result?.details as { note?: unknown; check?: unknown } | null | undefined;
+  return typeof details?.note === "string" || typeof details?.check === "string";
+};
+
+/** A message that went out with nothing the bot has to read about it. */
+export const heard = (result: { details?: unknown } | undefined): boolean => posted(result) && !noted(result);
+
+/** The call went through, and came back with nothing the bot has to read. */
+export const settled = (result: { details?: unknown; isError?: boolean } | undefined): boolean => !!result && !result.isError && result.details !== null && result.details !== undefined && !noted(result);
 
 /** The message was posted: the service answered with its id. Held back or refused, it answers without one. */
 export const posted = (result: { details?: unknown } | undefined): boolean => typeof (result?.details as { id?: unknown } | null | undefined)?.id === "string";
@@ -200,17 +239,32 @@ export const posted = (result: { details?: unknown } | undefined): boolean => ty
  * that work's results off from the model, and a message that was held back never ends anything.
  * Nor does one that went out with a note the bot hasn't read.
  */
-export function ending<T extends { execute: (id: string, params: Params, signal?: unknown) => Promise<{ details?: unknown }> }>(definition: T, ends: (params: Params) => boolean): T {
+export function ending<T extends { execute: (id: string, params: Params, signal?: unknown) => Promise<{ details?: unknown; isError?: boolean }> }>(definition: T, ends: (params: Params) => boolean, landed: (result: { details?: unknown; isError?: boolean }) => boolean = heard): T {
   return {
     ...definition,
     async execute(id: string, params: Params, signal?: unknown) {
       const result = await definition.execute(id, params, signal);
-      // A note with it (an @tag that reached nobody, say) is for the bot to read: that turn isn't over.
-      const noted = typeof (result.details as { note?: unknown } | null | undefined)?.note === "string";
-      return ends(params) && posted(result) && !noted ? { ...result, terminate: true } : result;
+      return ends(params) && landed(result) ? { ...result, terminate: true } : result;
     },
   };
 }
+
+/**
+ * The step being run: whether one of its calls said done. Pi ends a run only when every result of
+ * the step is terminating, so a memory saved beside the last message (done on the message alone)
+ * kept the turn going for a request that said nothing. A call that says done speaks for the
+ * bookkeeping calls beside it: they end the turn too. A call that does work (the shell, a thread)
+ * never does, so its result is always read.
+ */
+const step = { done: false };
+
+/** What an assistant message says of its step, from its tool calls: one of them says done, or asks the user with a card, which ends a turn by its own rule. */
+export function stepSaysDone(message: { role?: string; content?: unknown } | undefined): boolean {
+  return message?.role === "assistant" && Array.isArray(message.content) && message.content.some((b: any) => b?.type === "toolCall" && (b.arguments?.done === true || (b.name === "question" && !b.arguments?.close)));
+}
+
+/** A tool that takes `done`: its call ends the turn when the bot says it's the last, on it or on a call beside it, and it went through (see ending). */
+const last = <T extends { execute: (id: string, params: Params, signal?: unknown) => Promise<{ details?: unknown; isError?: boolean }> }>(definition: T): T => ending(definition, (params) => params?.done === true || step.done, settled);
 
 /** A call that ran past the threshold answered with its job number instead of a result (jobs.ts Started). */
 const startedJob = (value: unknown): boolean => !!value && typeof value === "object" && typeof (value as { job?: unknown }).job === "number" && (value as { state?: unknown }).state === "running";
@@ -228,6 +282,151 @@ export function toolRules(opts: any): Record<string, string> {
   const tools: string[] = Array.isArray(opts.selectedTools) ? opts.selectedTools.filter((name: string) => !hidden.has(name)) : [];
   const rules = [...tools.flatMap((name) => opts.toolGuidelines?.[name] ?? []), ...(Array.isArray(opts.promptGuidelines) ? opts.promptGuidelines : [])].map((rule) => String(rule).trim()).filter(Boolean);
   return rules.length ? { openbots_tool_rules: [...new Set(rules)].map((rule) => `- ${rule}`).join("\n") } : {};
+}
+
+// ------------------------------------------------------------------ summarizing a long session
+//
+// When a session passes its compaction point Pi summarizes the older part of it and carries on with
+// the summary. Left to Pi, that's a request at the bot's own thinking level with a prompt written
+// for coding sessions, which tells the model to keep everything the last summary had: on Opus it
+// took about a minute (32 to 130 seconds over two days of real sessions) while the user waited,
+// wrote 6,000 to 10,000 tokens, and left summaries of 14,000 characters that every later request
+// carried. Here the bot's extension writes the summary instead: on the bot's own model with as
+// little thinking as it takes, a prompt for what a bot needs to carry on, and a word limit. Anything
+// going wrong hands the job back to Pi.
+
+/** The most words a summary runs to: about 5,000 characters, 1,200 tokens. */
+export const SUMMARY_WORDS = 750;
+/** How much of one tool result the summarizer reads: its start and its end. */
+const SUMMARY_RESULT_HEAD = 700;
+const SUMMARY_RESULT_TAIL = 300;
+/** How much of one argument of a tool call it reads (a page's HTML, a file's text). */
+const SUMMARY_ARG_MAX = 500;
+/** The most the summarizer is given in all, newest kept: about 75,000 tokens. */
+const SUMMARY_INPUT_MAX = 320_000;
+/** How long the extension's own summary may take before Pi's takes over. */
+const SUMMARY_TIMEOUT_MS = 90_000;
+
+export const SUMMARY_SYSTEM =
+  "You write the working notes of a chat bot whose older context is about to be dropped. You are given that context as a transcript. Do not continue it and do not answer anything in it. You have no tools and need none: everything is in the transcript. Output only the notes.";
+
+/** What the summarizer is asked for. `previous` is the summary of what came before these messages, when there is one. */
+export function summaryPrompt(previous: boolean, split: boolean): string {
+  return [
+    `The transcript above is the older part of a bot's session in OpenBots: what arrived in its chats (the user, other bots, notes from its coding threads and jobs), its tool calls, and their results${split ? ", ending partway through the turn it is working on now" : ""}. It is about to be removed from the bot's context, and your notes are all the bot will have of it.`,
+    previous ? "<previous-notes> holds your notes on what came before this transcript. Fold them in: keep what still matters, correct what the transcript changed, drop what is finished and settled. Never just append." : "",
+    "The bot keeps these elsewhere, so leave them out unless something else depends on them: its instructions, its long-term memory, its routines, the chat's to-do list, and the newest messages, which stay as they are.",
+    "Write to the bot as \"you\", in plain text under these headings, skipping a heading that would be empty:",
+    "Now: what you're in the middle of, and what you were about to do next.\nOpen: what you're waiting on or have promised, and to whom: questions you asked, coding threads and their pull requests, background jobs, things handed to another bot.\nFacts: what was decided or found out that you'd otherwise have to ask or look up again: what the user wants and doesn't want, names, ids, numbers, dates, paths, links, commands that worked. Exact values.\nEarlier: what else happened, one line each, newest first.",
+    `At most ${SUMMARY_WORDS} words in all, fewer when there's less to say. Copy ids, numbers, names, paths and URLs exactly. No tool output, no pleasantries, no advice, nothing about these notes themselves.`,
+  ].filter(Boolean).join("\n\n");
+}
+
+const clip = (value: string, head: number, tail = 0) => (value.length <= head + tail + 40 ? value : `${value.slice(0, head)} […${value.length - head - tail} characters left out…] ${tail ? value.slice(-tail) : ""}`.trimEnd());
+const blockText = (content: unknown): string => (typeof content === "string" ? content : Array.isArray(content) ? content.map((b: any) => (b?.type === "text" ? String(b.text ?? "") : b?.type === "image" ? "[image]" : "")).filter(Boolean).join("\n") : "");
+/** What a prompt says every turn, which the summarizer has no use for. */
+const EVERY_TURN = /\n*(Use send_message to reply \(|Reply with send_message, done true)[^\n]*\[silent\]\.\s*$/;
+
+/** A session's messages as a transcript for the summarizer: who said what, each call in a line, and the start and end of each result. */
+export function summaryTranscript(messages: any[], max = SUMMARY_INPUT_MAX): string {
+  const parts: string[] = [];
+  for (const m of messages ?? []) {
+    if (!m || typeof m !== "object") continue;
+    if (m.role === "user") {
+      const said = blockText(m.content).replace(EVERY_TURN, "").trim();
+      if (said) parts.push(`[Arrived]\n${said}`);
+    } else if (m.role === "assistant") {
+      const said = blockText(m.content).trim();
+      if (said) parts.push(`[Bot]: ${said}`);
+      for (const b of Array.isArray(m.content) ? m.content : []) {
+        if (b?.type !== "toolCall") continue;
+        const { status: _, ...rest } = (b.arguments ?? {}) as Params;
+        // What the bot wrote in a chat is the conversation itself: said in full, like the lines that arrived.
+        if (b.name === "send_message" && typeof rest.text === "string") parts.push(`[Bot wrote${typeof rest.conversation === "string" ? ` in ${rest.conversation}` : ""}]: ${clip(rest.text, 1500)}`);
+        else parts.push(`[Bot called ${b.name}]: ${Object.entries(rest).map(([key, value]) => `${key}=${clip(typeof value === "string" ? value : JSON.stringify(value) ?? "", SUMMARY_ARG_MAX)}`).join(", ")}`);
+      }
+    } else if (m.role === "toolResult") {
+      const said = blockText(m.content).trim();
+      // A sent message's result says only that it was sent.
+      if (said && m.toolName !== "send_message" && m.toolName !== "react") parts.push(`[${m.toolName ?? "tool"} ${m.isError ? "failed" : "returned"}]: ${clip(said, SUMMARY_RESULT_HEAD, SUMMARY_RESULT_TAIL)}`);
+    } else if (typeof m.summary === "string" && m.summary.trim()) parts.push(`[Earlier notes]\n${m.summary.trim()}`);
+    // The system prompt's own changes aren't history: the bot has the current one.
+  }
+  let text = parts.join("\n\n");
+  // Too much to hand over whole: the newest of it is what the bot is likeliest to need.
+  if (text.length > max) text = `[…the oldest ${text.length - max} characters of the transcript are left out…]\n${text.slice(text.length - max)}`;
+  return text;
+}
+
+type ModelRef = { provider: string; id: string };
+
+/**
+ * The model that writes the summary: the bot's own. A smaller one would be quicker still, and the
+ * one a Claude bot has through the bundled bridge (Haiku 4.5) was tried on real sessions: twice as
+ * fast, and two of nine summaries weren't summaries at all (it went on with the transcript, or
+ * answered as itself). OPENBOTS_SUMMARY_MODEL (provider/id) names another, tried first.
+ */
+export function summaryModel<T extends ModelRef>(current: T, available: T[], forced = process.env.OPENBOTS_SUMMARY_MODEL): T {
+  return (forced && available.find((m) => `${m.provider}/${m.id}` === forced)) || current;
+}
+
+/**
+ * The least thinking a model can be asked for, as Pi's `reasoning` option: nothing for one that can
+ * answer without (or doesn't think at all), else its lowest level. Pi marks a level a model doesn't
+ * take with null in its thinkingLevelMap.
+ */
+export function leastThinking(model: { reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> }): string | undefined {
+  if (!model?.reasoning) return undefined;
+  const level = ["off", "minimal", "low", "medium", "high"].find((name) => model.thinkingLevelMap?.[name] !== null);
+  return level && level !== "off" ? level : undefined;
+}
+
+/** A heading of the notes, which may come dressed as markdown ("## Now", "**Now:**"). */
+const HEADING = /^[ \t#*_>-]*(Now|Open|Facts|Earlier)\b/m;
+
+/** Notes a model wrote are notes: they have at least one of the headings asked for, and aren't an attempt to call a tool or carry the transcript on. */
+export function soundSummary(text: string): boolean {
+  return HEADING.test(text) && !/<\/?(invoke|parameter|function_calls|tool_use|tool_call)\b/i.test(text);
+}
+
+/**
+ * The bot's own summary of a session's older part, for Pi's session_before_compact: on a model named
+ * for it if there is one, then on the bot's own, without thinking. It throws, saying why, when
+ * neither wrote sound notes (a model that failed, ran out of room, or went on with the transcript
+ * instead of summarizing it), and Pi's own summary takes over.
+ */
+export async function summarize(event: any, ctx: any): Promise<{ compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; usage?: unknown; details: { by: "openbots"; model: string } } }> {
+  const prep = event?.preparation;
+  const registry = ctx?.modelRegistry;
+  if (!prep?.firstKeptEntryId || !ctx?.model || typeof registry?.complete !== "function") throw new Error("nothing to summarize with");
+  const split = Array.isArray(prep.turnPrefixMessages) && prep.turnPrefixMessages.length > 0;
+  const transcript = summaryTranscript([...(prep.messagesToSummarize ?? []), ...(split ? prep.turnPrefixMessages : [])]);
+  if (!transcript.trim()) throw new Error("nothing to summarize");
+  const available: ModelRef[] = typeof registry.getAvailable === "function" ? registry.getAvailable() : [];
+  const own = ctx.model as ModelRef;
+  const small = summaryModel(own, available);
+  const previous = typeof prep.previousSummary === "string" && prep.previousSummary.trim() ? prep.previousSummary.trim() : "";
+  const text = `<transcript>\n${transcript}\n</transcript>\n\n${previous ? `<previous-notes>\n${previous}\n</previous-notes>\n\n` : ""}${summaryPrompt(!!previous, split)}`;
+  const signal = AbortSignal.any([AbortSignal.timeout(SUMMARY_TIMEOUT_MS), ...(event.signal ? [event.signal as AbortSignal] : [])]);
+  const failed: string[] = [];
+  for (const model of small === own ? [own] : [small, own]) {
+    const on = `${model.provider}/${model.id}`;
+    try {
+      const reasoning = leastThinking(model as { reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> });
+      const response = await registry.complete(model, { systemPrompt: SUMMARY_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] }, { maxTokens: 4000, signal, cacheRetention: "none", sessionId: crypto.randomUUID(), ...(reasoning ? { reasoning } : {}) });
+      if (!response || response.stopReason === "error" || response.stopReason === "length" || response.stopReason === "aborted") throw new Error(`ended with ${response?.stopReason ?? "nothing"}${response?.errorMessage ? `: ${response.errorMessage}` : ""}`);
+      if ((response.content ?? []).some((b: any) => b?.type === "toolCall")) throw new Error("called a tool");
+      const wrote = blockText(response.content).trim();
+      if (!soundSummary(wrote)) throw new Error(wrote ? "didn't write notes" : "wrote nothing");
+      // Anything said ahead of the first heading isn't part of the notes.
+      const summary = wrote.slice(wrote.search(HEADING)).trim();
+      return { compaction: { summary, firstKeptEntryId: prep.firstKeptEntryId, tokensBefore: prep.tokensBefore, usage: response.usage, details: { by: "openbots", model: on } } };
+    } catch (err) {
+      failed.push(`${on} ${err instanceof Error ? err.message : String(err)}`);
+      if (signal.aborted) break;
+    }
+  }
+  throw new Error(failed.join("; "));
 }
 
 export default function openbots(pi: any) {
@@ -271,6 +470,8 @@ export default function openbots(pi: any) {
   // A call to a tool that isn't loaded yet loads it, and the bot is told to call it again.
   pi.on("message_end", (event: any) => {
     const message = event?.message;
+    // The model's step is in: whether any of its calls said done is known before the first of them runs.
+    if (message?.role === "assistant") step.done = stepSaysDone(message);
     // A call just became a background job: the tool that reads, cancels and queues behind it is declared from the next request.
     if (message?.role === "toolResult" && !message.isError && startedJob(message.details)) load(["jobs"]);
     if (!dynamic() || message?.role !== "toolResult" || !message.isError || !catalog.includes(message.toolName)) return;
@@ -279,10 +480,30 @@ export default function openbots(pi: any) {
     return { message: { ...message, content: text(`${message.toolName} wasn't loaded, so that call didn't run. It's loaded now: call it again.`) } };
   });
 
+  // A long session is summarized by the bot's own quick request, not Pi's (see summarize). OPENBOTS_SUMMARY=pi leaves it to Pi.
+  pi.on("session_before_compact", async (event: any, ctx: any) => {
+    if (process.env.OPENBOTS_SUMMARY === "pi") return undefined;
+    try {
+      return await summarize(event, ctx);
+    } catch (err) {
+      // OPENBOTS_SUMMARY_TRACE names a file that's told why: the reason only, never the session's text.
+      if (process.env.OPENBOTS_SUMMARY_TRACE) await import("node:fs").then((fs) => fs.appendFileSync(process.env.OPENBOTS_SUMMARY_TRACE!, `${new Date().toISOString()} ${err instanceof Error ? err.message : String(err)}\n`), () => {});
+      return undefined;
+    }
+  });
+
+  // A Pi that has just started, or just summarized its session, may no longer hold the calls that
+  // wrote the bot's latest memories and routines: its next context is everything as it stands (agent.ts steady).
+  let fresh = true;
+  pi.on("session_compact", () => {
+    fresh = true;
+  });
+
   pi.on("before_agent_start", async (event: any) => {
     try {
       // What's loaded goes along: the guides to tools it hasn't loaded stay out of its context (agent.ts).
-      const context = (await call("context", dynamic() ? { tools: pi.getActiveTools() } : {})) as { sections: Record<string, string>; load?: string[] };
+      const context = (await call("context", { ...(dynamic() ? { tools: pi.getActiveTools() } : {}), ...(fresh ? { fresh: true } : {}) })) as { sections: Record<string, string>; load?: string[] };
+      fresh = false;
       if (Array.isArray(context.load) && context.load.length) load(context.load);
       const opts = event.systemPromptOptions ?? event;
       const sections = { ...context.sections, ...toolRules(opts) };
@@ -296,9 +517,11 @@ export default function openbots(pi: any) {
     }
   });
 
-  register(tool("bash", "Terminal", "Run a shell command on your computer. One that takes long carries on as a background job, and its result wakes you. For a program that keeps running (a server, a watcher), use process instead.", { type: "object", properties: { machine, command: str("The command."), cwd: str("Working directory, relative to your home if not absolute."), timeout: { type: "number", description: "Milliseconds before the command is stopped. Default 120000." } }, required: ["command"] }, (p, signal) => call("bash", p, signal)));
+  // The description asks for short output and says nothing of long output being trimmed (agent.ts SHELL_SHOWN): told that it is,
+  // the model stopped filtering its own, and ran `seq 1 20000` where it had run `seq 1 20000 | tail -n 1`.
+  register(tool("bash", "Terminal", "Run a shell command on your computer. Print only what you need: pipe a long output through tail, head or grep. One that takes long carries on as a background job, and its result wakes you. For a program that keeps running (a server, a watcher), use process instead.", { type: "object", properties: { machine, command: str("The command."), cwd: str("Working directory, relative to your home if not absolute."), timeout: { type: "number", description: "Milliseconds before the command is stopped. Default 120000." } }, required: ["command"] }, (p, signal) => call("bash", p, signal), shellText));
 
-  register(tool("read", "Read file", "Read a text file on your computer.", { type: "object", properties: { machine, path: str("File path."), offset: { type: "number" }, limit: { type: "number" } }, required: ["path"] }, (p, signal) => call("read", p, signal)));
+  register(tool("read", "Read file", "Read a text file on your computer: its first 24,000 characters, or limit characters from offset. A longer file says how much is left.", { type: "object", properties: { machine, path: str("File path."), offset: { type: "number" }, limit: { type: "number" } }, required: ["path"] }, (p, signal) => call("read", p, signal)));
 
   register(tool("write", "Write file", "Write a text file on your computer, creating it if needed.", { type: "object", properties: { machine, path: str("File path."), content: str("The whole file.") }, required: ["path", "content"] }, (p, signal) => call("write", p, signal)));
 
@@ -362,7 +585,7 @@ export default function openbots(pi: any) {
   );
 
   register(
-    tool(
+    last(tool(
       "todo",
       "To-do list",
       "The conversation's to-do list, which the user watches in the chat's details: the steps of the work going on here. action is add (items: the steps, in order), update (item, state todo|doing|done, or text to reword it), remove (item), clear (which: done or all) or list. item is an item's short id; its number works too but shifts as done items go. Each call returns the whole list. The list is temporary, so don't leave done items on it: clear it once the last item is done and you've said so, clear which done when several are done in a list still going, and clear it when the work changes or the user asks. Adding steps after a finished list starts a new one. Left alone, a finished list clears a few minutes after its last change, and in one still going, done items finished a while ago drop (the last few stay).",
@@ -376,23 +599,26 @@ export default function openbots(pi: any) {
           text: str("update: new wording."),
           which: str("clear: done (the default is all)."),
           conversation: str("Short conversation id. The one you're in if omitted."),
+          done,
         },
         required: ["action"],
       },
       (p, signal) => call("todo", p, signal),
-    ),
+    )),
   );
 
-  register(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id.") }, required: ["message", "emoji"] }, (p, signal) => call("react", p, signal)));
+  register(last(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id."), done }, required: ["message", "emoji"] }, (p, signal) => call("react", p, signal))));
 
-  // Asking is the end of the turn by its own rule ("stop after asking"): the card ends it.
-  register(ending(tool("question", "Ask", "Ask the user something you need answered, as a card they answer with a tap: its choices as options, and they can type their own. Related questions go together in questions: one card, and you get every answer at once. Don't write such a question in a message. Don't invent the answer; stop after asking. A card stays open until it's answered, so when one you asked is settled some other way (the user answers in a message, say \"merge\") or stops mattering, close it: close with its id, and reason or answer. It can't be answered after that, and closing wakes nobody. One the user already answered stays as it is.", { type: "object", properties: { close: str("Instead of asking: the id of a card you asked, to close. Only yours."), reason: str("close: why, in a few words the user sees on the card, like \"You said merge in the chat\"."), answer: str("close: the answer you settled on, if there was one. An option's text checks that option."), title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices, or a suggested answer or two for an open question. Don't add Other." }, questions: { type: "array", maxItems: 5, items: { type: "object", properties: { title: { type: "string" }, hint: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["title"] }, description: "Instead of title: 2 to 5 related questions, each with its own title, hint and options." }, thread: str("When this passes on an OpenBuild thread's question: that thread's id. With thread_question, the card closes if the user answers in the thread instead."), thread_question: str("The id of the thread's question it passes on."), conversation: str("Short conversation id.") }, required: [] }, (p, signal) => call("question", p, signal)), () => true));
+  // Asking is the end of the turn by its own rule ("stop after asking"): the card ends it. Its result always comes with a
+  // note, which says only that (stop and wait), so unlike a message's it doesn't keep the turn going: while it did, every
+  // card cost a request that said [silent]. Closing a card posts nothing, and ends nothing.
+  register(ending(tool("question", "Ask", "Ask the user something you need answered, as a card they answer with a tap: its choices as options, and they can type their own. Related questions go together in questions: one card, and you get every answer at once. Don't write such a question in a message. Don't invent the answer; stop after asking. A card stays open until it's answered, so when one you asked is settled some other way (the user answers in a message, say \"merge\") or stops mattering, close it: close with its id, and reason or answer. It can't be answered after that, and closing wakes nobody. One the user already answered stays as it is.", { type: "object", properties: { close: str("Instead of asking: the id of a card you asked, to close. Only yours."), reason: str("close: why, in a few words the user sees on the card, like \"You said merge in the chat\"."), answer: str("close: the answer you settled on, if there was one. An option's text checks that option."), title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices, or a suggested answer or two for an open question. Don't add Other." }, questions: { type: "array", maxItems: 5, items: { type: "object", properties: { title: { type: "string" }, hint: { type: "string" }, options: { type: "array", items: { type: "string" } } }, required: ["title"] }, description: "Instead of title: 2 to 5 related questions, each with its own title, hint and options." }, thread: str("When this passes on an OpenBuild thread's question: that thread's id. With thread_question, the card closes if the user answers in the thread instead."), thread_question: str("The id of the thread's question it passes on."), conversation: str("Short conversation id.") }, required: [] }, (p, signal) => call("question", p, signal)), () => true, posted));
 
   register(tool("poll", "Poll", "Start a poll in a group chat. The user and every bot there can vote. Options are lettered A, B, C… for you.", { type: "object", properties: { question: str("The question."), options: { type: "array", items: { type: "string" }, description: "Two to ten choices." }, multiple: { type: "boolean", description: "Voters can pick several. One answer each if omitted." }, hide_votes: { type: "boolean", description: "Hide answers from each voter until they've answered. On if omitted; false shows them from the start." }, conversation: str("Short conversation id.") }, required: ["question", "options"] }, (p, signal) => call("poll", p, signal)));
 
   register(tool("vote_poll", "Vote", "Vote in a poll, by the letters of your choices. Voting again replaces your vote, even once the poll has closed.", { type: "object", properties: { message: str("The poll's short message id."), choices: { type: "array", items: { type: "string" }, description: "Option letters, e.g. [\"B\"]. Only one unless the poll takes several." }, conversation: str("Short conversation id.") }, required: ["message", "choices"] }, (p, signal) => call("vote_poll", p, signal)));
 
-  register(tool("memory", "Memory", "Your private memory, kept across every conversation. write saves one fact as one self-contained sentence, dated for you: kind profile for a lasting fact about the user or how to work with them (always in your prompt, capped), journal (default) for what happened or was decided (search finds older ones). A fact you already have isn't copied. Newer wins: when a fact changes, pass replaces (the old one's id or exact text) rather than keeping both. forget deletes one, by id or exact text.", { type: "object", properties: { action: str("write (default) or forget."), text: str("write: one fact, in a sentence. forget: the memory's exact text."), kind: str("write: profile or journal. A new fact defaults to journal; one you already have keeps its kind unless you pass this."), replaces: str("write: the id or exact text of the outdated fact this takes the place of."), id: str("forget: the memory's id.") }, required: ["action"] }, (p, signal) => call("memory", p, signal)));
+  register(last(tool("memory", "Memory", "Your private memory, kept across every conversation. write saves one fact as one self-contained sentence, dated for you: kind profile for a lasting fact about the user or how to work with them (always in your prompt, capped), journal (default) for what happened or was decided (search finds older ones). A fact you already have isn't copied. Newer wins: when a fact changes, pass replaces (the old one's id or exact text) rather than keeping both. forget deletes one, by id or exact text.", { type: "object", properties: { action: str("write (default) or forget."), text: str("write: one fact, in a sentence. forget: the memory's exact text."), kind: str("write: profile or journal. A new fact defaults to journal; one you already have keeps its kind unless you pass this."), replaces: str("write: the id or exact text of the outdated fact this takes the place of."), id: str("forget: the memory's id."), done }, required: ["action"] }, (p, signal) => call("memory", p, signal))));
 
   register(tool("search", "Search", "Recall: search your memory (profile and journal, with each fact's kind and date), or everything ever said in your conversations. what is memory (default) or messages. An empty memory query lists your newest.", { type: "object", properties: { query: str("Words to look for, or a short id."), what: str("memory or messages.") }, required: ["query"] }, (p, signal) => call("search", p, signal)));
 
@@ -462,7 +688,7 @@ export default function openbots(pi: any) {
     },
   });
 
-  register(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume.") }, required: ["action"] }, (p, signal) => call("routine", p, signal)));
+  register(last(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume."), done }, required: ["action"] }, (p, signal) => call("routine", p, signal))));
 
   register(tool("ask_bot", "Ask bot", "Ask another bot. It doesn't wait: carry on or end your turn, and their reply wakes you where you are now. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p, signal) => call("ask_bot", p, signal)));
 
@@ -496,7 +722,7 @@ export default function openbots(pi: any) {
     tool(
       "manage_bot",
       "Manage bots",
-      "Primary bot only, except renaming yourself, changing your own look, listing computers, reading the team or your conversations, or writing your own instructions or role while you have none. Setting any bot's model, effort or fallbacks is primary only too, even your own. action is status (primary only, read-only: all bots working/idle, turn start, conversation id, last runner activity, exact pending assignment deliveries; handoffs are not inferred), team (read-only: the other bots' roles and full instructions, or bot for one), conversations (read-only: every conversation you're in, with short ids and titles), create (name, instructions, role, look {shape, color}, model, effort, fallback, fallback_models), update (bot, name, instructions, role, look, proactivity off|low|normal|high, model, effort, fallback, fallback_models), models (query: the model ids bots can use), computers (the machines every bot reaches, what each allows and its isolation), defaults (default_model, default_fallbacks: the default model and fallbacks for bots without their own; omitted fields stay, none given only reads), retire (bot: a reversible pause. It keeps its memory, instructions, settings and chats, its routines are paused, and it can't be mentioned, messaged, added to a group or woken; what was waiting on it goes back to whoever sent it, and coding threads it started report to you), rehire (bot: brings a retired bot back as it was; its routines stay paused until the user turns them on), delete (bot: for good, and only a bot that's already retired, so retire it first), create_group (name, bots: existing bot names or ids, optional instructions; always includes you), add_to_group (bot, conversation), or remove_from_group (bot, conversation). conversation is a group's short id, the one you're in if omitted.",
+      "Primary bot only, except renaming yourself, changing your own look, listing computers, reading the team or your conversations, or writing your own instructions or role while you have none. Setting any bot's model, effort or fallbacks is primary only too, even your own. action is status (primary only, read-only: all bots working/idle, turn start, conversation id, last runner activity, exact pending assignment deliveries; handoffs are not inferred), team (read-only: the other bots' roles and full instructions, or bot for one), conversations (read-only: every conversation you're in, with short ids and titles), create (name, instructions, role, look {shape, color}, model, effort, fallback, fallback_models), update (bot, name, instructions, role, look, proactivity off|low|normal|high, model, effort, fallback, fallback_models), models (query: the model ids bots can use), computers (the machines every bot reaches, what each allows and its isolation), defaults (default_model, default_fallbacks: the default model and fallbacks for bots without their own; omitted fields stay, none given only reads), retire (bot: a reversible pause. It keeps its memory, instructions, settings and chats, its routines are paused, and it can't be mentioned, messaged, added to a group or woken; what was waiting on it goes back to whoever sent it, and coding threads it started report to you), rehire (bot: brings a retired bot back as it was; its routines stay paused until the user turns them on), delete (bot: for good, and only a bot that's already retired, so retire it first), create_group (name, bots: existing bot names or ids, optional instructions; always includes you; write there with the conversation id it returns, as the conversation you're in doesn't change), add_to_group (bot, conversation), or remove_from_group (bot, conversation). conversation is a group's short id, the one you're in if omitted. Look model ids up with models before setting one.",
       { type: "object", properties: { action: str("status (primary only, read-only), team, conversations, create, create_group, update, retire, rehire, delete (a retired bot only), add_to_group, remove_from_group, models, defaults or computers."), bots: { type: "array", items: { type: "string" }, description: "create_group: existing bot names or full/short ids. You are included automatically." }, bot: str("Name or short id. You, if omitted, except for group changes."), conversation: str("add_to_group, remove_from_group: the group's short id."), name: str("New name."), instructions: str("What the bot is for and how it should act. Replaces the whole text. Optional when creating: leave it out if the conversation doesn't say."), role: str("What the bot is for, in one short line (100 characters at most) that teammates see in their roster. Optional, like instructions."), look: { type: "object", properties: { shape: { type: "string" }, color: { type: "string" } } }, proactivity: str("off, low, normal or high."), model: str("Primary only. A provider/model id from models, or default for the OpenBots default."), effort: str("Primary only. off, minimal, low, medium, high, xhigh, max, or default."), fallback: str("Primary only. inherit (the default fallbacks), own (fallback_models) or none."), fallback_models: { type: "array", items: { type: "string" }, description: "Primary only. With fallback own: up to 8 provider/model ids from models, tried in order. A second account's ids (openai-codex-2/…) are entries of their own." }, default_model: str("defaults, primary only. A provider/model id from models for every bot without its own, or default to clear it (Pi's default)."), default_fallbacks: { type: "array", items: { type: "string" }, description: "defaults, primary only. Up to 8 provider/model ids from models, tried in order by bots that inherit fallbacks. An empty list clears them." }, query: str("models: narrow the list.") }, required: ["action"] },
       (p, signal) => call("manage_bot", p, signal),
     ),

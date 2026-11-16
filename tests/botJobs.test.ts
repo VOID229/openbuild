@@ -133,7 +133,8 @@ test("a call still running at the threshold comes back as a job, the turn can en
   const woke = await turn(alpha.bot, 2);
   a.equal(woke.focus, own);
   a.match(woke.message, /Job 1 finished after \\d+s: bash “make release”, which you started for “Building the release”\\./);
-  a.match(woke.message, /Its result:\\n\\{\\n  "exitCode": 0,\\n  "output": "built ok"\\n\\}/);
+  // What it printed, as it printed it: no JSON around it, and no word on an exit code of 0.
+  a.match(woke.message, /Its result:\\nbuilt ok\\n\\n/);
   a.match(woke.message, /Sam hasn't written here since you started it, so the plan stands\\./);
   // It's off the board once it's in.
   a.ok(!woke.message.includes('Your job board'));
@@ -359,7 +360,8 @@ test("a long result wakes the bot with a summary, and jobs result pages through 
   await idle(alpha.bot);
   g.open();
   const woke = await turn(alpha.bot, 2);
-  const whole = JSON.stringify({ exitCode: 1, output }, null, 2);
+  // The output as printed, then how it ended.
+  const whole = output + '\\n[exit code 1]';
   a.ok(whole.length > 20000 && whole.length < 40000);
   a.ok(!woke.message.includes(whole));
   a.ok(woke.message.length < 4000, String(woke.message.length));

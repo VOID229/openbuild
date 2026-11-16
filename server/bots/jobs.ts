@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { botsDir } from "./db";
 import * as db from "./db";
 import * as svc from "./service";
+import { shellText } from "./extension";
 
 /**
  * How long a call may hold a turn nobody is waiting on. Between 5 and 10 seconds the tool time a
@@ -312,7 +313,8 @@ function resultText(value: unknown): string {
     const images = Array.isArray(app.images) ? app.images.length : 0;
     return `${app.isError ? "Error: " : ""}${app.text || "(no output)"}${images ? `\n(${images} ${images === 1 ? "image" : "images"} came with it; call the tool again to see ${images === 1 ? "it" : "them"}.)` : ""}`;
   }
-  return JSON.stringify(value, null, 2) ?? "";
+  // A shell command's output as it printed it (extension.ts shellText), not as JSON around it.
+  return shellText(value) ?? JSON.stringify(value, null, 2) ?? "";
 }
 
 /** A job's call returned. Cancelled meanwhile, its result goes nowhere; otherwise it's kept and the bot is woken with it. */
