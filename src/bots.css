@@ -3010,9 +3010,13 @@
 
 /* A bot asking the user to pick. */
 /* A card in the chat (a question, a poll, a plan): the bubble's fill on a hairline, with its
-   choices as tidy rows. */
+   choices as tidy rows. As wide as its choices need, up to 480px and never past the line. A
+   percentage width would make the line (whose width the card sets) size to the card's widest
+   choice on one row, up to the bubble's own cap, so the card would come out narrower than its
+   line, and the actions and hover zone placed beside the line would stand far off from the card. */
 .bm-bubble.bm-card {
-  width: min(480px, 100%);
+  width: fit-content;
+  max-width: 480px;
   padding: 14px 16px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
