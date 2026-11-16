@@ -270,14 +270,21 @@ describe("acting on a pull request", () => {
     globalThis.fetch = realFetch;
   });
   const activity = (folder: { cwd: string }, number: number) => usePullActivity.getState()[pullKey(folder, number)];
+  // Importing the app's modules starts the store loading /api/state, retrying for a few seconds, and
+  // on a slow machine a retry lands mid-test. Only the pull requests API is stubbed, so a retry isn't
+  // counted as a read here or held in place of one: it goes to the real fetch, as it would otherwise.
+  const stubPulls = (answer: (url: string) => Promise<Response>) => {
+    globalThis.fetch = (async (url: string, init?: RequestInit) =>
+      String(url).startsWith("/api/workspaces/pulls") ? answer(String(url)) : realFetch(url, init)) as unknown as typeof fetch;
+  };
 
   test("stays going without the tab that started it, and leaves the new state behind", async () => {
     const folder = { cwd: "/acting/merge" };
     const reads: string[] = [];
-    globalThis.fetch = (async (url: string) => {
+    stubPulls(async (url) => {
       reads.push(url);
       return Response.json({ number: 5, state: "merged" });
-    }) as unknown as typeof fetch;
+    });
     let finish = () => {};
     const merge = actOnPull(folder, 5, "merge", () => new Promise<void>((resolve) => (finish = resolve)));
     // What a tab mounted now finds, and pressing Merge again from it.
@@ -302,11 +309,17 @@ describe("acting on a pull request", () => {
     let answer: unknown = { number: 3, state: "open", base: "main" };
     let release = () => {};
     const reads: string[] = [];
-    globalThis.fetch = (async (url: string) => {
+    // When the app has read the held answer's body; all it does after that is promise callbacks.
+    const settled = Promise.withResolvers<void>();
+    stubPulls(async (url) => {
       reads.push(url);
-      if (reads.length > 1) await new Promise<void>((resolve) => (release = resolve));
-      return Response.json(answer);
-    }) as unknown as typeof fetch;
+      if (reads.length === 1) return Response.json(answer);
+      await new Promise<void>((resolve) => (release = resolve));
+      const res = Response.json(answer);
+      const body = res.json.bind(res);
+      res.json = () => body().finally(settled.resolve);
+      return res;
+    });
     await prefetchPull(folder, 3);
     // GitHub, asked just after, still says open: the read after the merge is held back to show that.
     answer = { number: 3, state: "open", base: "main" };
@@ -314,22 +327,28 @@ describe("acting on a pull request", () => {
     expect(activity(folder, 3)).toEqual({});
     expect(await prefetchPull(folder, 3)).toMatchObject({ state: "merged", mergedAt: 1234, base: "main" });
     release();
-    await Bun.sleep(5);
+    await settled.promise;
+    // Past every promise callback queued so far, so the held read has been heard out by now.
+    await Bun.sleep(0);
+    expect(reads).toHaveLength(2);
     expect(await prefetchPull(folder, 3)).toMatchObject({ state: "merged" });
     expect(reads.at(-1)).toContain("fresh=true");
   });
 
   test("a merge GitHub only queued waits for the read after it", async () => {
     const folder = { cwd: "/acting/queued" };
-    globalThis.fetch = (async () => Response.json({ number: 4, state: "open" })) as unknown as typeof fetch;
+    stubPulls(async () => Response.json({ number: 4, state: "open" }));
     await prefetchPull(folder, 4);
     let release = () => {};
-    globalThis.fetch = (async () => {
+    const asked = Promise.withResolvers<void>();
+    stubPulls(async () => {
+      asked.resolve();
       await new Promise<void>((resolve) => (release = resolve));
       return Response.json({ number: 4, state: "open", mergeState: "QUEUED" });
-    }) as unknown as typeof fetch;
+    });
     const merge = actOnPull(folder, 4, "merge", async () => ({ ok: true, state: "open", threads: [] }));
-    await Bun.sleep(5);
+    // The action is done and its read is out: the merge still shows going until that read is back.
+    await asked.promise;
     expect(activity(folder, 4)).toEqual({ running: "merge" });
     release();
     await merge;
@@ -347,9 +366,9 @@ describe("acting on a pull request", () => {
 
   test("an action that worked isn't failed by the read after it", async () => {
     const folder = { cwd: "/acting/gone" };
-    globalThis.fetch = (async () => {
+    stubPulls(async () => {
       throw new Error("the worktree is gone");
-    }) as unknown as typeof fetch;
+    });
     await actOnPull(folder, 7, "merge", async () => {});
     expect(activity(folder, 7)).toEqual({});
   });
