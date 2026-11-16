@@ -2627,12 +2627,26 @@
   flex: none;
 }
 
-/* What the run did, most first: on a narrow screen a long list ends in an ellipsis. */
+/* What the run did, most first: on a narrow screen a long list ends in an ellipsis, and shows whole in
+   a tooltip on hover or focus (BotChat). */
 .bm-events-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Opened, a label too long for the line wraps onto the next, so it reads whole without a tooltip: on a
+   phone, there's no hover to show one. */
+.bm-events[data-open] .bm-events-toggle {
+  height: auto;
+  min-height: 24px;
+  padding-block: 3px;
+}
+
+.bm-events[data-open] .bm-events-label {
+  white-space: normal;
+  text-align: start;
 }
 
 .bm-events-toggle .bm-mascot + .bm-mascot {
