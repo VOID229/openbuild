@@ -2,7 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkRelease, installRelease, knownTags, parseLsRemote, releaseTrack, restartServer, restartStatus, selectRelease, setReleaseTrack, watchInstall } from "../server/releases";
+import { APP_FRESH_FOR, checkRelease, installRelease, knownTags, parseLsRemote, releaseChanges, releaseTrack, restartServer, restartStatus, selectRelease, setReleaseTrack, watchInstall } from "../server/releases";
+import { RELEASE_CHECK_EVERY } from "../shared/releaseUpdate";
 
 const CANONICAL = "https://github.com/dkod-ai/openbuild.git";
 /** Where the repository was before it moved to dkod-ai; existing installs still have it as origin. */
@@ -119,6 +120,77 @@ test("release checks are saved between processes, and a failure keeps the last k
   // A cache from before releases were tags is asked again.
   writeFileSync(path, JSON.stringify({ releases: [], checkedAt: Date.now() }));
   expect(knownTags()).toBeUndefined();
+}));
+
+test("an open app's checks ask the repository again every five minutes, the command line's hourly", () => withRepos(async ({ source, checkout, git, commit }) => {
+  const path = join(process.env.OPENCHAT_DATA_DIR!, "release-cache.json");
+  /** The saved list of tags, as if it had been fetched `ms` ago; and no copy in memory, as a later request has none. */
+  const age = (ms: number) => {
+    const saved = JSON.parse(readFileSync(path, "utf8"));
+    writeFileSync(path, JSON.stringify({ ...saved, checkedAt: Date.now() - ms }));
+    setReleaseTrack("stable");
+  };
+  expect(RELEASE_CHECK_EVERY).toBe(5 * 60_000);
+  expect(APP_FRESH_FOR).toBeLessThan(RELEASE_CHECK_EVERY);
+  expect((await checkRelease(false, checkout, APP_FRESH_FOR)).latest).toBe("0.1.8");
+  commit(source);
+  git(source, "tag", "0.1.9");
+  // A list a few minutes old still answers: several tabs asking in the same five minutes share it.
+  age(4 * 60_000);
+  expect(await checkRelease(false, checkout, APP_FRESH_FOR)).toMatchObject({ latest: "0.1.8", available: false });
+  // Five minutes on, the app's next check asks again; `ob start` and the like still wouldn't.
+  age(RELEASE_CHECK_EVERY);
+  expect(await checkRelease(false, checkout)).toMatchObject({ latest: "0.1.8", available: false });
+  age(RELEASE_CHECK_EVERY);
+  expect(await checkRelease(false, checkout, APP_FRESH_FOR)).toMatchObject({ latest: "0.1.9", available: true });
+}));
+
+test("an available release's changelog: the commits it adds, newest first, read without moving the checkout", () => withRepos(async ({ source, checkout, git }) => {
+  const change = (subject: string) => { git(source, "commit", "-q", "--allow-empty", "-m", subject); return git(source, "rev-parse", "HEAD"); };
+  setReleaseTrack("nightly");
+  // Nothing newer: nothing to list.
+  expect(await releaseChanges(await checkRelease(true, checkout), checkout)).toBeUndefined();
+
+  change("feat(bots): first (#1)");
+  change("fix(sidebar): second (#2)");
+  const nine = change("perf: third (#3)");
+  git(source, "tag", "0.1.9-nightly");
+  const before = { head: git(checkout, "rev-parse", "HEAD"), tags: git(checkout, "tag"), refs: git(checkout, "for-each-ref") };
+  const status = await checkRelease(true, checkout);
+  expect(status).toMatchObject({ available: true, latest: "0.1.9-nightly", head: before.head, target: nine });
+  expect(await releaseChanges(status, checkout)).toEqual({ changes: ["perf: third (#3)", "fix(sidebar): second (#2)", "feat(bots): first (#1)"], total: 3 });
+  // Only objects came: the checkout, its tags and every other ref are as they were, and it's still clean.
+  expect({ head: git(checkout, "rev-parse", "HEAD"), tags: git(checkout, "tag"), refs: git(checkout, "for-each-ref") }).toEqual(before);
+  expect(git(checkout, "status", "--porcelain")).toBe("");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.8", available: true });
+
+  // Asked once per release: with the repository out of reach, the same release still lists its changes,
+  // from memory and, in a later process, from the commits already here.
+  const away = `${source}-away`;
+  renameSync(source, away);
+  expect((await releaseChanges(status, checkout))?.total).toBe(3);
+  expect((await releaseChanges({ ...status }, checkout))?.total).toBe(3);
+  // A release whose commits can't be had has no changelog, which isn't remembered: the next check tries again.
+  const unknown = { ...status, latest: "0.1.10-nightly", target: "0".repeat(40) };
+  await expect(releaseChanges(unknown, checkout)).rejects.toThrow();
+  renameSync(away, source);
+
+  // A long way behind, the list stops at forty and counts the rest.
+  for (let i = 4; i <= 48; i++) change(`fix: change ${i} (#${i})`);
+  git(source, "tag", "0.1.10-nightly");
+  const far = await releaseChanges(await checkRelease(true, checkout), checkout);
+  expect(far?.total).toBe(48);
+  expect(far?.changes).toHaveLength(40);
+  expect(far?.changes[0]).toBe("fix: change 48 (#48)");
+
+  // Back from a nightly to the stable track's older release: nothing is added.
+  git(source, "tag", "0.1.9", nine);
+  git(checkout, "fetch", "-q", "--no-tags", "origin", "+refs/tags/0.1.10-nightly:refs/tags/0.1.10-nightly");
+  git(checkout, "switch", "-q", "--detach", "0.1.10-nightly");
+  setReleaseTrack("stable");
+  const back = await checkRelease(true, checkout);
+  expect(back).toMatchObject({ available: true, latest: "0.1.9" });
+  expect(await releaseChanges(back, checkout)).toEqual({ changes: [], total: 0 });
 }));
 
 test("updates fetch a release with its tags, keep branches, and roll back after failed dependencies", () => withRepos(async ({ source, checkout, git }) => {

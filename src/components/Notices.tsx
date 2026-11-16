@@ -5,7 +5,8 @@ import { loadRuntimeStatuses } from "../lib/runtimeStatus";
 import { runtimeName } from "../lib/runtimes";
 import { useServerOutage } from "../lib/serverOutage";
 import { useStore } from "../lib/store";
-import { useRuntimeUpdates, useUpdateAvailable, useReleaseUpdate } from "../lib/update";
+import { installRelease, restartServer, useReleaseUpdate, useReleaseWatch } from "../lib/releaseUpdate";
+import { useRuntimeUpdates, useUpdateAvailable } from "../lib/update";
 import { IconButton, Spinner } from "./primitives";
 
 /** "Pi 1.4.0", "Pi 1.4.0 and Codex 0.48.0", "Pi 1.4.0, Codex 0.48.0 and Claude Code 2.1.0". */
@@ -16,7 +17,6 @@ function listPhrase(items: string[]): string {
 
 const NOTICE_MS = 4000;
 const NOTICE_LEAVE_MS = 180; // .notice-leaving's animation
-const RESTART_WAIT_MS = 60_000;
 
 /**
  * One notice. It leaves on its own after NOTICE_MS unless `sticky` (work in progress), `persistent`
@@ -78,15 +78,20 @@ function Notice({ text, role = "status", action, details, sticky = false, persis
 /** Notices at the top of the window; Settings → Notifications turns each kind off. */
 export function Notices() {
   const prefs = useStore((s) => s.settings.notifications);
-  const { release, refresh: refreshRelease } = useReleaseUpdate(prefs.builds);
+  // The same update the button beside the sidebar's version shows (lib/releaseUpdate.ts): started
+  // from either, it shows in both.
+  useReleaseWatch();
+  const info = useReleaseUpdate((s) => s.info);
+  const phase = useReleaseUpdate((s) => s.phase);
+  const failure = useReleaseUpdate((s) => s.failure);
+  const release = prefs.builds && (info?.available || info?.restart?.pending) ? info : undefined;
   const [dismissedRelease, setDismissedRelease] = useState(() => { try { return localStorage.getItem("openbuild:dismissed-release") ?? ""; } catch { return ""; } });
-  const [releaseBusy, setReleaseBusy] = useState(false);
-  const [releaseResult, setReleaseResult] = useState("");
-  const [releaseDetails, setReleaseDetails] = useState("");
   const [expiredRelease, setExpiredRelease] = useState("");
-  const [restarting, setRestarting] = useState(false);
+  const releaseBusy = phase === "installing";
+  const restarting = phase === "restarting";
+  const releaseDetails = failure?.during === "install" ? failure.message : "";
   const restartPending = !!release?.restart?.pending;
-  const restartFailure = restartPending ? releaseDetails || release?.restart?.error || "" : "";
+  const restartFailure = restartPending ? (failure?.during === "restart" ? failure.message : "") || release?.restart?.error || "" : "";
   // Its own key: having closed the offer to update doesn't hide the restart it led to.
   const releaseKey = !release ? "" : restartPending ? `restart:${release.restart?.head}` : `${release.track}:${release.latest}`;
   const showRelease = !!release && dismissedRelease !== releaseKey && expiredRelease !== releaseKey;
@@ -153,48 +158,8 @@ export function Notices() {
       if (!controller.signal.aborted) setUpdating(false);
     }
   };
-  const updateRelease = async () => {
-    if (busy.current || releaseBusy) return;
-    busy.current = true;
-    setReleaseBusy(true);
-    setReleaseResult("");
-    setReleaseDetails("");
-    try {
-      const response = await fetch("/api/releases/update", { method: "POST" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Could not start the update.");
-      let output = "";
-      const result = await followJob(line => { output = (output + "\n" + line).slice(-12000); }, undefined, undefined, undefined, body.job);
-      if (result?.code !== 0) throw new Error(output || "Connection lost. Check server status before retrying.");
-      await refreshRelease().catch(() => {});
-    } catch (err) {
-      setReleaseResult("OpenBuild update failed. Check details before retrying.");
-      setReleaseDetails(err instanceof Error ? err.message : String(err));
-    } finally { busy.current = false; setReleaseBusy(false); }
-  };
-  const restartServer = async () => {
-    if (busy.current || releaseBusy) return;
-    busy.current = true;
-    setRestarting(true);
-    setReleaseDetails("");
-    try {
-      const response = await fetch("/api/releases/restart", { method: "POST" });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Could not start the restart.");
-      // The old server reports a restart that failed; the new one has nothing pending.
-      for (const deadline = Date.now() + RESTART_WAIT_MS; Date.now() < deadline;) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const status = await fetch("/api/releases/restart", { cache: "no-store" }).then((res) => res.ok ? res.json() : undefined).catch(() => undefined);
-        if (status?.error) throw new Error(status.error);
-        if (status && !status.pending) return location.reload();
-      }
-      throw new Error("The server didn't come back. Run ob restart on this server.");
-    } catch (err) {
-      setReleaseDetails(err instanceof Error ? err.message : String(err));
-      busy.current = false;
-      setRestarting(false);
-    }
-  };
+  const updateRelease = () => { if (!busy.current) void installRelease(); };
+  const restart = () => { if (!busy.current) void restartServer(); };
   return (
     <div className="notices">
       {showOutage && (
@@ -211,21 +176,21 @@ export function Notices() {
         <Notice
           text={restartPending
             ? restarting ? "Restarting OpenBuild…" : restartFailure ? "OpenBuild couldn't restart. Check details before retrying." : "OpenBuild updated. Restart to load it."
-            : releaseBusy ? "Updating OpenBuild…" : releaseResult || `OpenBuild ${release.latest} is available (${release.track}).`}
+            : releaseBusy ? "Updating OpenBuild…" : releaseDetails ? "OpenBuild update failed. Check details before retrying." : `OpenBuild ${release.latest} is available (${release.track}).`}
           action={restartPending
             ? (
-              <button type="button" className="btn btn-sm btn-primary" disabled={restarting || updating} aria-busy={restarting} onClick={() => void restartServer()}>
+              <button type="button" className="btn btn-sm btn-primary" disabled={restarting || updating} aria-busy={restarting} onClick={restart}>
                 {restarting && <Spinner size={12} />}
                 {restarting ? "Restarting…" : restartFailure ? "Retry" : "Restart"}
               </button>
             )
-            : <button type="button" className="btn btn-sm btn-primary" disabled={releaseBusy || updating} aria-busy={releaseBusy} onClick={() => void updateRelease()}>{releaseBusy ? "Updating…" : releaseDetails ? "Retry" : "Update"}</button>}
+            : <button type="button" className="btn btn-sm btn-primary" disabled={releaseBusy || updating} aria-busy={releaseBusy} onClick={updateRelease}>{releaseBusy ? "Updating…" : releaseDetails ? "Retry" : "Update"}</button>}
           details={restartPending ? restartFailure : releaseDetails}
           sticky={releaseBusy || restarting}
           persistent={restartPending}
           dismissLabel="Dismiss release update"
           onDismiss={() => { setDismissedRelease(releaseKey); try { localStorage.setItem("openbuild:dismissed-release", releaseKey); } catch {} }}
-          onExpire={() => { setExpiredRelease(releaseKey); setReleaseResult(""); setReleaseDetails(""); }}
+          onExpire={() => setExpiredRelease(releaseKey)}
         />
       )}
       {showBuild && (

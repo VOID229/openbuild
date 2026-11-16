@@ -6,7 +6,9 @@ import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
 import { createPreview, localPreviewTarget, forwardPreview, stopPreviews } from "./preview";
-import { checkRelease, restartStatus } from "./releases";
+import { APP_FRESH_FOR, checkRelease, releaseChanges, restartStatus, UPDATE_JOB } from "./releases";
+import type { ReleaseCheck } from "../shared/releaseUpdate";
+import { currentJob } from "./pi/jobs";
 import { currentRelease } from "./version";
 // OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
@@ -75,6 +77,8 @@ const STATE_KEY = "client-state";
 const serverId = devices.serverId();
 /** This device's name (chosen when pairing, else the computer name), read per request so a rename shows up. */
 const machine = () => devices.deviceName();
+/** How long a release check waits for the release's changelog before answering without it. */
+const CHANGES_WAIT_MS = 10_000;
 /** The port other OpenBuild servers listen on, as `openbuild pair --client` assumes. */
 const PAIR_PORT = Number(process.env.PORT ?? 3100);
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
@@ -294,16 +298,32 @@ function serve(port: number, hostname: string) {
         DELETE: (req) => forbidden(req) ?? localAuth.remove(req),
       },
 
-      // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
-      // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
+      // The release on this installation's track, for the update button beside the version in the
+      // sidebar and the notice (shared/releaseUpdate.ts). The app asks every few minutes; `?fresh` is
+      // its button, which always asks the repository and says so when that fails. Installing and
+      // restarting are /api/releases/update and /restart (server/pi/routes.ts). None of these is in
+      // `devicePathAllowed`: only this server's own signed-in browser reaches them, never a paired device.
       "/api/releases": {
-        GET: api(async () => {
+        GET: api(async (req) => {
           const restart = restartStatus();
-          // A failed check must not hide that an installed release is waiting for a restart.
-          const status = await checkRelease().catch((error) => { if (restart.pending) return undefined; throw error; });
-          return Response.json({ ...status, restart });
+          const job = currentJob();
+          const updating = job && !job.done && job.title === UPDATE_JOB ? job.id : undefined;
+          try {
+            const status = await checkRelease(new URL(req.url).searchParams.has("fresh"), undefined, APP_FRESH_FOR);
+            // The changelog is an extra: without it the update is still on offer. Its first reading
+            // downloads the release's commits, which a slow connection mustn't make the check wait out:
+            // it carries on, and a later check has it.
+            const changes = await Promise.race([releaseChanges(status).catch(() => undefined), Bun.sleep(CHANGES_WAIT_MS).then(() => undefined)]);
+            const { head: _head, target: _target, ...release } = status;
+            return Response.json({ ...release, changes, restart, updating } satisfies ReleaseCheck);
+          } catch (error) {
+            // A failed check must not hide an update that is installing, or one that waits for a restart.
+            return Response.json({ error: (error as Error).message, restart, updating } satisfies ReleaseCheck, { status: restart.pending || updating ? 200 : 502 });
+          }
         }),
       },
+      // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
+      // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
       "/api/config": {
         GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine(), release: currentRelease() })),
       },

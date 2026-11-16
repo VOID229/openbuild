@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { updateStepOf } from "../shared/releaseUpdate";
 
 const root = resolve(import.meta.dir, "..");
 const hasPython = process.platform === "linux" && Bun.spawnSync(["which", "python3"]).exitCode === 0;
@@ -61,8 +62,9 @@ for (const scenario of [
 export const checkRelease = async () => ({ available: false });
 export const releaseTrack = () => 'stable';
 export const setReleaseTrack = () => {};
-export async function installRelease() {
+export async function installRelease(root, progress) {
   if (process.env.OUTCOME === 'fail') throw new Error('fixture install failed');
+  if (process.env.OUTCOME !== 'current') { progress?.('download', 'v1.2.3'); progress?.('install', 'v1.2.3'); }
   return { installed: process.env.OUTCOME !== 'current', current: 'v1.2.3', track: 'stable' };
 }
 `);
@@ -96,6 +98,14 @@ fi
       expect(actual.output.includes("Restart now? [Y/n]")).toBe(!scenario.noninteractive);
       if (!scenario.restart && !scenario.unsafe) expect(actual.output).toContain("Changes will take effect on the next restart.");
     }
+    // Without a terminal to draw on (as when the app runs it for its update button), each step is a
+    // line the app reads back as that step, in order, before the result.
+    if (scenario.noninteractive) {
+      const lines: string[] = actual.output.split(/\r?\n/);
+      expect(lines.map(updateStepOf).filter(Boolean)).toEqual(["check", "download", "install"]);
+      expect(lines.findIndex((line) => updateStepOf(line) === "install")).toBeLessThan(lines.findIndex((line) => line.startsWith("Updated to OpenBuild")));
+    }
+    if (scenario.outcome === "current") expect(actual.output.split(/\r?\n/).map(updateStepOf).filter(Boolean)).toEqual(["check"]);
     if (scenario.unsafe) expect(actual.output).toContain("KillMode=process");
     if (scenario.failRestart) expect(actual.output).toContain("fixture restart failed");
   } finally {

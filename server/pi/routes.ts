@@ -7,7 +7,7 @@ import { isStreamId, isStreamRef } from "../../shared/replies";
 import { EFFORTS, type ModelInfo, type Speed, type ThreadRuntime } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
-import { restartServer, restartStatus, watchInstall } from "../releases";
+import { restartServer, restartStatus, UPDATE_JOB, watchInstall } from "../releases";
 import * as workspaceFiles from "../workspaceFiles";
 import * as workspaceGit from "../workspaceGit";
 import * as pullRequestView from "../pullRequestView";
@@ -159,7 +159,7 @@ export function piRoutes(api: Api) {
       POST: api(() => {
         const running = currentJob();
         if (running && !running.done) return Response.json({ error: "A maintenance job is already running" }, { status: 409 });
-        const job = startJob("Updating OpenBuild", [process.execPath, new URL("../../bin/openbuild.ts", import.meta.url).pathname, "update"], watchInstall());
+        const job = startJob(UPDATE_JOB, [process.execPath, new URL("../../bin/openbuild.ts", import.meta.url).pathname, "update"], watchInstall());
         return Response.json({ job: job.id });
       }),
     },

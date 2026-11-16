@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { RELEASE_CHECK_EVERY, type ReleaseChanges } from "../shared/releaseUpdate";
 import { latestRelease, parseVersionTag } from "../shared/version";
 import { dataDir } from "./paths";
 import { prepareUserPlugins } from "./pluginFiles";
@@ -16,6 +17,15 @@ const RELEASES = "https://github.com/dkod-ai/openbuild/releases/tag/";
 const statePath = () => join(dataDir(), "release-track.json");
 const cachePath = () => join(dataDir(), "release-cache.json");
 const FRESH_FOR = 60 * 60_000, RETRY_AFTER = 5 * 60_000;
+/**
+ * How old a list of tags may be for an open app, which asks every RELEASE_CHECK_EVERY: just under
+ * that, so each of its checks asks the repository, and several tabs' checks share one answer.
+ */
+export const APP_FRESH_FOR = RELEASE_CHECK_EVERY - 30_000;
+/** The maintenance job (server/pi/jobs.ts) that runs `ob update` for the app. */
+export const UPDATE_JOB = "Updating OpenBuild";
+/** A changelog is a tooltip: this many changes, and a count of the rest. */
+const CHANGES_SHOWN = 40;
 function writeState(path: string, value: unknown) {
   mkdirSync(dataDir(), { recursive: true });
   const temp = `${path}.${process.pid}.tmp`;
@@ -78,11 +88,14 @@ export function knownTags(): RemoteTags | undefined {
   const saved = readCache();
   return saved?.checkedAt ? saved.tags : undefined;
 }
-/** `force` always asks and reports failure. Otherwise a recent or last-known list is enough, and a failure holds off further requests. */
-async function listTags(force: boolean, root: string) {
+/**
+ * `force` always asks and reports failure. Otherwise a list no older than `freshFor`, or failing that
+ * the last one known, is enough, and a failure holds off further requests.
+ */
+async function listTags(force: boolean, root: string, freshFor = FRESH_FOR) {
   const saved = readCache();
   if (!force && saved) {
-    if (saved.retryAt ? saved.retryAt > Date.now() : Date.now() - saved.checkedAt < FRESH_FOR) {
+    if (saved.retryAt ? saved.retryAt > Date.now() : Date.now() - saved.checkedAt < freshFor) {
       if (saved.checkedAt) return saved.tags;
       throw new Error(saved.error ?? "Release check failed.");
     }
@@ -97,13 +110,17 @@ async function listTags(force: boolean, root: string) {
     throw error;
   }
 }
-export interface ReleaseStatus { track: Track; current: string; latest?: string; available: boolean; url?: string }
+export interface ReleaseStatus {
+  track: Track; current: string; latest?: string; available: boolean; url?: string;
+  /** The checkout's commit, and the commit `latest` names. */
+  head: string; target?: string;
+}
 let cache: { track: Track; root: string; until: number; value: Promise<ReleaseStatus> } | undefined;
-export function checkRelease(force = false, root = ROOT): Promise<ReleaseStatus> {
+export function checkRelease(force = false, root = ROOT, freshFor = FRESH_FOR): Promise<ReleaseStatus> {
   const track = releaseTrack();
   if (!force && cache?.track === track && cache.root === root && cache.until > Date.now()) return cache.value;
   const value = (async () => {
-    const tags = await listTags(force, root);
+    const tags = await listTags(force, root, freshFor);
     const latest = latestRelease(Object.keys(tags), track);
     const head = git(["rev-parse", "HEAD"], root);
     // HEAD's version: its own tags, and the canonical ones on its commit (a promotion since it was fetched).
@@ -116,15 +133,53 @@ export function checkRelease(force = false, root = ROOT): Promise<ReleaseStatus>
     if (latest && available && !leavingNightly) {
       try { git(["merge-base", "--is-ancestor", tags[latest.tag]!, "HEAD"], root); available = false; } catch {}
     }
-    return { track, current, latest: latest?.tag, available, url: latest && RELEASES + latest.tag };
+    return { track, current, latest: latest?.tag, available, url: latest && RELEASES + latest.tag, head, target: latest && tags[latest.tag] };
   })();
   // Only spares git calls in a burst: the cache file decides when the repository is asked again.
   cache = { track, root, until: Date.now() + 60_000, value };
   value.catch(() => { if (cache?.value === value) cache = undefined; });
   return value;
 }
-/** With `progress`, the caller owns the terminal, so dependency output stays captured. */
-export async function installRelease(root = ROOT, progress?: (step: "download" | "install", tag: string) => void) {
+
+async function gitAsync(args: string[], root: string, timeout = 60_000) {
+  const p = Bun.spawn(["git", "-C", root, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  if (code !== 0) throw new Error(err.trim().split("\n").at(-1) || `git ${args[0]} exited with ${code}`);
+  return out.trim();
+}
+let changelog: { key: string; value: Promise<ReleaseChanges | undefined> } | undefined;
+/**
+ * What an available release changes: the subjects of the commits it adds to the checkout, newest
+ * first. Every merge to main is one commit and one version, so that is the list of changes.
+ *
+ * The commits are read with git, like the tags: the release's history is fetched from the canonical
+ * repository (the same objects the update then needs, so installing it downloads nothing twice),
+ * without a ref of its own, so nothing about the checkout or what names it changes. Asked once per
+ * release: every later check answers from memory.
+ */
+export function releaseChanges(status: ReleaseStatus, root = ROOT): Promise<ReleaseChanges | undefined> {
+  const { latest, target, head } = status;
+  if (!status.available || !latest || !target) return Promise.resolve(undefined);
+  const key = `${root}\n${head}\n${target}`;
+  if (changelog?.key === key) return changelog.value;
+  const value = (async () => {
+    const known = await gitAsync(["cat-file", "-e", `${target}^{commit}`], root).then(() => true, () => false);
+    if (!known) await gitAsync(["fetch", "--quiet", "--no-tags", REPO, `refs/tags/${latest}`], root);
+    // A merge's own commits aren't changes of their own: only what main itself gained.
+    const subjects = (await gitAsync(["log", "--first-parent", "--format=%s", `${head}..${target}`], root)).split("\n").filter(Boolean);
+    return { changes: subjects.slice(0, CHANGES_SHOWN), total: subjects.length };
+  })();
+  changelog = { key, value };
+  // A failure isn't kept: the next check tries again.
+  value.catch(() => { if (changelog?.value === value) changelog = undefined; });
+  return value;
+}
+
+/**
+ * With `progress`, the caller is told each step. `capture` keeps dependency output off the terminal
+ * (the caller owns it, drawing those steps), and puts it in the error if the installation fails.
+ */
+export async function installRelease(root = ROOT, progress?: (step: "download" | "install", tag: string) => void, capture = !!progress) {
   if (git(["status", "--porcelain"], root)) throw new Error("Your checkout has local changes. Commit or stash them before updating.");
   const status = await checkRelease(true, root);
   if (!status.latest) throw new Error(`No published ${status.track} releases yet.`);
@@ -142,8 +197,8 @@ export async function installRelease(root = ROOT, progress?: (step: "download" |
   const target = git(["rev-parse", `refs/tags/${status.latest}^{commit}`], root);
   const previous = git(["rev-parse", "HEAD"], root);
   const install = () => {
-    const p = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], { cwd: root, stdio: progress ? ["ignore", "pipe", "pipe"] : ["inherit", "inherit", "inherit"] });
-    if (p.exitCode !== 0) throw new Error(`Dependency installation failed.${progress ? `\n${p.stderr?.toString().trim() ?? ""}` : ""}`);
+    const p = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], { cwd: root, stdio: capture ? ["ignore", "pipe", "pipe"] : ["inherit", "inherit", "inherit"] });
+    if (p.exitCode !== 0) throw new Error(`Dependency installation failed.${capture ? `\n${p.stderr?.toString().trim() ?? ""}` : ""}`);
   };
   try {
     // A detached release checkout leaves local branches and commits intact.

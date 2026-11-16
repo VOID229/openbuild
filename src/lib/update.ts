@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ThreadRuntime } from "../../shared/types";
 import { isHosted } from "./runtime";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "./runtimeStatus";
@@ -114,30 +114,4 @@ export function useRuntimeUpdates(enabled = true, only?: ThreadRuntime[]): Runti
     const status = statuses?.[runtime];
     return status?.updateAvailable && status.latest ? [{ runtime, version: status.latest }] : [];
   });
-}
-
-/** Release availability for this server, separate from the tab's bundle reload notice. */
-export function useReleaseUpdate(enabled = true) {
-  const [release, setRelease] = useState<{ track?: string; latest?: string; available?: boolean; restart?: { pending: boolean; head?: string; error?: string } }>();
-  const refresh = useCallback(async () => {
-    const res = await fetch("/api/releases");
-    if (res.ok) setRelease(await res.json());
-  }, []);
-  useEffect(() => {
-    if (!enabled || isHosted()) return;
-    let pending = false;
-    const check = async () => {
-      if (pending || document.visibilityState !== "visible") return;
-      pending = true;
-      try { await refresh(); }
-      catch { /* Retry when online or on the next interval. */ }
-      finally { pending = false; }
-    };
-    void check();
-    const timer = setInterval(() => void check(), RUNTIME_CHECK_EVERY);
-    document.addEventListener("visibilitychange", check);
-    window.addEventListener("online", check);
-    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", check); window.removeEventListener("online", check); };
-  }, [enabled, refresh]);
-  return { release: enabled && (release?.available || release?.restart?.pending) ? release : undefined, refresh };
 }
