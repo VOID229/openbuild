@@ -105,19 +105,58 @@ export function machineLine(t: ComputerTarget, here: string): string {
   return `${label}: ${allowed.join(", ")}${missing.length ? ` (not ${missing.join(" or ")})` : ""}; ${kind}.`;
 }
 
+/** The longest a bot's context waits on its machines: only while nothing is known of them yet, as on the first turn after the server starts. */
 const NOTE_WAIT = 2500;
+/** How old what the machines said may be before they're asked again. */
+const NOTE_FRESH = 60_000;
+/** How long a turn gives that asking: a device that's awake answers within it, and one that isn't never holds the turn. */
+const NOTE_GRACE = 150;
 
-/** The machines a bot can reach, for its context. A device slow to answer doesn't hold up the turn: it's listed as not checked. */
+type Checked = Omit<ComputerTarget, "isolation">;
+const hot = globalThis as { openbotsMachines?: { at: number; list: Checked[] }; openbotsMachinesCheck?: Promise<void> };
+
+/** Ask every machine what it allows, once at a time, and keep what they said. Never rejects. */
+function checkMachines(): Promise<void> {
+  return (hot.openbotsMachinesCheck ??= Promise.resolve()
+    .then(() => computerTargets({ engines: false }))
+    .then((list) => void (hot.openbotsMachines = { at: Date.now(), list }), () => {})
+    .finally(() => (hot.openbotsMachinesCheck = undefined)));
+}
+
+/** The server asks its paired devices as it starts, so the first turn's context doesn't wait on them. */
+export function warmMachines() {
+  if (devices.readDevices().length) void checkMachines();
+}
+
+/**
+ * The machines a bot can reach, for its context. It's said from what each machine last answered, and
+ * they're asked again behind the turn, never in front of it: a paired device that doesn't answer (a
+ * laptop that's asleep) takes five seconds per address to give up on, and the note used to wait 2.5
+ * seconds for it before the first model request of every turn of every bot, then listed every
+ * device as "not checked yet". Now only the first note after the server starts waits that long;
+ * after that a stale answer is given at most NOTE_GRACE to refresh, and the turn goes on with what's known.
+ */
 export async function machinesNote(): Promise<string> {
   const here = devices.deviceName();
+  const paired = devices.readDevices();
   // The note says how bots are kept apart on each machine, which is the user's setting: no engine is asked,
   // which took `podman info` two seconds in front of a turn's first model request, whenever a minute had passed since the last.
-  const listed = await Promise.race([machines({ engines: false }).catch(() => undefined), Bun.sleep(NOTE_WAIT).then(() => undefined)]);
-  const lines = listed
-    ? listed.map((t) => machineLine(t, here))
-    : [machineLine({ device: "local", name: here, status: "ready", isolation: isolationOf("local") }, here), ...devices.readDevices().map((d) => `- ${d.name} (machine id ${d.id}): not checked yet; a call there finds out.`)];
+  if (paired.length) {
+    const known = hot.openbotsMachines;
+    if (!known) await Promise.race([checkMachines(), Bun.sleep(NOTE_WAIT)]);
+    else if (Date.now() - known.at > NOTE_FRESH) await Promise.race([checkMachines(), Bun.sleep(NOTE_GRACE)]);
+  }
+  const answered = new Map((hot.openbotsMachines?.list ?? []).map((t) => [t.device, t]));
+  // Which machines there are and how bots are kept apart on each are read now; only what a device answered is from before.
+  const lines = [
+    machineLine({ device: "local", name: answered.get("local")?.name ?? here, status: "ready", isolation: isolationOf("local") }, here),
+    ...paired.map((d) => {
+      const t = answered.get(d.id);
+      return t ? machineLine({ ...t, name: d.name, isolation: isolationOf(d.id, t.grants) }, here) : `- ${d.name} (machine id ${d.id}): not checked yet; a call there finds out.`;
+    }),
+  ];
   // Nothing is paired: there's one computer, and nothing to say about choosing between several.
-  if (!devices.readDevices().length) return ["Your computer is on this server: bash, read, write, edit, browser and process run there. A link to a file in a message is file:///path.", ...lines].join("\n");
+  if (!paired.length) return ["Your computer is on this server: bash, read, write, edit, browser and process run there. A link to a file in a message is file:///path.", ...lines].join("\n");
   return [
     "Machines you can reach. bash, read, write, edit, browser and process run on this server unless you pass machine (a name or id from this list), and send_message takes machine for its images and attach_screenshot. You have a computer of your own on each: its own home folder, files, processes and browser, not shared with the others. A call a machine refuses or can't take fails; it never runs somewhere else instead. Whether a paired device allows this server's bots is its owner's choice, made on that device. A link to a file in a message is file:///path on this server, or file://<machine id>/path on another machine.",
     ...lines,

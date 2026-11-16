@@ -12,6 +12,7 @@ import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
 import { listModels, onModelsForgotten } from "../pi/sessions";
 import { friendFlags, piFlags } from "./extensions";
+import { warmMachines } from "./machines";
 import { allowsTools } from "../friends/store";
 import { botsDir } from "./db";
 import * as db from "./db";
@@ -1748,6 +1749,8 @@ export function startBots() {
     if (svc.piSetup()) void svc.greetOnFirstOpen();
   });
   resumeWatches();
+  // What the paired devices allow is asked now, behind nobody: the first turn's context has it ready (machines.ts).
+  warmMachines();
   if (!hot.openbotsProc) {
     hot.openbotsProc = true;
     procListeners.add((computerId, proc, tail) => {
