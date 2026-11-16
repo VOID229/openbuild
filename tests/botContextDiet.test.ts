@@ -527,6 +527,106 @@ test("a memory or routine the bot adds itself doesn't send its section again; an
   `);
 });
 
+test("only the add is held back: pausing, resuming, rewording or deleting what the bot itself added still reaches it", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    const svc = await import('./server/bots/service.ts');
+    const agent = await import('./server/bots/agent.ts');
+    svc.setHooks({ wake() {}, stop() {} });
+    svc.updateSettings({ onboarding: 'done', user: { name: 'Gal' } });
+    const { bot, conversationId } = svc.createBot({ name: 'Boss' });
+    agent.setFocus(bot.id, conversationId);
+    const context = async (extra = {}) => (await agent.seams.handle(bot.id, 'context', { tools: ['send_message'], ...extra })).sections;
+    // What the section really says right now, whatever any session was last sent.
+    const real = () => agent.contextSections(bot.id);
+    const routineId = (title) => svc.fullBot(bot.id).routines.find((r) => r.title === title).id;
+
+    // --- routines
+    const empty = await context({ fresh: true });
+    a.equal(empty.openbots_routines, '');
+    // The bot adds a routine: held back, it has the call.
+    agent.routine(bot.id, { action: 'add', title: 'Standup notes', schedule: 'Weekdays at 9:00', task: 'Post the notes' });
+    a.equal((await context()).openbots_routines, '');
+    // It pauses that same routine: the section it holds says nothing of it, and the real one says [paused]. It's sent.
+    agent.routine(bot.id, { action: 'pause', title: 'Standup notes' });
+    a.match(real().openbots_routines, /Standup notes \\(Weekdays at 9:00\\) \\[paused\\]/);
+    const paused = await context();
+    a.equal(paused.openbots_routines, real().openbots_routines);
+    // It turns it back on: sent again.
+    agent.routine(bot.id, { action: 'resume', title: 'Standup notes' });
+    const resumed = await context();
+    a.doesNotMatch(resumed.openbots_routines, /\\[paused\\]/);
+    a.equal(resumed.openbots_routines, real().openbots_routines);
+
+    // Paused and resumed before its Pi asks again: it's as it was added, and there's nothing to correct.
+    agent.routine(bot.id, { action: 'add', title: 'Check the build', schedule: 'Weekdays at 10:00' });
+    agent.routine(bot.id, { action: 'pause', title: 'Check the build' });
+    agent.routine(bot.id, { action: 'resume', title: 'Check the build' });
+    a.equal((await context()).openbots_routines, resumed.openbots_routines);
+    // The user rewords a routine the bot added, in the app: sent.
+    svc.updateRoutine(bot.id, routineId('Check the build'), { title: 'Check the nightly build' });
+    const reworded = await context();
+    a.match(reworded.openbots_routines, /Check the nightly build/);
+    a.equal(reworded.openbots_routines, real().openbots_routines);
+
+    // Two it adds, one it removes: the section it gets has the one that's left and not the one that's gone.
+    agent.routine(bot.id, { action: 'add', title: 'Water the plants', schedule: 'Fridays at 8:00' });
+    agent.routine(bot.id, { action: 'add', title: 'Send the invoice', schedule: 'in 2 hours', follow_up: true });
+    a.equal((await context()).openbots_routines, reworded.openbots_routines);
+    agent.routine(bot.id, { action: 'remove', title: 'Send the invoice' });
+    const removed = await context();
+    a.match(removed.openbots_routines, /Water the plants/);
+    a.doesNotMatch(removed.openbots_routines, /Send the invoice/);
+    a.equal(removed.openbots_routines, real().openbots_routines);
+    // One added and removed with nothing else new: what it holds is the truth again, so it's left as it is.
+    agent.routine(bot.id, { action: 'add', title: 'One-off', schedule: 'in 3 hours', follow_up: true });
+    agent.routine(bot.id, { action: 'remove', title: 'One-off' });
+    a.equal((await context()).openbots_routines, real().openbots_routines);
+
+    // --- memory
+    svc.addMemory(bot.id, 'Likes tea', { kind: 'profile' });
+    const start = await context({ fresh: true });
+    agent.memory(bot.id, { action: 'write', text: 'Ships on Fridays' });
+    agent.memory(bot.id, { action: 'write', text: 'Invoices go out on the 1st' });
+    a.equal((await context()).openbots_memory, start.openbots_memory);
+    // It forgets one of the two it just wrote: the section goes again, with the other and without that one.
+    agent.memory(bot.id, { action: 'forget', text: 'Ships on Fridays' });
+    const forgot = await context();
+    a.match(forgot.openbots_memory, /Invoices go out on the 1st/);
+    a.doesNotMatch(forgot.openbots_memory, /Ships on Fridays/);
+    a.equal(forgot.openbots_memory, real().openbots_memory);
+
+    // It writes one, then replaces it: the old wording is gone from what it's told, the new one is there.
+    agent.memory(bot.id, { action: 'write', text: 'The review is on Thursday' });
+    a.equal((await context()).openbots_memory, forgot.openbots_memory);
+    agent.memory(bot.id, { action: 'write', text: 'The review is on Wednesday', replaces: 'The review is on Thursday' });
+    const replaced = await context();
+    a.match(replaced.openbots_memory, /The review is on Wednesday/);
+    a.doesNotMatch(replaced.openbots_memory, /The review is on Thursday/);
+    a.equal(replaced.openbots_memory, real().openbots_memory);
+
+    // It writes one to its journal, then writes the same fact again as a profile fact: it moved, and it's told.
+    agent.memory(bot.id, { action: 'write', text: 'Prefers short answers' });
+    a.equal((await context()).openbots_memory, replaced.openbots_memory);
+    agent.memory(bot.id, { action: 'write', text: 'Prefers short answers', kind: 'profile' });
+    const moved = await context();
+    a.match(moved.openbots_memory, /Your profile:[^]*Prefers short answers[^]*Your journal/);
+    a.equal(moved.openbots_memory, real().openbots_memory);
+
+    // The user deletes, in the app, a memory the bot added in this session: sent.
+    agent.memory(bot.id, { action: 'write', text: 'Parks at the back' });
+    a.equal((await context()).openbots_memory, moved.openbots_memory);
+    svc.forgetMemory(bot.id, 'Parks at the back');
+    agent.memory(bot.id, { action: 'write', text: 'Coffee machine is on the second floor' });
+    const after = await context();
+    a.doesNotMatch(after.openbots_memory, /Parks at the back/);
+    a.match(after.openbots_memory, /Coffee machine is on the second floor/);
+    a.equal(after.openbots_memory, real().openbots_memory);
+
+    process.exit(0);
+  `);
+});
+
 // ------------------------------------------------------------------ what a turn's line says of all this
 
 test("a turn's metrics say how long it spent summarizing, and whether it ended on a call", () => {
