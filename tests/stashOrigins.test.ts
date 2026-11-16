@@ -26,6 +26,22 @@ async function until(check: () => Promise<boolean>, what: string, within = 15_00
   throw new Error(`Timed out: ${what}`);
 }
 
+/**
+ * A server without Pi, which is what CI has, greets with a popup (HarnessSetup) that takes the
+ * keyboard. It opens whenever the server's answer about what's installed comes back, so it could
+ * land before the typing below or in the middle of it, and the typed draft then went to the
+ * popup's button instead of the composer: the test passed or failed by that race. The server is
+ * asked here the same thing the app asks; when a popup is coming it's waited for and closed, as
+ * anyone would close it. Closed in a tab, it stays closed there, reloads included.
+ */
+async function closeSetupPopup(page: Page) {
+  const { runtimes } = await server.json<{ runtimes: { pi?: { installed?: boolean } } }>("/api/runtimes");
+  if (!runtimes.pi || runtimes.pi.installed === true) return;
+  await page.until("!!document.querySelector('.modal.hs .modal-close')", 30_000);
+  await page.eval("document.querySelector('.modal.hs .modal-close').click(), true");
+  await page.until("!document.querySelector('.modal.hs')", 30_000);
+}
+
 const PICTURE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
 test.skipIf(!browser)("a stash made at one address is there at another after a restart, with its picture and its file", async () => {
@@ -33,6 +49,7 @@ test.skipIf(!browser)("a stash made at one address is there at another after a r
   const fileId = crypto.randomUUID();
   // The server bundles the app for the first page: on a busy machine that alone takes a while.
   const lan = await Page.open(chrome!.ws, `${server.url}/`, 1200, 800, "!!document.querySelector('.composer-input')");
+  await closeSetupPopup(lan);
   // What an older build left in this address's IndexedDB: a stash with a picture and a held file.
   await lan.eval(`(async () => {
     const put = (db, store, key, value) => new Promise((resolve, reject) => {
@@ -76,6 +93,8 @@ test.skipIf(!browser)("a stash made at one address is there at another after a r
 
   // Another address, opened for the first time: a browser storage of its own, empty.
   const tail = await Page.open(chrome!.ws, `http://localhost:${server.port}/`, 1200, 800, "!!document.querySelector('.composer-input')");
+  // A new address is a new tab's storage: the popup greets there too.
+  await closeSetupPopup(tail);
   await tail.until("document.querySelector('.stash-count')?.textContent === '2'", 30_000);
   // Clicked in the page: where the tab is on screen can still move while the app finishes loading.
   await tail.eval("document.querySelector('.stash-tab-btn').click(), true");
