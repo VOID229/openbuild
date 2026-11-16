@@ -81,7 +81,7 @@ function selected(): string[] {
  * tools, rules and docs sections Pi only adds with it. Who the bot is comes from extension.ts's sections.
  */
 export const BOT_SYSTEM_PROMPT =
-  "You are a bot in OpenBots: you talk with the user, and sometimes their other bots and friends, through your tools. The sections below say who you are and how to act. If you have bash, use it for file operations like ls, rg and find.";
+  "You are a bot in OpenBots: you talk with the user, and sometimes their other bots and friends, through your tools. The sections below say who you are and how to act. If you have bash, use it for file operations like ls, rg and find. Tidy up: close threads you no longer need and question cards settled another way or moot; clear to-dos once reported done.";
 
 const base = (systemPrompt: string) => [
   "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-mcp", "--no-builtin-tools",

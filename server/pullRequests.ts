@@ -10,7 +10,9 @@
 //
 // A merge closes the thread only when it came after the thread's last user message (so a thread that
 // kept going after the merge stays open), and never while it's working, pinned, snoozed or was
-// reopened after an earlier auto-close. A day later its worktree is removed (closedWorktrees.ts) when
+// reopened after an earlier auto-close. A thread a bot started also closes when its pull request is
+// closed unmerged, and not while a bot's message waits for it; its bot hears in one line with its next
+// turn (`botThreadHooks`, set by server/bots/threads.ts). A day later its worktree is removed (closedWorktrees.ts) when
 // nothing would be lost: no uncommitted changes, HEAD is the commit GitHub merged, and no other open thread works there.
 // Only OpenBuild's own worktrees are ever removed.
 import { existsSync } from "node:fs";
@@ -37,6 +39,7 @@ export interface GhPullRequest {
   headRefOid?: string;
   createdAt: string;
   mergedAt?: string | null;
+  closedAt?: string | null;
   statusCheckRollup?: { __typename?: string; status?: string; conclusion?: string | null; state?: string }[] | null;
 }
 
@@ -66,6 +69,7 @@ export function pickPullRequest(prs: GhPullRequest[], branch: string | undefined
 
 export function toThreadPullRequest(pr: GhPullRequest, checkedAt: number): ThreadPullRequest {
   const mergedAt = pr.mergedAt ? Date.parse(pr.mergedAt) : NaN;
+  const closedAt = pr.state === "CLOSED" && pr.closedAt ? Date.parse(pr.closedAt) : NaN;
   const checks = checksOf(pr.statusCheckRollup);
   return {
     number: pr.number,
@@ -74,6 +78,7 @@ export function toThreadPullRequest(pr: GhPullRequest, checkedAt: number): Threa
     ...(pr.isDraft ? { draft: true } : {}),
     ...(checks ? { checks } : {}),
     ...(Number.isFinite(mergedAt) ? { mergedAt } : {}),
+    ...(Number.isFinite(closedAt) ? { closedAt } : {}),
     ...(pr.headRefOid ? { head: pr.headRefOid } : {}),
     checkedAt,
   };
@@ -85,15 +90,29 @@ const working = (chat: Chat) => {
   return last?.status === "streaming" || managedSessionBoundary(chat.id) === Infinity;
 };
 
+/** The bot that started this thread, if one did (its first message is the bot's). */
+export const startedByBot = (chat: Pick<Chat, "startedBy" | "messages">): string | undefined =>
+  chat.startedBy?.bot ?? chat.messages?.find((m) => m.role === "user")?.sentByBot;
+
+/** What the bots add, once they're loaded (server/bots/threads.ts). */
+export const botThreadHooks: {
+  /** A bot's message is queued or steered for the thread, or a bot is following its turn. */
+  waiting?: (threadId: string) => boolean;
+  /** A thread `bot` started was closed because its pull request `pr` merged or was closed. */
+  closed?: (chat: Chat, pr: ThreadPullRequest, bot: string) => void;
+} = {};
+
 /** Whether this thread should be closed now that its pull request is `pr`. */
 export function shouldClose(chat: Chat, pr: ThreadPullRequest, now: number): boolean {
-  if (pr.state !== "merged" || pr.mergedAt === undefined) return false;
+  // A bot's thread is done with once its pull request is closed too; one a person started stays for them.
+  const at = pr.state === "merged" ? pr.mergedAt : pr.state === "closed" && startedByBot(chat) ? pr.closedAt : undefined;
+  if (at === undefined) return false;
   if (chat.archived || chat.pinned || chat.autoCloseOptOut) return false;
   if (chat.snoozedUntil !== undefined && chat.snoozedUntil > now) return false;
-  if (working(chat)) return false;
+  if (working(chat) || botThreadHooks.waiting?.(chat.id)) return false;
   // Talking to the thread after the merge means it's still in use.
   const lastAsked = chat.messages.findLast((m) => m.role === "user")?.createdAt ?? chat.createdAt;
-  return pr.mergedAt >= Math.max(lastAsked, chat.createdAt);
+  return at >= Math.max(lastAsked, chat.createdAt);
 }
 
 /** Merged threads are closed unless the user turned it off (client settings are one JSON document). */
@@ -132,7 +151,7 @@ async function listPullRequests(repo: string): Promise<GhPullRequest[] | undefin
   const bin = gh();
   if (!bin) return undefined;
   const r = await run(
-    [bin, "pr", "list", "--state", "all", "--limit", String(LIST_LIMIT), "--json", "number,url,state,isDraft,headRefName,headRefOid,createdAt,mergedAt,statusCheckRollup"],
+    [bin, "pr", "list", "--state", "all", "--limit", String(LIST_LIMIT), "--json", "number,url,state,isDraft,headRefName,headRefOid,createdAt,mergedAt,closedAt,statusCheckRollup"],
     repo,
     60_000,
   );
@@ -193,7 +212,7 @@ async function sweepOnce(refresh?: () => Promise<void>) {
 
 /** The fields that change what a thread shows (or what its worktree's removal checks). */
 const differs = (a: ThreadPullRequest | undefined, b: ThreadPullRequest) =>
-  !a || a.number !== b.number || a.state !== b.state || a.checks !== b.checks || a.draft !== b.draft || a.head !== b.head || a.mergedAt !== b.mergedAt;
+  !a || a.number !== b.number || a.state !== b.state || a.checks !== b.checks || a.draft !== b.draft || a.head !== b.head || a.mergedAt !== b.mergedAt || a.closedAt !== b.closedAt;
 
 /**
  * Save what's now known about thread `id`'s pull request, closing the thread if it merged. Read and
@@ -216,7 +235,15 @@ function save(id: string, next: (before: ThreadPullRequest | undefined) => Threa
     ...(close ? { archived: true, done: false, woke: false, autoClosedAt: now } : {}),
   } as unknown as storage.StoredChat);
   // Its worktree goes a day later, if nothing in it would be lost (closedWorktrees.ts).
-  if (close) console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} merged`);
+  if (close) {
+    console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} ${pr.state}`);
+    const bot = startedByBot(stored);
+    try {
+      if (bot) botThreadHooks.closed?.(stored, pr, bot);
+    } catch (err) {
+      console.error("[pull-requests] Telling a bot its thread closed failed:", err);
+    }
+  }
   return true;
 }
 

@@ -367,6 +367,8 @@ export interface ThreadPullRequest {
   /** Its checks, when it has any. */
   checks?: "pending" | "passing" | "failing";
   mergedAt?: number;
+  /** When it was closed without merging. */
+  closedAt?: number;
   /** The commit GitHub has on its branch: a merged worktree still at it holds nothing the merge didn't take. */
   head?: string;
   /** When the server last asked GitHub (ms). */

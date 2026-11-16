@@ -1,7 +1,9 @@
 // A closed thread keeps its worktree for a day, in case it's reopened, and then a sweep removes it:
 // - with "Delete worktrees of closed threads" on, any closed thread's;
 // - one its pull request's merge closed, even with it off, when nothing would be lost: HEAD is still
-//   the commit GitHub merged (so its branch can go too).
+//   the commit GitHub merged (so its branch can go too);
+// - one a bot started, closed by a bot or with its pull request, even with it off: bots start threads
+//   but rarely tidy up. Its branch stays unless it's at the merged commit, so its commits aren't lost.
 // Never forced: uncommitted work stays, and so does a worktree an open thread still works in.
 // A thread deleted by hand takes its worktree with it straight away (removeDeletedThreadWorktree).
 import { existsSync } from "node:fs";
@@ -31,6 +33,9 @@ function enabled(): boolean {
 /** Closed because its pull request merged (a bot's close also stamps autoClosedAt, but not a merge). */
 const mergeClosed = (chat: Chat) => !!chat.autoClosedAt && chat.pullRequest?.state === "merged" && !!chat.pullRequest.head;
 
+/** A thread a bot started that was closed for it, not by hand (a person's close leaves autoClosedAt unset). */
+const botClosed = (chat: Chat) => !!chat.autoClosedAt && !!chat.startedBy?.bot;
+
 /** A merged thread's worktree still at the commit GitHub merged. */
 async function atMergedHead(chat: Chat): Promise<boolean> {
   const head = await run(["git", "rev-parse", "HEAD"], chat.workspace!.cwd, 10_000);
@@ -59,7 +64,7 @@ const kept = new Set<string>();
 export async function sweepClosedWorktrees(removeRemote?: RemoteRemove, now = Date.now()): Promise<void> {
   const all = enabled();
   for (const chat of due(storage.pullRequestChatSummaries(), now)) {
-    if (!all && !mergeClosed(chat)) continue;
+    if (!all && !mergeClosed(chat) && !botClosed(chat)) continue;
     const { cwd, deviceId } = chat.workspace!;
     const key = `${deviceId ?? ""}\0${cwd}`;
     if (removed.has(key)) continue;
@@ -71,7 +76,7 @@ export async function sweepClosedWorktrees(removeRemote?: RemoteRemove, now = Da
     try {
       // A squash merge leaves the branch's commits off the base: only a branch still at the merged commit is deleted by force.
       const merged = !deviceId && mergeClosed(chat) && (await atMergedHead(chat));
-      if (!all && !merged) continue;
+      if (!all && !merged && !botClosed(chat)) continue;
       await (deviceId ? removeRemote!(deviceId, cwd) : removeWorktree(cwd, false, merged));
       removed.add(key);
       console.log(`[worktrees] Removed the worktree of "${chat.title}", closed over a day ago`);
