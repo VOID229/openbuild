@@ -25,7 +25,8 @@ export function fxEnv(): Record<string, string> {
   env.FX_SKIP_ONBOARDING ??= "1";
   env.FX_NO_OPEN_BROWSER ??= "1";
   env.FX_AUTO_UPGRADE ??= "0";
-  for (const [name, value] of Object.entries(prepared?.value.vars ?? {})) env[name] ??= value;
+  // Empty counts as unset, as it does for finding them (prepare) and for saying what's missing.
+  for (const [name, value] of Object.entries(prepared?.value.vars ?? {})) if (!env[name]) env[name] = value;
   // A session id header ("x-opencode-session") is one per run: a shell wrapper makes a new one for
   // each `fx` it starts, so each fx process OpenBuild starts gets its own.
   for (const name of prepared?.value.sessionVars ?? []) env[name] ||= crypto.randomUUID();

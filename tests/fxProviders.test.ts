@@ -184,6 +184,24 @@ describe("the picker's fx models", () => {
     expect(new Set(sessions).size).toBe(sessions.length);
   });
 
+  test("an empty variable in the server's environment counts as unset: the shell's value is the one fx gets", async () => {
+    process.env.SHELL = shell("export OCG_KEY=sk-from-profile");
+    process.env.OCG_KEY = "";
+    try {
+      const { models } = await listModels(true);
+      expect(models.filter((m) => m.provider === "opencode-go").map((m) => m.id)).toEqual(["fx/opencode-go/glm-5.3-flash", "fx/opencode-go/kimi-k3.1-pro"]);
+      const runs = logged().filter((l) => l.args?.[0] === "models" && l.provider === "opencode-go");
+      expect(runs.length).toBeGreaterThan(0);
+      for (const r of runs) expect(r.key).toBe("sk-from-profile");
+      writeFileSync(log, "");
+      const events = await turn("fx/opencode-go/kimi-k3.1-pro");
+      expect(events.filter((e) => e.t === "error")).toEqual([]);
+      expect(logged().find((l) => l.args?.[0] === "acp")).toMatchObject({ provider: "opencode-go", key: "sk-from-profile" });
+    } finally {
+      delete process.env.OCG_KEY;
+    }
+  });
+
   test("each provider is a group of its own: the gateway's xai models aren't the Grok sign-in's", async () => {
     process.env.SHELL = shell("export OCG_KEY=sk-from-profile; export LOCAL_KEY=local");
     process.env.FX_TEST_GATEWAY = "1";
