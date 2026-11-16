@@ -2,10 +2,10 @@
 // a paired device that doesn't answer in front of every turn, a minute of summarizing on the bot's
 // own model, a model request that only says the turn is over, and tool results at full length.
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import openbots, { heard, LAST, stepSaysDone, SUMMARY_SYSTEM, SUMMARY_WORDS, leastThinking, settled, shellText, soundSummary, summarize, summaryModel, summaryPrompt, summaryTranscript } from "../server/bots/extension";
+import openbots, { heard, LAST, stepSaysDone, traceSummary, SUMMARY_SYSTEM, SUMMARY_WORDS, leastThinking, settled, shellText, soundSummary, summarize, summaryModel, summaryPrompt, summaryTranscript } from "../server/bots/extension";
 import { COMPACT_AT, compactionPolicy } from "../server/bots/sessionPolicy";
 import { BOT_TOOLS } from "../server/bots/toolPreload";
 import { summarizeTurns, summaryRows, TurnMeter } from "../server/bots/turnMetrics";
@@ -216,6 +216,68 @@ test("the summary is asked for in a few hundred words, on the bot's own model wi
     expect(requests).toHaveLength(0);
   } finally {
     delete process.env.OPENBOTS_SUMMARY;
+  }
+});
+
+test("why a summary failed is written down when it can be, and a trace that can't be written never stops Pi's summary taking over", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "openbuild-diet-trace-"));
+  const hooks = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
+  openbots({ on: (name: string, handler: never) => hooks.set(name, handler), registerTool() {} });
+  const hook = hooks.get("session_before_compact")!;
+  const opus = { provider: "claude-code", id: "default" };
+  const event = { preparation: { firstKeptEntryId: "kept1", tokensBefore: 81234, messagesToSummarize: [user("[aaaa1111] Gal: ship it?")], turnPrefixMessages: [] } };
+  // A model that goes on with the conversation, and a registry that throws outright: neither is a summary.
+  const chatty = { model: opus, modelRegistry: { getAvailable: () => [opus], complete: async () => ({ stopReason: "stop", content: [{ type: "text", text: "Sure! What next?" }] }) } };
+  const broken = { model: opus, modelRegistry: { getAvailable: () => [opus], complete: async () => { throw new Error("socket hang up"); } } };
+  const before = process.env.OPENBOTS_SUMMARY_TRACE;
+  try {
+    // A trace that can be written says why, a line each time, and nothing of the session.
+    const file = join(dir, "trace.txt");
+    process.env.OPENBOTS_SUMMARY_TRACE = file;
+    expect(await hook(event, chatty)).toBeUndefined();
+    expect(await hook(event, broken)).toBeUndefined();
+    const lines = readFileSync(file, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^\d{4}-\d\d-\d\dT[\d:.]+Z claude-code\/default didn't write notes$/);
+    expect(lines[1]).toMatch(/claude-code\/default socket hang up$/);
+    expect(lines.join("\n")).not.toContain("ship it");
+
+    // A folder that isn't there, a path that is a folder, a file that can't be written to, a folder that can't be entered:
+    // the hook still answers undefined (Pi's own summary), and never rejects.
+    const locked = join(dir, "locked.txt");
+    writeFileSync(locked, "");
+    chmodSync(locked, 0o400);
+    const closed = join(dir, "closed");
+    mkdirSync(closed);
+    chmodSync(closed, 0o500);
+    for (const path of ["/does-not-exist/trace.txt", dir, join(dir, "missing", "deeper", "trace.txt"), locked, join(closed, "trace.txt"), "\0bad"]) {
+      process.env.OPENBOTS_SUMMARY_TRACE = path;
+      await expect(hook(event, chatty)).resolves.toBeUndefined();
+      await expect(hook(event, broken)).resolves.toBeUndefined();
+      // The write itself never throws or rejects, whatever it's handed.
+      await expect(traceSummary(new Error("why"), path)).resolves.toBeUndefined();
+    }
+    expect(existsSync("/does-not-exist")).toBe(false);
+    // (Root writes where it likes, so only anyone else's locked file is sure to be untouched.)
+    if (process.getuid?.() !== 0) expect(readFileSync(locked, "utf8")).toBe("");
+    chmodSync(closed, 0o700);
+    // It didn't quietly start writing somewhere else either.
+    expect(readFileSync(file, "utf8").trim().split("\n")).toHaveLength(2);
+
+    // A summary that works is still used with a trace that can't be written, and with none set nothing is written.
+    const notes = "Now: you're shipping the release.";
+    const sound = { model: opus, modelRegistry: { getAvailable: () => [opus], complete: async () => ({ stopReason: "stop", content: [{ type: "text", text: notes }], usage: {} }) } };
+    process.env.OPENBOTS_SUMMARY_TRACE = "/does-not-exist/trace.txt";
+    expect(await hook(event, sound)).toMatchObject({ compaction: { summary: notes } });
+    delete process.env.OPENBOTS_SUMMARY_TRACE;
+    expect(await hook(event, chatty)).toBeUndefined();
+    await expect(traceSummary(new Error("why"), undefined)).resolves.toBeUndefined();
+    await expect(traceSummary(undefined, file)).resolves.toBeUndefined();
+    expect(readFileSync(file, "utf8").trim().split("\n")).toHaveLength(3);
+  } finally {
+    if (before === undefined) delete process.env.OPENBOTS_SUMMARY_TRACE;
+    else process.env.OPENBOTS_SUMMARY_TRACE = before;
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

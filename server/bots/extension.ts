@@ -429,6 +429,22 @@ export async function summarize(event: any, ctx: any): Promise<{ compaction: { s
   throw new Error(failed.join("; "));
 }
 
+/**
+ * OPENBOTS_SUMMARY_TRACE names a file that's told why the extension's summary wasn't used: the
+ * reason only, never the session's text. It's a diagnostic and nothing depends on it: a path that
+ * can't be written (a folder that isn't there, no permission) is passed over in silence, so the
+ * hand-over to Pi's own summary always happens. Never throws, never rejects.
+ */
+export async function traceSummary(err: unknown, path = process.env.OPENBOTS_SUMMARY_TRACE): Promise<void> {
+  if (!path) return;
+  try {
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(path, `${new Date().toISOString()} ${err instanceof Error ? err.message : String(err)}\n`);
+  } catch {
+    // Nothing to tell and nobody to tell it to.
+  }
+}
+
 export default function openbots(pi: any) {
   const catalog: string[] = [];
   /** A catalog tool starts inactive: declared to the model only once loaded. */
@@ -486,8 +502,7 @@ export default function openbots(pi: any) {
     try {
       return await summarize(event, ctx);
     } catch (err) {
-      // OPENBOTS_SUMMARY_TRACE names a file that's told why: the reason only, never the session's text.
-      if (process.env.OPENBOTS_SUMMARY_TRACE) await import("node:fs").then((fs) => fs.appendFileSync(process.env.OPENBOTS_SUMMARY_TRACE!, `${new Date().toISOString()} ${err instanceof Error ? err.message : String(err)}\n`), () => {});
+      await traceSummary(err);
       return undefined;
     }
   });
