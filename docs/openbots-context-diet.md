@@ -112,8 +112,9 @@ before each one, and a made-up 100,000-token session with eight facts planted in
 with Pi's own summary took 57.7, 70.4 and 71.0 seconds, so it isn't the machine. The summarizing
 request reads about as much as before (29,000 to 76,000 tokens; the extension's transcript is a
 little shorter than Pi's). Both summaries of the made-up session kept all eight planted facts. On
-the real ones, the short summaries keep 25 to 57% of the ids, paths, links and numbers the long
-ones had, weighted to the newest: by design, they drop what's finished.
+the real ones, the short summaries keep 23 to 63% of the ids, paths, links and numbers the long
+ones had, and about half to nine tenths of those from the newest part of the session: by design,
+they drop what's finished.
 
 **A smaller model was tried and left out.** The one a Claude bot has through the bundled bridge is
 Haiku 4.5: 7 to 11 seconds a summary, twice as fast again, but 2 of 9 summaries of real sessions
