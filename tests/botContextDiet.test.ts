@@ -32,12 +32,13 @@ test("a bot's context doesn't wait on a paired device that stopped answering", a
     import { mock } from 'bun:test';
     const all = { files: true, terminal: true, browser: true, unisolated: true };
     // A laptop that answers at once, until it goes to sleep: then asking it takes seconds to give up.
-    let asleep = false, asked = 0;
+    let asleep = false, hung = false, asked = 0;
     mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), engines: async () => [], procListeners: new Set() }));
     mock.module('./server/computers/api.ts', () => ({
       computerApi: () => ({ call: async () => ({}) }),
       computerTargets: async () => {
         asked++;
+        if (hung) await new Promise(() => {});
         if (asleep) await Bun.sleep(1200);
         return [{ device: 'local', name: 'Studio', status: 'ready', grants: all }, asleep ? { device: 'lap', name: 'Laptop', status: 'offline', message: 'no answer' } : { device: 'lap', name: 'Laptop', status: 'ready', grants: all }];
       },
@@ -83,6 +84,23 @@ test("a bot's context doesn't wait on a paired device that stopped answering", a
     a.match((await timed()).note, READY);
     m.setIsolation('lap', 'container');
     a.match(await m.machinesNote(), /- Laptop \\(machine id lap\\): files, terminal, browser; container\\./);
+    // A device that takes the request and never answers: the round is given up on, and the next one starts.
+    m.tuning.giveUpMs = 200;
+    hung = true;
+    globalThis.openbotsMachines.at = 0;
+    const before = asked;
+    const stuck = await timed();
+    a.ok(stuck.ms < 700, 'the note waited ' + stuck.ms + ' ms on a round that never answers');
+    a.equal(asked, before + 1);
+    // While it's out, no second round is started beside it.
+    await timed();
+    a.equal(asked, before + 1);
+    await Bun.sleep(350);
+    hung = false;
+    const again = await timed();
+    a.equal(asked, before + 2);
+    a.match(again.note, /- Laptop \\(machine id lap\\): files, terminal, browser; container\\./);
+
     // A device paired since the last answer is listed, as not asked yet.
     devices.addDevice({ id: 'tow', name: 'Tower', mode: 'lan', urls: ['http://y'], token: 't' });
     a.match(await m.machinesNote(), /- Tower \\(machine id tow\\): not checked yet; a call there finds out\\./);
@@ -202,6 +220,23 @@ test("the summary is asked for in a few hundred words, on the bot's own model wi
     await expect(summarize(event, { model: opus, modelRegistry: registry([bad]) })).rejects.toThrow(/claude-code\/default (didn't write notes|ended with|called a tool|wrote nothing)/);
   }
   await expect(summarize({ preparation: { firstKeptEntryId: "k", messagesToSummarize: [] } }, { model: opus, modelRegistry: registry([]) })).rejects.toThrow("nothing to summarize");
+
+  // A request that never ends, and takes no notice of being told to stop, isn't waited on past the limit...
+  const deaf = { model: opus, modelRegistry: { getAvailable: () => [opus], complete: () => new Promise(() => {}) } };
+  let began = Date.now();
+  await expect(summarize(event, deaf, 150)).rejects.toThrow(/claude-code\/default took too long or was stopped/);
+  expect(Date.now() - began).toBeLessThan(1500);
+  // ...nor past Pi stopping the compaction (the turn was stopped).
+  const stop = new AbortController();
+  began = Date.now();
+  const stopped = summarize({ ...event, signal: stop.signal }, deaf);
+  setTimeout(() => stop.abort(), 50);
+  await expect(stopped).rejects.toThrow(/took too long or was stopped/);
+  expect(Date.now() - began).toBeLessThan(1500);
+  // One that fails after it was given up on troubles nobody.
+  const late = { model: opus, modelRegistry: { getAvailable: () => [opus], complete: () => new Promise((_, reject) => setTimeout(() => reject(new Error("late")), 200)) } };
+  await expect(summarize(event, late, 50)).rejects.toThrow(/took too long/);
+  await Bun.sleep(250);
 
   // The extension answers Pi's session_before_compact with it, and with nothing when it fails or is switched off.
   const hooks = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown>>();
@@ -417,13 +452,13 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     import { mock } from 'bun:test';
     const files = new Map();
     let printed = '';
-    let failWrites = false;
+    let failWrites = false, hangWrites = false;
     mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), engines: async () => [], procListeners: new Set() }));
     mock.module('./server/computers/api.ts', () => ({
       computerApi: () => ({
         call: async (id, op, body) => {
           if (op !== 'fs') return {};
-          if (body.op === 'write') { if (failWrites) throw new Error('disk full'); files.set(body.path, Buffer.from(body.data, 'base64').toString()); return {}; }
+          if (body.op === 'write') { if (hangWrites) await new Promise(() => {}); if (failWrites) throw new Error('disk full'); files.set(body.path, Buffer.from(body.data, 'base64').toString()); return {}; }
           if (body.op === 'read') return { data: Buffer.from(files.get(body.path) ?? '').toString('base64') };
           return {};
         },
@@ -466,6 +501,20 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     a.match(unsaved.output, /characters left out here\\. Ask again for less/);
     a.doesNotMatch(unsaved.output, /\\.outputs/);
     failWrites = false;
+    // A machine that takes the file and never says it's written doesn't hold the command's result either.
+    agent.outputs.keepWaitMs = 150;
+    hangWrites = true;
+    let started = Date.now();
+    const slow = await bash('make');
+    a.ok(Date.now() - started < 1500, 'the result waited ' + (Date.now() - started) + ' ms on the kept file');
+    a.match(slow.output, /characters left out here\\. Ask again for less/);
+    a.ok(slow.output.startsWith('FIRST LINE\\n') && slow.output.endsWith('LAST LINE: 3 tests failed\\n'));
+    started = Date.now();
+    const slowApp = await fitApp(bot, { text: 'x'.repeat(40000), images: [] });
+    a.ok(Date.now() - started < 1500);
+    a.match(slowApp.text, /Ask again for less/);
+    hangWrites = false;
+    agent.outputs.keepWaitMs = 5000;
 
     // An app's answer keeps more of its start than of its end; a short one is left alone.
     const short = { text: 'three issues', images: [] };
@@ -474,10 +523,11 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     const fitted = await fitApp(bot, listing);
     a.ok(fitted.text.length < APP_SHOWN.head + APP_SHOWN.tail + 400);
     a.ok(fitted.text.startsWith('ISSUE 1\\n') && fitted.text.endsWith('ISSUE LAST'));
-    a.match(fitted.text, /are in ~\\/\\.outputs\\/app-1\\.txt/);
-    a.equal(files.get('.outputs/app-1.txt'), listing.text);
+    // (The one that never got written took the first name.)
+    a.match(fitted.text, /are in ~\\/\\.outputs\\/app-2\\.txt/);
+    a.equal(files.get('.outputs/app-2.txt'), listing.text);
     // The bot reads the part it needs with the path the note gave it.
-    a.match(await agent.seams.handle(bot, 'read', { path: '.outputs/app-1.txt', offset: 8, limit: 32 }), /^an issue with a long description\\n\\n\\[… [\\d,]+ more characters\\. Read on with offset 40/);
+    a.match(await agent.seams.handle(bot, 'read', { path: '.outputs/app-2.txt', offset: 8, limit: 32 }), /^an issue with a long description\\n\\n\\[… [\\d,]+ more characters\\. Read on with offset 40/);
     a.deepEqual([fitted.images, fitted.isError], [[], false]);
 
     // A file read without a limit is its first part, and says how much is left and where to carry on.

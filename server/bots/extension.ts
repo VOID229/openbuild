@@ -395,7 +395,7 @@ export function soundSummary(text: string): boolean {
  * neither wrote sound notes (a model that failed, ran out of room, or went on with the transcript
  * instead of summarizing it), and Pi's own summary takes over.
  */
-export async function summarize(event: any, ctx: any): Promise<{ compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; usage?: unknown; details: { by: "openbots"; model: string } } }> {
+export async function summarize(event: any, ctx: any, timeoutMs = SUMMARY_TIMEOUT_MS): Promise<{ compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number; usage?: unknown; details: { by: "openbots"; model: string } } }> {
   const prep = event?.preparation;
   const registry = ctx?.modelRegistry;
   if (!prep?.firstKeptEntryId || !ctx?.model || typeof registry?.complete !== "function") throw new Error("nothing to summarize with");
@@ -407,13 +407,23 @@ export async function summarize(event: any, ctx: any): Promise<{ compaction: { s
   const small = summaryModel(own, available);
   const previous = typeof prep.previousSummary === "string" && prep.previousSummary.trim() ? prep.previousSummary.trim() : "";
   const text = `<transcript>\n${transcript}\n</transcript>\n\n${previous ? `<previous-notes>\n${previous}\n</previous-notes>\n\n` : ""}${summaryPrompt(!!previous, split)}`;
-  const signal = AbortSignal.any([AbortSignal.timeout(SUMMARY_TIMEOUT_MS), ...(event.signal ? [event.signal as AbortSignal] : [])]);
+  const signal = AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(event.signal ? [event.signal as AbortSignal] : [])]);
+  // A request that doesn't stop when it's told to isn't waited on either: past the limit, or stopped, the job goes back to Pi.
+  const over = new Promise<never>((_, reject) => {
+    const give = () => reject(new Error("took too long or was stopped"));
+    if (signal.aborted) give();
+    else signal.addEventListener("abort", give, { once: true });
+  });
+  over.catch(() => {});
   const failed: string[] = [];
   for (const model of small === own ? [own] : [small, own]) {
     const on = `${model.provider}/${model.id}`;
     try {
       const reasoning = leastThinking(model as { reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> });
-      const response = await registry.complete(model, { systemPrompt: SUMMARY_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] }, { maxTokens: 4000, signal, cacheRetention: "none", sessionId: crypto.randomUUID(), ...(reasoning ? { reasoning } : {}) });
+      const asked = Promise.resolve(registry.complete(model, { systemPrompt: SUMMARY_SYSTEM, messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] }, { maxTokens: 4000, signal, cacheRetention: "none", sessionId: crypto.randomUUID(), ...(reasoning ? { reasoning } : {}) }));
+      // Left behind when the limit passes: whatever it says later is nobody's to hear.
+      asked.catch(() => {});
+      const response = await Promise.race([asked, over]);
       if (!response || response.stopReason === "error" || response.stopReason === "length" || response.stopReason === "aborted") throw new Error(`ended with ${response?.stopReason ?? "nothing"}${response?.errorMessage ? `: ${response.errorMessage}` : ""}`);
       if ((response.content ?? []).some((b: any) => b?.type === "toolCall")) throw new Error("called a tool");
       const wrote = blockText(response.content).trim();

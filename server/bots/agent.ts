@@ -1359,6 +1359,8 @@ export const APP_SHOWN = { head: 13_000, tail: 3_000 };
 export const READ_SHOWN = 24_000;
 /** Outputs kept per bot and kind: the file names go round, so they never pile up. */
 const KEPT_OUTPUTS = 20;
+/** How long keeping one may take. It's a convenience: a machine slow to write it, or a computer that has to start first, never holds the tool's result. Tests shorten it. */
+export const outputs = { keepWaitMs: 5_000 };
 const keptCount = new Map<string, number>();
 
 /** `text` as a bot's context takes it: whole when it fits, else its two ends with the middle left out and where the whole is, or how to get the rest. */
@@ -1378,8 +1380,8 @@ async function keepOutput(api: { call: (id: string, op: string, body?: Record<st
   // From its home, not `~/…`: a container's files take a leading ~ for a folder's name.
   const path = `.outputs/${kind}-${n}.txt`;
   try {
-    await api.call(id, "fs", { op: "write", path, data: Buffer.from(text).toString("base64") });
-    return path;
+    const wrote = await Promise.race([api.call(id, "fs", { op: "write", path, data: Buffer.from(text).toString("base64") }).then(() => true, () => false), Bun.sleep(outputs.keepWaitMs).then(() => false)]);
+    return wrote ? path : undefined;
   } catch {
     return undefined;
   }
@@ -1408,7 +1410,7 @@ async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSig
 export async function fitApp<T>(botId: string, out: T): Promise<T> {
   const answer = out as { text?: unknown } | null;
   if (!answer || typeof answer !== "object" || typeof answer.text !== "string" || answer.text.length <= (APP_SHOWN.head + APP_SHOWN.tail) * 1.1) return out;
-  const kept = await computerOn(botId, undefined).then(({ api, id }) => keepOutput(api, id, "app", answer.text as string), () => undefined);
+  const kept = await Promise.race([computerOn(botId, undefined).then(({ api, id }) => keepOutput(api, id, "app", answer.text as string), () => undefined), Bun.sleep(outputs.keepWaitMs).then(() => undefined)]);
   return { ...answer, text: fitOutput(answer.text, APP_SHOWN, kept) } as T;
 }
 

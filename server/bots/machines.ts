@@ -112,15 +112,23 @@ const NOTE_FRESH = 60_000;
 /** How long a turn gives that asking: a device that's awake answers within it, and one that isn't never holds the turn. */
 const NOTE_GRACE = 150;
 
+/** How long one round of asking may take before it's given up on, so a device that accepts a request and never answers doesn't keep the next round from starting. Tests shorten it. */
+export const tuning = { giveUpMs: 20_000 };
+
 type Checked = Omit<ComputerTarget, "isolation">;
 const hot = globalThis as { openbotsMachines?: { at: number; list: Checked[] }; openbotsMachinesCheck?: Promise<void> };
 
 /** Ask every machine what it allows, once at a time, and keep what they said. Never rejects. */
 function checkMachines(): Promise<void> {
-  return (hot.openbotsMachinesCheck ??= Promise.resolve()
+  if (hot.openbotsMachinesCheck) return hot.openbotsMachinesCheck;
+  const asking = Promise.resolve()
     .then(() => computerTargets({ engines: false }))
-    .then((list) => void (hot.openbotsMachines = { at: Date.now(), list }), () => {})
-    .finally(() => (hot.openbotsMachinesCheck = undefined)));
+    // An answer that comes after the round was given up on is still what the machines said.
+    .then((list) => void (hot.openbotsMachines = { at: Date.now(), list }), () => {});
+  const round: Promise<void> = Promise.race([asking, Bun.sleep(tuning.giveUpMs)]).finally(() => {
+    if (hot.openbotsMachinesCheck === round) hot.openbotsMachinesCheck = undefined;
+  });
+  return (hot.openbotsMachinesCheck = round);
 }
 
 /** The server asks its paired devices as it starts, so the first turn's context doesn't wait on them. */
