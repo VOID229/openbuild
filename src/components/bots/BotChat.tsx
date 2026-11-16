@@ -1419,8 +1419,8 @@ function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direc
 /**
  * A bot at work in another chat, as this one shows it: its mascot, calmer than at work here (BotAvatar's
  * `away`), and what it's doing there in words for this chat (activity.ts, awayLines), in the bot's own
- * chat as a line of its own, in a group by its name. Quiet: no sweep through the words, as nothing is
- * going on here. Gone once its turn there ends, or it comes here.
+ * chat as a line of its own, in a group by its name. Its words glow as a working row's do. Gone once
+ * its turn there ends, or it comes here.
  */
 function AwayRow({ conversation, bot }: { conversation: Conversation; bot: Bot }) {
   const direct = conversation.kind === "direct";
@@ -1431,7 +1431,7 @@ function AwayRow({ conversation, bot }: { conversation: Conversation; bot: Bot }
   return (
     <div className="bm-working bm-away" role="status" aria-label={said[0]}>
       {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
-      <FitText key={said[0]} className="bm-away-text" lines={said} aria-hidden />
+      <FitText key={said[0]} className="bm-away-text" lines={said} within=".bm-away" aria-hidden />
     </div>
   );
 }

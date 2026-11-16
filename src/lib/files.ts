@@ -1,6 +1,6 @@
 import { ATTACHMENT_CHUNK, MAX_ATTACHMENT_BYTES, MAX_IMAGE_DATA_URL, formatBytes, type StoredFile } from "../../shared/attachments";
 import type { Attachment } from "../../shared/types";
-import { uid } from "./chat";
+import { uid } from "./id";
 import { apiUrl } from "./devices";
 
 export { formatBytes };

@@ -10,7 +10,7 @@ import { useFieldDictation } from "../lib/useFieldDictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../lib/draftSelection";
 import { AttachmentError, attachmentUrl, formatBytes, readAttachment } from "../lib/files";
-import { heldFile, holdFile } from "../lib/localFiles";
+import { hasHeldFile, holdFile } from "../lib/localFiles";
 import { MAX_ATTACHMENT_BYTES } from "../../shared/attachments";
 import { FileChip } from "./FileChip";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
@@ -452,11 +452,11 @@ export function Composer({ variant, chatId, streaming }: Props) {
   // What's attached right now, including images added earlier in the same paste that haven't rendered yet.
   const attached = useRef(files);
   attached.current = files;
-  // Files this browser no longer holds (attached on another device, or too large to outlast a reload).
+  // Files neither this browser nor a stash on the server holds (attached on another device, or too large to outlast a reload).
   const [missing, setMissing] = useState<string[]>([]);
   useEffect(() => {
     let live = true;
-    void Promise.all(files.filter((f) => f.local).map(async (f) => ((await heldFile(f.id)) ? undefined : f.id))).then((ids) => live && setMissing(ids.filter((id): id is string => !!id)));
+    void Promise.all(files.filter((f) => f.local).map(async (f) => ((await hasHeldFile(f.id)) ? undefined : f.id))).then((ids) => live && setMissing(ids.filter((id): id is string => !!id)));
     return () => {
       live = false;
     };

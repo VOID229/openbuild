@@ -603,6 +603,18 @@ export function parseFileRef(item: string): BotFile | undefined {
     return undefined;
   }
 }
+/**
+ * The files a stash carries that waited in the browser for their message (src/lib/localFiles.ts):
+ * attachments marked `local`, or OpenBots' references to such files. They're kept with the stash on
+ * the server (server/stashes.ts). Takes attachments' shape, so OpenBuild's and OpenBots' stashes alike.
+ */
+export function stashHeldFiles(files: readonly { id: string; name: string; dataUrl: string; local?: boolean }[]): { id: string; name: string }[] {
+  return files.flatMap((f) => {
+    const ref = parseFileRef(f.dataUrl);
+    if (ref?.local) return [{ id: ref.id, name: ref.name }];
+    return f.local ? [{ id: f.id, name: f.name }] : [];
+  });
+}
 export const MAX_BOT_IMAGES = 4;
 export const MAX_BOT_FILES = 10;
 /** What a composer keeps of what was added: the first pictures and files up to each limit. */
