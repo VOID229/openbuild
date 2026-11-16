@@ -147,28 +147,75 @@ test("a turn's status follows each step as it starts and ends, and is never Thin
   for (const s of sent) if (s.state === 'working') a.ok(s.activity && !/thinking/i.test(s.activity) && !plain(s.activity), JSON.stringify(s));
 `), 30_000);
 
-test("text streaming reads Writing a reply; a [silent] in the making and text after a sent message don't", () => run("writing", `
+test("text streaming reads Writing a reply once it can only be a reply; a [silent] in the making and text after a sent message don't", () => run("writing", `
   const first = await turn();
   feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
   update({ type: 'text_start', contentIndex: 0 });
   a.equal(line(), 'Reading your message');
+  // A sentence could still be the line before a tool call: the status waits for the reply to show itself.
   update({ type: 'text_delta', contentIndex: 0, delta: 'Sure, ' });
-  a.equal(line(), 'Writing a reply');
   update({ type: 'text_delta', contentIndex: 0, delta: 'here is what I found.' });
+  a.equal(line(), 'Reading your message');
+  a.equal(typing(), false);
+  // A second paragraph is a reply.
+  update({ type: 'text_delta', contentIndex: 0, delta: '\\n\\nThe build broke on a missing import.' });
   a.equal(line(), 'Writing a reply');
   // The reply is shown while the turn settles, and the status still says what that is.
-  feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Sure, here is what I found.' }] } });
+  feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Sure, here is what I found.\\n\\nThe build broke on a missing import.' }] } });
   a.equal(typing(), true);
   a.equal(line(), 'Writing a reply');
   await over(first);
   a.equal(status(), undefined);
   a.equal(typing(), false);
 
+  // A short reply says so the moment it's done: the chat shows it typing, the status the same.
+  const short = await turn();
+  feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  update({ type: 'text_delta', contentIndex: 0, delta: 'All green, merged.' });
+  a.equal(line(), 'Reading your message');
+  feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'All green, merged.' }] } });
+  a.equal(typing(), true);
+  a.equal(line(), 'Writing a reply');
+  await over(short);
+
+  // So does a long one in a single paragraph, once it's longer than a line between steps ever is.
+  const long = await turn();
+  feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  const words = 'The suite is green on main again, and the flaky timeout in the durable tests came from a slow tmpfs. ';
+  update({ type: 'text_delta', contentIndex: 0, delta: words });
+  a.equal(line(), 'Reading your message');
+  update({ type: 'text_delta', contentIndex: 0, delta: words + words });
+  a.equal(line(), 'Writing a reply');
+  await over(long);
+
+  // A model that writes a line before every call (a local one, say) is working, not writing: the status
+  // goes from step to step and never says it's writing a reply in between.
+  const narrated = await turn();
+  sent.length = 0;
+  const lines = ['Let me look up the actual tool names.', 'The apps tool needs to be loaded first, then I can discover tools. Let me do that.', 'Two things showed up: the first push failed durable.test (looks like its own startedAt change), and botAvatarLife.test.ts:224 flaked on the current head. Checking that line.'];
+  for (const [i, said] of lines.entries()) {
+    feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    update({ type: 'thinking_start', contentIndex: 0 });
+    update({ type: 'thinking_delta', contentIndex: 0, delta: 'Let me try the apps tool.' });
+    update({ type: 'text_start', contentIndex: 1 });
+    for (const word of said.split(/(?<= )/)) update({ type: 'text_delta', contentIndex: 1, delta: word });
+    a.notEqual(line(), 'Writing a reply');
+    a.equal(typing(), false);
+    // The call comes whole, as from Ollama, after a wait while the model writes it.
+    feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'text', text: said }, { type: 'toolCall', id: 'n' + i, name: 'bash', arguments: { status: 'Looking up the tools', command: 'true' } }] } });
+    start('bash', 'n' + i, { status: 'Looking up the tools', command: 'true' });
+    a.equal(line(), 'Looking up the tools');
+    end('bash', 'n' + i);
+    feed({ type: 'turn_end' });
+  }
+  a.deepEqual(sent.filter((s) => s.activity === 'Writing a reply'), []);
+  await over(narrated);
+
   // Text that goes on to a tool call was the bot between steps: the call takes the line over at once.
   const second = await turn();
   feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
   update({ type: 'text_delta', contentIndex: 0, delta: 'Let me check the build.' });
-  a.equal(line(), 'Writing a reply');
+  a.equal(line(), 'Reading your message');
   update({ type: 'toolcall_start', contentIndex: 1, id: 'b1', toolName: 'bash' });
   a.equal(line(), 'Running a command');
   update({ type: 'toolcall_delta', contentIndex: 1, delta: '{"status":"Checking why the build failed","command":"bun run build"}' });
