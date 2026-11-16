@@ -2119,6 +2119,16 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
   }, [folding]);
   const who = [...new Set(messages.map((m) => m.author))].flatMap((id) => bots.find((b) => b.id === id) ?? []);
   const fresh = messages.every((m) => m.at > since);
+  const label = runLabel(messages.flatMap((m) => m.event ?? []));
+  const labelEl = useRef<HTMLSpanElement>(null);
+  // A label the line cuts off shows whole in a tooltip, on hover or keyboard focus. It's set as the pointer
+  // or focus arrives, just before the tooltip layer (on the document) looks for it, so nothing measures
+  // every run all the time. Opened, the label wraps instead (bots.css), which is how a phone reads it all.
+  const tipIfCut = (e: React.SyntheticEvent<HTMLButtonElement>) => {
+    const el = labelEl.current;
+    if (el && el.scrollWidth > el.clientWidth) e.currentTarget.dataset.tooltip = label;
+    else delete e.currentTarget.dataset.tooltip;
+  };
   return (
     <div className={cx("bm-events", fresh && "bm-recv")} data-open={open || undefined} data-folding={folding || undefined}>
       <button
@@ -2126,6 +2136,8 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
         className="bm-events-toggle"
         aria-expanded={open}
         data-id={`run-${messages[0]!.id}`}
+        onPointerOver={tipIfCut}
+        onFocus={tipIfCut}
         onClick={(e) => {
           const chat = e.currentTarget.closest<HTMLElement>(".bots-messages");
           if (chat) keepViews.get(chat)?.(e.currentTarget, open, body.current);
@@ -2134,7 +2146,9 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
         }}
       >
         {who.length > 0 && <Mascots bots={who.slice(0, 3)} size={14} />}
-        <span className="bm-events-label">{runLabel(messages.flatMap((m) => m.event ?? []))}</span>
+        <span ref={labelEl} className="bm-events-label">
+          {label}
+        </span>
         <ChevronRight className="bm-events-chevron" size={13} strokeWidth={2} aria-hidden />
       </button>
       {/* The same thing done again and again, with nothing between, shows once with how many times. The

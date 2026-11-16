@@ -34,7 +34,8 @@ async function open(after: number, { width = 1280, height = 800, ran: each }: { 
     const ran = (i) => ({ id: 'e' + i, author: bot, at: t0 + 60_000 + i * 1000, text: '', event: ${each ?? "{ kind: 'routine', text: 'Ran a routine', detail: 'Routine ' + (i % 3) }"} });
     const messages = [...Array.from({ length: 40 }, (_, i) => said(i)), ...Array.from({ length: 24 }, (_, i) => ran(i)), ...Array.from({ length: ${after} }, (_, i) => ({ ...said(100 + i), at: t0 + 120_000 + i * 1000 }))];
     bots.setState({ conversations: s.conversations.map((c) => (c.id === chat.id ? { ...c, messages, more: false } : c)), activeId: chat.id });
-    store.setState({ botsOpen: true, botsSidebarOpen: true });
+    // On a phone the sidebar is the list of chats, over the chat: closed, the chat is what shows.
+    store.setState({ botsOpen: true, botsSidebarOpen: ${width > 700} });
     return true;
   })()`);
   await page.until(`!!document.querySelector(${JSON.stringify(TOGGLE)})`);
@@ -123,5 +124,48 @@ describe.skipIf(!browser)("a run of background actions holds the view", () => {
       return { text: label.textContent, one: box.height <= 24.5, clipped: label.scrollWidth > label.clientWidth, inside: box.left >= chat.left && box.right <= chat.right };
     })()`);
     expect(fit).toEqual({ text: "Answered 8 permission prompts, merged 8 pull requests, stopped 8 threads", one: true, clipped: true, inside: true });
+  }, 60_000);
+
+  test("a label cut off shows whole: in a tooltip on hover, to a screen reader, and wrapped once the run is opened", async () => {
+    const full = "Answered 8 permission prompts, merged 8 pull requests, stopped 8 threads";
+    const mixed = "[{ kind: 'thread', text: 'Answered a permission prompt' }, { kind: 'thread', text: 'Merged a pull request', detail: '#' + i }, { kind: 'thread', text: 'Stopped a thread', detail: 'T' }][i % 3]";
+    const phone = await open(2, { width: 360, height: 720, ran: mixed });
+    const tip = () => phone.eval<string | null>("document.querySelector('.tooltip')?.textContent ?? null");
+    const hover = async () => {
+      const [x, y] = await phone.eval<[number, number]>(`(() => { const r = document.querySelector(${JSON.stringify(TOGGLE)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+      await phone.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 1, y: 1 });
+      await phone.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    };
+    await hover();
+    await phone.until(`document.querySelector('.tooltip')?.textContent === ${JSON.stringify(full)}`);
+    expect(await tip()).toBe(full);
+
+    // A screen reader hears the whole label as the button's name: the ellipsis is only drawn.
+    const { root } = await phone.send("DOM.getDocument", { depth: 0 });
+    const { nodeId } = await phone.send("DOM.querySelector", { nodeId: root.nodeId, selector: TOGGLE });
+    const { nodes } = await phone.send("Accessibility.getPartialAXTree", { nodeId, fetchRelatives: false });
+    expect(nodes[0].name.value).toBe(full);
+
+    // Opened (a tap, on a phone), the label wraps onto a second line and nothing of it is cut.
+    await phone.click(TOGGLE);
+    const opened = await phone.eval<{ text: string; lines: number; clipped: boolean; inside: boolean }>(`(() => {
+      const toggle = document.querySelector(${JSON.stringify(TOGGLE)});
+      const label = toggle.querySelector('.bm-events-label');
+      const chat = document.querySelector('.bots-messages').getBoundingClientRect();
+      const box = toggle.getBoundingClientRect();
+      return { text: label.textContent, lines: label.getClientRects().length && Math.round(label.getBoundingClientRect().height / parseFloat(getComputedStyle(label).lineHeight)), clipped: label.scrollWidth > label.clientWidth || label.scrollHeight > label.clientHeight, inside: box.left >= chat.left && box.right <= chat.right };
+    })()`);
+    expect(opened).toEqual({ text: full, lines: 2, clipped: false, inside: true });
+    // Nothing's cut any more, so hovering again brings no tooltip.
+    await hover();
+    await Bun.sleep(700);
+    expect(await tip()).toBeNull();
+
+    // On a desktop the same label fits, and has no tooltip to repeat it.
+    const desktop = await open(2, { ran: mixed });
+    const [x, y] = await desktop.eval<[number, number]>(`(() => { const r = document.querySelector(${JSON.stringify(TOGGLE)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    await desktop.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await Bun.sleep(700);
+    expect(await desktop.eval<unknown>(`[document.querySelector(${JSON.stringify(TOGGLE)}).textContent, document.querySelector('.tooltip')]`)).toEqual([full, null]);
   }, 60_000);
 });
