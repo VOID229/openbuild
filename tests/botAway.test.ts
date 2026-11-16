@@ -102,21 +102,21 @@ test.skipIf(!browser)("the hover card's two lines say as much as they hold, a lo
   expect(long.inView).toBe(true);
 }, 30_000);
 
-/** How the line of the row at the chat's end is drawn. */
+/** How the line of the row at the chat's end is drawn, and how far that row sits above the composer. */
 const lineAndGap = (page: Page, text: string) =>
-  page.eval<{ anim: string; clip: string; color: string; rest: string; textW: number; rowW: number }>(`(() => {
+  page.eval<{ anim: string; clip: string; color: string; rest: string; gap: number; textW: number; rowW: number }>(`(() => {
     const scroller = document.querySelector(".bots-messages");
     scroller.scrollTop = scroller.scrollHeight;
     const el = document.querySelector(${JSON.stringify(text)}), cs = getComputedStyle(el);
-    const row = el.closest(".bm-working").getBoundingClientRect();
-    return { anim: cs.animationName.split(",")[0].trim(), clip: cs.backgroundClip, color: cs.color, rest: cs.getPropertyValue("--bots-glow-rest").trim(), textW: el.getBoundingClientRect().width, rowW: row.width };
+    const row = el.closest(".bm-working").getBoundingClientRect(), composer = document.querySelector(".bots-composer").getBoundingClientRect();
+    return { anim: cs.animationName.split(",")[0].trim(), clip: cs.backgroundClip, color: cs.color, rest: cs.getPropertyValue("--bots-glow-rest").trim(), gap: Math.round(composer.top - row.bottom), textW: el.getBoundingClientRect().width, rowW: row.width };
   })()`);
-/** Scout's chat, long enough to scroll. */
+/** Scout's chat, long enough to scroll, so its end sits on the composer. */
 const fill = (page: Page) =>
   page.eval(`(window.bots.setState((s) => ({ conversations: s.conversations.map((c) => c.id !== "dm" ? c : { ...c, messages: Array.from({ length: 24 }, (_, i) => ({ id: "fill-" + i, author: i % 2 ? "scout" : "me", at: Date.now() - 60000 + i, text: "Message " + i + " about the build" })) }) })), true)`);
 
-for (const [label, width] of [["a laptop", 900], ["a phone", 390]] as const) {
-  test.skipIf(!browser)(`on ${label}, busy elsewhere glows as work here does`, async () => {
+for (const [label, width, gap] of [["a laptop", 900, 24], ["a phone", 390, 16]] as const) {
+  test.skipIf(!browser)(`on ${label}, busy elsewhere glows as work here does, and both rows sit ${gap}px above the composer`, async () => {
     const page = await open(width);
     await fill(page);
     await work(page, "dm", "Running the test suite");
@@ -132,6 +132,9 @@ for (const [label, width] of [["a laptop", 900], ["a phone", 390]] as const) {
     expect(away).toMatchObject({ anim: "bots-glow", clip: "text", color: "rgba(0, 0, 0, 0)", rest: working.rest });
     // As wide as its words, as the working line is, so the band crosses them at the same pace.
     expect(away.textW).toBeLessThan(away.rowW - 40);
+    // A clear step above the composer, as before the chat kept a working row's room (#304).
+    expect(working.gap).toBe(gap);
+    expect(away.gap).toBe(gap);
     if (width < 768) {
       // Under the name in a phone's header too, as the live step there does.
       const head = await page.eval<{ anim: string; clip: string }>(`(() => { const cs = getComputedStyle(document.querySelector(".bots-head-sub-away")); return { anim: cs.animationName, clip: cs.backgroundClip }; })()`);

@@ -1718,7 +1718,8 @@
   width: 100%;
   max-width: var(--bm-w);
   margin: 0 auto;
-  padding: 16px 0 10px;
+  /* The working row (or what's last) sits a clear step above the composer, not against it. */
+  padding: 16px 0 24px;
 }
 
 /* A group: one author's messages in a row, under their name (groups) with their face at the bottom. */
