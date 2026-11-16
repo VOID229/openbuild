@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, JOURNAL_RECENT, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -121,12 +121,8 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
       const bot = requireBot(botId);
       const session = sessionKey(botId);
       const fresh = p.fresh === true;
-      const memories = new Map(bot.memory.map((m) => [m.id, memoryMark(m)]));
-      const journal = bot.memory.filter((m) => m.kind !== "profile").slice(0, JOURNAL_RECENT);
-      const inPrompt = new Map([...bot.memory.filter((m) => m.kind === "profile"), ...journal].map((m) => [m.id, memories.get(m.id)!]));
-      sections.openbots_memory = steady(`${session}:memory`, sections.openbots_memory ?? "", inPrompt, memories, fresh);
-      const routines = new Map(bot.routines.map((r) => [r.id, routineMark(r)]));
-      sections.openbots_routines = steady(`${session}:routines`, sections.openbots_routines ?? "", routines, routines, fresh);
+      sections.openbots_memory = steady(`${session}:memory`, sections.openbots_memory ?? "", new Map(bot.memory.map((m) => [m.id, memoryMark(m)])), fresh);
+      sections.openbots_routines = steady(`${session}:routines`, sections.openbots_routines ?? "", new Map(bot.routines.map((r) => [r.id, routineMark(r)])), fresh);
       // How to search the web and how to use apps ride with their tools: a bot that hasn't loaded
       // them gets a line saying what's there, and the rest when it loads one (tool_notes). A Pi that
       // doesn't say what it has loaded gets it all, as before.
@@ -268,52 +264,56 @@ function requireBot(id: string): Bot {
  * conversation whenever its text changes, and a bot's own writes changed two of them all the time:
  * every memory it saved sent its memory section again (2,800 characters, 121 times in two days of
  * real sessions) and every routine it added its routines (120 times), each staying in the session
- * until it compacted. The bot already has what it just wrote, as the call that wrote it. So a
- * section stays as the session last got it while the only difference is something that session
- * added itself, and still is exactly as it added it. Anything else sends it afresh: a memory
- * another chat's turn wrote, one changed, replaced or forgotten, a routine paused, resumed, removed
- * or run, the user's edits, and all of those just the same when the item is one this session added.
- * So does a Pi that just started or just compacted (`fresh`), whose session may no longer hold
- * those calls.
+ * until it compacted. The bot already has what it just wrote, as the call that wrote it.
+ *
+ * So a section stays as the session last got it in one case only: everything it was made from is
+ * still there exactly as it was, and everything new is something that same session added and is
+ * still exactly as it added it. What's held back is the add, never the item. Anything else sends
+ * the section afresh at once: a memory another chat's turn wrote, one reworded, replaced, moved or
+ * forgotten (one too old to be listed as well: the section counts them), a routine paused,
+ * resumed, removed or run, the user's edits, and all of those just the same when the item is one
+ * this session added. So does a Pi that just started or just compacted (`fresh`), whose session
+ * may no longer hold those calls.
  */
 interface Kept {
   text: string;
-  /** What the section showed, by id, each with a mark of its content. */
-  items: Map<string, string>;
-  /** What this session has added since, by id, each with the mark of what it added: the add is what's held back, not the item. */
+  /** Everything the section was made from, by id, each with a mark of what it said. */
+  known: Map<string, string>;
+  /** What this session has added since, by id, each with the mark of what it added. */
   own: Map<string, string>;
 }
 const keptSections = ((globalThis as { openbotsKeptSections?: Map<string, Kept> }).openbotsKeptSections ??= new Map<string, Kept>());
 /** A bot's session: one per conversation it works in. */
 const sessionKey = (botId: string) => `${botId}:${getFocus(botId) ?? ""}`;
-/** What a memory or a routine says, as the sections show it: two with the same mark read the same. */
-const memoryMark = (m: { kind?: string; text: string }) => `${m.kind}\n${m.text}`;
+/** What a memory or a routine says, as its section shows it (the day a memory is dated included): two with the same mark read the same. */
+const memoryMark = (m: { kind?: string; text: string; at: number }) => `${m.kind}\n${memoryDate(m.at)}\n${m.text}`;
 const routineMark = (r: { title: string; schedule: string; enabled: boolean; task?: string }) => `${r.title}\n${r.schedule}\n${r.enabled}\n${r.task ?? ""}`;
 
-/** `shows` is what the section lists now, `all` everything it could list, both by id with a mark of the content. */
-export function steady(key: string, text: string, shows: Map<string, string>, all: Map<string, string>, fresh = false): string {
+/** `text` is the section as it stands, `all` everything it's made from now, by id with a mark of what each says. */
+export function steady(key: string, text: string, all: Map<string, string>, fresh = false): string {
   const before = keptSections.get(key);
+  const same = (marks: Map<string, string>) => [...marks].every(([id, mark]) => all.get(id) === mark);
   const unchanged = !!before && !fresh
-    // Everything it was shown is still there as it was (it may have moved out of the latest few)...
-    && [...before.items].every(([id, mark]) => all.get(id) === mark)
+    // Everything it was made from is still there, saying what it said...
+    && same(before.known)
     // ...everything this session added is still there exactly as it added it: one it has since
     // paused, reworded or deleted isn't what its session holds anymore...
-    && [...before.own].every(([id, mark]) => all.get(id) === mark)
-    // ...and everything new is one of those.
-    && [...shows.keys()].every((id) => before.items.has(id) || before.own.has(id));
+    && same(before.own)
+    // ...and nothing else is new.
+    && [...all.keys()].every((id) => before.known.has(id) || before.own.has(id));
   if (unchanged) return before!.text;
-  keptSections.set(key, { text, items: new Map(shows), own: new Map() });
+  keptSections.set(key, { text, known: new Map(all), own: new Map() });
   return text;
 }
 
 /**
  * The bot added this itself, in the session it's working in: that session needn't be shown it
- * again, as it is now (`mark`). Only an add: something the section already showed, or that this
+ * again, as it is now (`mark`). Only an add: something the section was made from, or that this
  * session added before, keeps the mark it had, so writing it again differently counts as a change.
  */
 function ownAddition(botId: string, section: "memory" | "routines", id: string, mark: string) {
   const kept = keptSections.get(`${sessionKey(botId)}:${section}`);
-  if (kept && !kept.items.has(id) && !kept.own.has(id)) kept.own.set(id, mark);
+  if (kept && !kept.known.has(id) && !kept.own.has(id)) kept.own.set(id, mark);
 }
 
 export function contextFor(botId: string): string {

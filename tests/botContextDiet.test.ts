@@ -675,9 +675,30 @@ test("only the add is held back: pausing, resuming, rewording or deleting what t
     a.match(moved.openbots_memory, /Your profile:[^]*Prefers short answers[^]*Your journal/);
     a.equal(moved.openbots_memory, real().openbots_memory);
 
+    // The section counts the journal entries too old to list ("N older entries"), so one of those going changes it too.
+    for (let i = 1; i <= 7; i++) svc.addMemory(bot.id, 'Old note ' + i);
+    const counted = await context();
+    a.match(counted.openbots_memory, /\\(\\d+ older entries: search finds them\\)/);
+    a.doesNotMatch(counted.openbots_memory, /Old note 1\\b/);
+    agent.memory(bot.id, { action: 'forget', text: 'Old note 1' });
+    const fewer = await context();
+    a.notEqual(fewer.openbots_memory, counted.openbots_memory);
+    a.equal(fewer.openbots_memory, real().openbots_memory);
+    // A note written in another chat's turn, then enough of this session's own to push it off the list: it's still news.
+    const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [bot.id, svc.createBot({ name: 'Beta' }).bot.id] });
+    agent.setFocus(bot.id, group.id);
+    agent.memory(bot.id, { action: 'write', text: 'Said in the group' });
+    agent.setFocus(bot.id, conversationId);
+    for (let i = 1; i <= 6; i++) agent.memory(bot.id, { action: 'write', text: 'Own note ' + i });
+    a.doesNotMatch(real().openbots_memory, /Said in the group/);
+    const pushed = await context();
+    a.notEqual(pushed.openbots_memory, fewer.openbots_memory);
+    a.equal(pushed.openbots_memory, real().openbots_memory);
+    const moved2 = pushed;
+
     // The user deletes, in the app, a memory the bot added in this session: sent.
     agent.memory(bot.id, { action: 'write', text: 'Parks at the back' });
-    a.equal((await context()).openbots_memory, moved.openbots_memory);
+    a.equal((await context()).openbots_memory, moved2.openbots_memory);
     svc.forgetMemory(bot.id, 'Parks at the back');
     agent.memory(bot.id, { action: 'write', text: 'Coffee machine is on the second floor' });
     const after = await context();

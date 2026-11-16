@@ -217,7 +217,8 @@ call that wrote it.
 A section now stays as the session last got it while the only difference is something that same
 session added, and still is exactly as it added it (`server/bots/agent.ts`, `steady`). Only the add
 is held back, not the item: anything else sends the section afresh, at once. That's a memory
-written in another chat's turn, one changed, replaced or forgotten, a routine paused, resumed,
+written in another chat's turn, one changed, re-dated, replaced or forgotten (an old one the
+section only counts, too), a routine paused, resumed,
 removed or run, the user's edits, and all of those just the same when the memory or routine is one
 the session added itself (pausing a routine it just added sends the section with `[paused]`). So
 does a Pi that just started or just summarized its session, which may no longer hold those calls.
