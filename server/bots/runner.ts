@@ -28,7 +28,7 @@ import { board as jobBoard, cancelAll as cancelCalls, DETACHABLE, forget as forg
 import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, COMPACT_AT, readDeliveries, saveDeliveries } from "./sessionPolicy";
 import { BOT_TOOLS, noteToolUse, preloadWithStarter } from "./toolPreload";
 import { TurnMeter, unloadedResult, type TurnOutcome } from "./turnMetrics";
-import { follow, liveActivity, newLive, ownStatus, reads, startLine, type Live, type Step } from "./steps";
+import { follow, liveActivity, looksLikeReply, newLive, ownStatus, reads, startLine, type Live, type Step } from "./steps";
 
 const IDLE = 20 * 60 * 1000;
 
@@ -786,13 +786,14 @@ const works = (step: Step) => !WRITING.has(step.tool) && step.tool !== "react";
 
 /**
  * Its words are on their way to the chat: a message it's writing or sending (the chat shows it typing),
- * or text it's streaming. Not text after a message already went out, which is never posted, nor a
- * [silent] in the making.
+ * or streamed text that can only be a reply (looksLikeReply). Not the line some models write before
+ * each tool call, which would flip the status to "Writing a reply" and back at every step; not text
+ * after a message already went out, which is never posted; nor a [silent] in the making.
  */
 function writing(mind: Mind, live: Live): boolean {
   if (mind.typing) return true;
   const text = (mind.draft ?? "").trim().toLowerCase();
-  return live.streaming && !mind.sent && !!text && !"[silent]".startsWith(text) && !saysSilent(text);
+  return live.streaming && !mind.sent && looksLikeReply(text) && !"[silent]".startsWith(text) && !saysSilent(text);
 }
 
 /**

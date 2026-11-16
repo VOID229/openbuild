@@ -5,7 +5,7 @@
 // none of those, and never "Thinking".
 import { expect, test } from "bun:test";
 import openbots from "../server/bots/extension";
-import { activityFor, COMPACTING, follow, heading, liveActivity, newLive, partialArgs, RETRYING, startLine, type Live } from "../server/bots/steps";
+import { activityFor, COMPACTING, follow, heading, liveActivity, looksLikeReply, newLive, partialArgs, REPLY_CHARS, RETRYING, startLine, type Live } from "../server/bots/steps";
 import type { PiRecord } from "../server/pi/rpc";
 import { betweenTurns, fitWords, statusLine, THREAD_ABOUT_MAX, THREAD_NAME_MAX, threadAbout, TYPING, waitingOnThreads, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
 import { holdingLine, liveLine, workingLine } from "../src/lib/bots/activity";
@@ -219,6 +219,20 @@ test("nothing of a response is left showing once it's over, failed or was stoppe
   expect(lines(whole, [{ type: "message_end", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Checking." }, { type: "toolCall", id: "m", name: "bot_web_search", arguments: { status: "Looking up the release date" } }] } }])).toEqual(["Looking up the release date"]);
   expect(follow(whole, start("bot_web_search", "m", { status: "Looking up the release date" })).started?.id).toBe("m");
   expect(whole.steps.length).toBe(1);
+});
+
+test("streamed text is a reply only once a line between steps couldn't be it: past its length, or into a second paragraph", () => {
+  // What models write before a tool call, a local one before nearly every call.
+  for (const line of [
+    "Let me look up the actual tool names.",
+    "The `apps` tool needs to be loaded first, then I can discover tools. Let me do that.",
+    "That bell schedule matches School.md, so hour 3 is 10:00–10:45 and hours 3–5 run to 12:30. The test time itself still isn't in the notes, so it's worth checking with Gal or the school message before you plan around it.",
+  ])
+    expect(looksLikeReply(line)).toBe(false);
+  expect(looksLikeReply("Sure, here is what I found.\n\nThe build broke on a missing import.")).toBe(true);
+  expect(looksLikeReply("Found it.\n \n")).toBe(false);
+  expect(looksLikeReply("a".repeat(REPLY_CHARS - 1))).toBe(false);
+  expect(looksLikeReply("a".repeat(REPLY_CHARS))).toBe(true);
 });
 
 test("text on its way to the chat reads Writing a reply, and Pi's own waits say what they are", () => {

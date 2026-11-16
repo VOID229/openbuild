@@ -5,8 +5,8 @@
 // tool name. Between steps the status keeps saying what the bot is about: the heading of the model's
 // reasoning when it writes one, else the last step it named, else what the turn started on (a message
 // to read, a routine). Plain working words (shared/bots.ts, WORKING_PHRASES) are only for a turn with
-// none of those, and "Writing a reply" shows while the model streams text. The runner (runner.ts)
-// turns this into BotStatus.
+// none of those, and "Writing a reply" shows while the model streams what can only be a reply
+// (looksLikeReply). The runner (runner.ts) turns this into BotStatus.
 import { appById } from "../../shared/apps";
 import { ROUTINE_START, workingPhrase, WRITING_REPLY } from "../../shared/bots";
 import type { PiRecord } from "../pi/rpc";
@@ -58,6 +58,24 @@ export function startLine(kinds: string[], direct: boolean): string {
   if (kinds.includes("note")) return "Reading a note";
   if (kinds.includes("heartbeat")) return "Checking in on things";
   return "Looking at a reaction";
+}
+
+/**
+ * Streamed text gets this long, in characters, only as a reply. Some models (local ones especially)
+ * write a line before each tool call ("Let me look up the tool names."), and that line is never this
+ * long: across every bot's sessions the longest was 218 characters, while a reply past 300 was common.
+ */
+export const REPLY_CHARS = 280;
+
+/**
+ * Text the model is streaming that can only be a reply: past the length a line between steps ever
+ * runs to, or into a second paragraph, which a line between steps never has. Anything shorter is
+ * told apart only once the response ends: with a tool call it was the bot between steps, without one
+ * it's the reply, and the chat shows it typing then.
+ */
+export function looksLikeReply(text: string): boolean {
+  const t = text.trim();
+  return t.length >= REPLY_CHARS || /\n[ \t]*\n/.test(t);
 }
 
 export const COMPACTING = "Summarizing the conversation so far";
