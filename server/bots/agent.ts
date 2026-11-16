@@ -1373,14 +1373,24 @@ export function fitOutput(text: string, shown: { head: number; tail: number }, k
   return `${text.slice(0, shown.head)}\n\n[… ${left.toLocaleString("en-US")} characters left out here. ${where} …]\n\n${text.slice(-shown.tail)}`;
 }
 
-/** Keeps a long output whole in a file in the bot's home on the machine `api` is, and says where, from that home. Undefined when it couldn't be written. */
-async function keepOutput(api: { call: (id: string, op: string, body?: Record<string, unknown>) => Promise<unknown> }, id: string, kind: string, text: string): Promise<string | undefined> {
+/**
+ * Keeps a long output whole in a file in the bot's home on the machine `api` is, and says where,
+ * from that home. Undefined when it couldn't be written, or wasn't within `outputs.keepWaitMs`:
+ * the write is then ended, not left running, so writes to a machine that never answers don't pile
+ * up, each holding its output. `gaveUp` is the caller's own limit, when it has waited already.
+ */
+async function keepOutput(api: { call: (id: string, op: string, body?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown> }, id: string, kind: string, text: string, gaveUp?: AbortSignal): Promise<string | undefined> {
+  if (gaveUp?.aborted) return undefined;
   const n = ((keptCount.get(`${id}:${kind}`) ?? 0) % KEPT_OUTPUTS) + 1;
   keptCount.set(`${id}:${kind}`, n);
   // From its home, not `~/…`: a container's files take a leading ~ for a folder's name.
   const path = `.outputs/${kind}-${n}.txt`;
+  const limit = AbortSignal.timeout(outputs.keepWaitMs);
+  const stop = gaveUp ? AbortSignal.any([gaveUp, limit]) : limit;
+  const up = new Promise<false>((resolve) => stop.addEventListener("abort", () => resolve(false), { once: true }));
   try {
-    const wrote = await Promise.race([api.call(id, "fs", { op: "write", path, data: Buffer.from(text).toString("base64") }).then(() => true, () => false), Bun.sleep(outputs.keepWaitMs).then(() => false)]);
+    // The signal ends the write where the machine takes one; the race lets go of one that doesn't stop.
+    const wrote = await Promise.race([Promise.resolve().then(() => api.call(id, "fs", { op: "write", path, data: Buffer.from(text).toString("base64") }, stop)).then(() => !stop.aborted, () => false), up]);
     return wrote ? path : undefined;
   } catch {
     return undefined;
@@ -1410,7 +1420,11 @@ async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSig
 export async function fitApp<T>(botId: string, out: T): Promise<T> {
   const answer = out as { text?: unknown } | null;
   if (!answer || typeof answer !== "object" || typeof answer.text !== "string" || answer.text.length <= (APP_SHOWN.head + APP_SHOWN.tail) * 1.1) return out;
-  const kept = await Promise.race([computerOn(botId, undefined).then(({ api, id }) => keepOutput(api, id, "app", answer.text as string), () => undefined), Bun.sleep(outputs.keepWaitMs).then(() => undefined)]);
+  // The bot's computer may have to start first. Past the limit the answer goes back without a file, and a computer
+  // that comes up after that writes nothing: no file lands that nobody was told of.
+  const limit = AbortSignal.timeout(outputs.keepWaitMs);
+  const up = new Promise<undefined>((resolve) => limit.addEventListener("abort", () => resolve(undefined), { once: true }));
+  const kept = await Promise.race([computerOn(botId, undefined).then(({ api, id }) => keepOutput(api, id, "app", answer.text as string, limit), () => undefined), up]);
   return { ...answer, text: fitOutput(answer.text, APP_SHOWN, kept) } as T;
 }
 

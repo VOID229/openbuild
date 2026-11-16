@@ -32,15 +32,26 @@ test("a bot's context doesn't wait on a paired device that stopped answering", a
     import { mock } from 'bun:test';
     const all = { files: true, terminal: true, browser: true, unisolated: true };
     // A laptop that answers at once, until it goes to sleep: then asking it takes seconds to give up.
-    let asleep = false, hung = false, asked = 0;
+    let asleep = false, hung = false, deaf = 0, asked = 0, active = 0;
+    const signals = [];
     mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), engines: async () => [], procListeners: new Set() }));
     mock.module('./server/computers/api.ts', () => ({
       computerApi: () => ({ call: async () => ({}) }),
-      computerTargets: async () => {
+      computerTargets: async (opts = {}) => {
         asked++;
-        if (hung) await new Promise(() => {});
-        if (asleep) await Bun.sleep(1200);
-        return [{ device: 'local', name: 'Studio', status: 'ready', grants: all }, asleep ? { device: 'lap', name: 'Laptop', status: 'offline', message: 'no answer' } : { device: 'lap', name: 'Laptop', status: 'ready', grants: all }];
+        active++;
+        signals.push(opts.signal);
+        const laptop = (status) => [{ device: 'local', name: 'Studio', status: 'ready', grants: all }, status === 'ready' ? { device: 'lap', name: 'Laptop', status, grants: all } : { device: 'lap', name: 'Laptop', status, message: 'no answer' }];
+        try {
+          // Takes the request and never answers: like the real one, it ends when the round's signal says so, with the laptop unreachable.
+          if (hung) return await new Promise((resolve) => opts.signal.addEventListener('abort', () => resolve(laptop('offline')), { once: true }));
+          // Doesn't stop when told to (nothing real does this anymore): it comes back late, saying what was true when it was asked.
+          if (deaf) return await Bun.sleep(deaf).then(() => laptop('offline'));
+          if (asleep) await Bun.sleep(1200);
+          return laptop(asleep ? 'offline' : 'ready');
+        } finally {
+          active--;
+        }
       },
     }));
     const devices = await import('./server/devices.ts');
@@ -84,22 +95,62 @@ test("a bot's context doesn't wait on a paired device that stopped answering", a
     a.match((await timed()).note, READY);
     m.setIsolation('lap', 'container');
     a.match(await m.machinesNote(), /- Laptop \\(machine id lap\\): files, terminal, browser; container\\./);
-    // A device that takes the request and never answers: the round is given up on, and the next one starts.
+    // A device that takes the request and never answers. Each round's time runs out: its requests are told to stop,
+    // and nothing of it is left running when the next one starts.
+    const CONTAINED = /- Laptop \\(machine id lap\\): files, terminal, browser; container\\./;
     m.tuning.giveUpMs = 200;
     hung = true;
-    globalThis.openbotsMachines.at = 0;
     const before = asked;
-    const stuck = await timed();
-    a.ok(stuck.ms < 700, 'the note waited ' + stuck.ms + ' ms on a round that never answers');
-    a.equal(asked, before + 1);
-    // While it's out, no second round is started beside it.
-    await timed();
-    a.equal(asked, before + 1);
-    await Bun.sleep(350);
+    for (let round = 1; round <= 3; round++) {
+      globalThis.openbotsMachines.at = 0;
+      const stuck = await timed();
+      a.ok(stuck.ms < 700, 'the note waited ' + stuck.ms + ' ms on a round that never answers');
+      a.equal(asked, before + round);
+      a.equal(active, 1, 'one round out at a time');
+      // While it's out, no second round is started beside it.
+      await timed();
+      a.equal(asked, before + round);
+      await Bun.sleep(350);
+      a.equal(active, 0, 'round ' + round + ' was still asking after its time ran out');
+      a.equal(signals.at(-1).aborted, true);
+    }
+    a.equal(signals.slice(-3).every((signal) => signal instanceof AbortSignal && signal.aborted), true);
+    // What a round that ran out of time says of a device that never answered: it can't be reached.
+    a.match(await m.machinesNote(), /- Laptop \\(machine id lap\\): unreachable right now/);
     hung = false;
-    const again = await timed();
-    a.equal(asked, before + 2);
-    a.match(again.note, /- Laptop \\(machine id lap\\): files, terminal, browser; container\\./);
+    globalThis.openbotsMachines.at = 0;
+    a.match((await timed()).note, CONTAINED);
+    a.equal(active, 0);
+
+    // A round that doesn't stop when it's told to is let go of all the same, and what it says when it finally comes
+    // back is thrown away once a newer round has answered: an old "unreachable" can't replace a newer "ready".
+    m.tuning.giveUpMs = 150;
+    deaf = 700;
+    globalThis.openbotsMachines.at = 0;
+    await timed();
+    a.equal(active, 1);
+    await Bun.sleep(250);
+    a.equal(active, 1, 'the deaf round is still out, past its time');
+    deaf = 0;
+    globalThis.openbotsMachines.at = 0;
+    a.match((await timed()).note, CONTAINED);
+    const answeredAt = globalThis.openbotsMachines.at;
+    // The old round comes back now, with the laptop unreachable as it was then.
+    await Bun.sleep(700);
+    a.equal(active, 0);
+    a.equal(globalThis.openbotsMachines.list.find((t) => t.device === 'lap').status, 'ready');
+    a.equal(globalThis.openbotsMachines.at, answeredAt);
+    a.match(await m.machinesNote(), CONTAINED);
+    // With no newer round, a late answer is the latest there is, and is kept.
+    deaf = 300;
+    globalThis.openbotsMachines.at = 0;
+    await timed();
+    await Bun.sleep(500);
+    a.match(await m.machinesNote(), /- Laptop \\(machine id lap\\): unreachable right now/);
+    deaf = 0;
+    m.tuning.giveUpMs = 20000;
+    globalThis.openbotsMachines.at = 0;
+    a.match((await timed()).note, CONTAINED);
 
     // A device paired since the last answer is listed, as not asked yet.
     devices.addDevice({ id: 'tow', name: 'Tower', mode: 'lan', urls: ['http://y'], token: 't' });
@@ -107,7 +158,90 @@ test("a bot's context doesn't wait on a paired device that stopped answering", a
 
     process.exit(0);
   `);
-});
+}, 30_000);
+
+test("asking a paired device has a deadline at every step, and stopping a round ends its requests", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    // The real requests, to a stand-in for a paired device's server: it answers as that device, or takes the request and never answers.
+    const all = { files: true, terminal: true, browser: true, unisolated: true };
+    let mode = 'answer', open = 0, seen = 0;
+    const device = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch(req) {
+      seen++;
+      if (mode === 'answer') return Response.json({ grants: all }, { headers: { 'x-openbuild-server': 'lap' } });
+      open++;
+      req.signal.addEventListener('abort', () => open--, { once: true });
+      return new Promise(() => {});
+    } });
+    const devices = await import('./server/devices.ts');
+    devices.addDevice({ id: 'lap', name: 'Laptop', mode: 'lan', urls: ['http://127.0.0.1:' + device.port], token: 't' });
+    const svc = await import('./server/bots/service.ts');
+    const api = await import('./server/computers/api.ts');
+    const m = await import('./server/bots/machines.ts');
+    svc.setHooks({ wake() {}, stop() {} });
+    const laptop = async (opts = {}) => { const started = Date.now(); const found = (await api.computerTargets({ engines: false, ...opts })).find((t) => t.device === 'lap'); return { ...found, ms: Date.now() - started }; };
+    const closed = async () => { for (let i = 0; i < 40 && open; i++) await Bun.sleep(25); return open; };
+
+    a.equal((await laptop()).status, 'ready');
+    // It was just found answering, so the next thing asked of it is what it allows: it takes that request and never
+    // answers. That one had no deadline of its own. It has now, and the request is ended, not left open.
+    api.timing.identityMs = 300;
+    mode = 'hang';
+    const late = await laptop();
+    a.equal(late.status, 'offline');
+    a.ok(late.ms >= 250 && late.ms < 2000, 'asking what it allows took ' + late.ms + ' ms');
+    a.equal(await closed(), 0, 'a request was left open');
+
+    // A caller's signal ends a round at once, wherever it is: finding the device (it's asked afresh after a failure)...
+    api.timing.identityMs = 60_000;
+    let stop = new AbortController();
+    setTimeout(() => stop.abort(), 200);
+    const finding = await laptop({ signal: stop.signal });
+    a.equal(finding.status, 'offline');
+    a.ok(finding.ms < 1500, 'stopping while finding it took ' + finding.ms + ' ms');
+    a.equal(await closed(), 0);
+    // ...or asking what it allows.
+    mode = 'answer';
+    a.equal((await laptop()).status, 'ready');
+    mode = 'hang';
+    stop = new AbortController();
+    setTimeout(() => stop.abort(), 200);
+    const asking = await laptop({ signal: stop.signal });
+    a.equal(asking.status, 'offline');
+    a.ok(asking.ms < 1500, 'stopping while asking took ' + asking.ms + ' ms');
+    a.equal(await closed(), 0);
+
+    // The bots' note, through all of it: three rounds run out of time against a device that never answers, and none
+    // of their requests is still open after; then the device answers, and an old round has nothing left to say.
+    mode = 'answer';
+    const READY = /- Laptop \\(machine id lap\\): files, terminal, browser; host \\(unisolated\\)\\./;
+    a.match(await m.machinesNote(), READY);
+    m.tuning.giveUpMs = 600;
+    mode = 'hang';
+    for (let round = 1; round <= 3; round++) {
+      const before = seen;
+      globalThis.openbotsMachines.at = 0;
+      const started = Date.now();
+      await m.machinesNote();
+      a.ok(Date.now() - started < 500, 'the note waited on the round');
+      // Well inside the round's time: its one request is out.
+      await Bun.sleep(100);
+      a.equal(open, 1, 'round ' + round + ' has one request out');
+      a.equal(seen, before + 1);
+      // Past it: ended, by the round, not by any deadline of the request's own (a minute, here).
+      await Bun.sleep(500);
+      a.equal(await closed(), 0, 'round ' + round + ' left a request open after its time ran out');
+    }
+    a.match(await m.machinesNote(), /- Laptop \\(machine id lap\\): unreachable right now/);
+    mode = 'answer';
+    globalThis.openbotsMachines.at = 0;
+    a.match(await m.machinesNote(), READY);
+    await Bun.sleep(400);
+    a.match(await m.machinesNote(), READY);
+    a.equal(open, 0);
+    process.exit(0);
+  `);
+}, 30_000);
 
 // ------------------------------------------------------------------ a long session is summarized quickly, and briefly
 
@@ -452,13 +586,18 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     import { mock } from 'bun:test';
     const files = new Map();
     let printed = '';
-    let failWrites = false, hangWrites = false;
+    let failWrites = false, hangWrites = false, slowEnsure = 0, writing = 0;
     mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), engines: async () => [], procListeners: new Set() }));
     mock.module('./server/computers/api.ts', () => ({
       computerApi: () => ({
-        call: async (id, op, body) => {
+        call: async (id, op, body, signal) => {
+          // The bot's computer coming up: at once, or (slowEnsure) only after the limit for keeping an output has passed.
+          if (op === 'ensure' && slowEnsure) await Bun.sleep(slowEnsure);
           if (op !== 'fs') return {};
-          if (body.op === 'write') { if (hangWrites) await new Promise(() => {}); if (failWrites) throw new Error('disk full'); files.set(body.path, Buffer.from(body.data, 'base64').toString()); return {}; }
+          if (body.op === 'write') {
+            // A machine that takes the file and never says it's written: the write goes on until it's told to stop.
+            if (hangWrites) { writing++; await new Promise((resolve) => signal?.addEventListener('abort', resolve, { once: true })); writing--; throw new Error('aborted'); }
+            if (failWrites) throw new Error('disk full'); files.set(body.path, Buffer.from(body.data, 'base64').toString()); return {}; }
           if (body.op === 'read') return { data: Buffer.from(files.get(body.path) ?? '').toString('base64') };
           return {};
         },
@@ -513,7 +652,20 @@ test("a long output reaches the bot as its two ends, with the whole kept in a fi
     const slowApp = await fitApp(bot, { text: 'x'.repeat(40000), images: [] });
     a.ok(Date.now() - started < 1500);
     a.match(slowApp.text, /Ask again for less/);
+    // Neither write is still going: at the limit it was ended, not left to pile up behind the next.
+    a.equal(writing, 0);
     hangWrites = false;
+    // The bot's computer takes longer to come up than keeping the answer may: the answer goes back without a file,
+    // and when the computer is up nothing is written after all, so no file lands that nobody was told of.
+    const kept = files.size;
+    slowEnsure = 400;
+    started = Date.now();
+    const unkept = await fitApp(bot, { text: 'y'.repeat(40000), images: [] });
+    a.ok(Date.now() - started < 350, 'the answer waited ' + (Date.now() - started) + ' ms on the computer starting');
+    a.match(unkept.text, /Ask again for less/);
+    await Bun.sleep(500);
+    a.equal(files.size, kept, 'a file was written after the answer had gone back without it');
+    slowEnsure = 0;
     agent.outputs.keepWaitMs = 5000;
 
     // An app's answer keeps more of its start than of its end; a short one is left alone.

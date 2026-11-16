@@ -112,20 +112,48 @@ const NOTE_FRESH = 60_000;
 /** How long a turn gives that asking: a device that's awake answers within it, and one that isn't never holds the turn. */
 const NOTE_GRACE = 150;
 
-/** How long one round of asking may take before it's given up on, so a device that accepts a request and never answers doesn't keep the next round from starting. Tests shorten it. */
+/**
+ * How long one round of asking may take. At the limit every request of the round still out is
+ * ended (computerTargets takes the signal down to each one), so a device that takes a request and
+ * never answers is listed as unreachable and nothing of the round is left running. Tests shorten it.
+ */
 export const tuning = { giveUpMs: 20_000 };
 
 type Checked = Omit<ComputerTarget, "isolation">;
-const hot = globalThis as { openbotsMachines?: { at: number; list: Checked[] }; openbotsMachinesCheck?: Promise<void> };
+const hot = globalThis as {
+  openbotsMachines?: { at: number; list: Checked[] };
+  /** The round that's out, if one is. */
+  openbotsMachinesCheck?: Promise<void>;
+  /** The number of the newest round started: only that one may say what the machines said. */
+  openbotsMachinesRound?: number;
+};
 
-/** Ask every machine what it allows, once at a time, and keep what they said. Never rejects. */
+/**
+ * Ask every machine what it allows, one round at a time, and keep what they said. Never rejects.
+ *
+ * A round is over when it has its answers or when its time is up, whichever is first, and at that
+ * moment its requests are aborted: none outlives it. Should something in a round not stop when told
+ * to, the round is still let go of, and what it says when it finally comes back is thrown away once
+ * a newer round has started, so an old "unreachable" can't replace a newer answer.
+ */
 function checkMachines(): Promise<void> {
   if (hot.openbotsMachinesCheck) return hot.openbotsMachinesCheck;
+  const id = (hot.openbotsMachinesRound = (hot.openbotsMachinesRound ?? 0) + 1);
+  const stop = new AbortController();
+  const up = new Promise<void>((resolve) => stop.signal.addEventListener("abort", () => resolve(), { once: true }));
+  // Not a reason to keep a script or a stopping server alive.
+  const timer = setTimeout(() => stop.abort(), tuning.giveUpMs);
+  (timer as { unref?: () => void }).unref?.();
   const asking = Promise.resolve()
-    .then(() => computerTargets({ engines: false }))
-    // An answer that comes after the round was given up on is still what the machines said.
-    .then((list) => void (hot.openbotsMachines = { at: Date.now(), list }), () => {});
-  const round: Promise<void> = Promise.race([asking, Bun.sleep(tuning.giveUpMs)]).finally(() => {
+    .then(() => computerTargets({ engines: false, signal: stop.signal }))
+    .then(
+      (list) => {
+        if (hot.openbotsMachinesRound === id) hot.openbotsMachines = { at: Date.now(), list };
+      },
+      () => {},
+    )
+    .finally(() => clearTimeout(timer));
+  const round: Promise<void> = Promise.race([asking, up]).finally(() => {
     if (hot.openbotsMachinesCheck === round) hot.openbotsMachinesCheck = undefined;
   });
   return (hot.openbotsMachinesCheck = round);
