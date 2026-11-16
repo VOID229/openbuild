@@ -1718,7 +1718,8 @@
   width: 100%;
   max-width: var(--bm-w);
   margin: 0 auto;
-  padding: 16px 0 10px;
+  /* The working row (or what's last) sits a clear step above the composer, not against it. */
+  padding: 16px 0 24px;
 }
 
 /* A group: one author's messages in a row, under their name (groups) with their face at the bottom. */
@@ -2755,25 +2756,29 @@
   margin-bottom: 0;
 }
 
-/* At work in another chat: what it's doing there, quiet, with no sweep through the words, since
-   nothing is going on here. The most exact way of saying it that fits (FitText). */
+/* At work in another chat: what it's doing there, with the same sweep through the words as work here
+   (below). The most exact way of saying it that fits (FitText). As wide as its words, like the
+   working line, so the band crosses them at the same pace rather than the whole row's width. */
 .bm-away-text {
+  --bots-glow-rest: var(--text-3);
   display: block;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 14px;
-  color: var(--text-3);
 }
 
 /* The live step, here and under the name in a phone's header: the words sit a step dimmer and a soft
    band of full-strength text sweeps them left to right, then rests a beat. The sidebar's working
    titles do the same (styles.css, .history-title-glow); this one barely rests between sweeps. The gradient
-   paints the words, so they set no colour of their own: one would sit on top and hide the band. */
+   paints the words, so they set no colour of their own: one would sit on top and hide the band. A bot
+   at work in another chat says so here with the same glow (.bm-away-text, .bots-head-sub-away). */
 .bm-working-text,
-.bots-head-sub.bots-head-sub-live {
+.bm-away-text,
+.bots-head-sub.bots-head-sub-live,
+.bots-head-sub.bots-head-sub-away {
   background: linear-gradient(90deg, var(--bots-glow-rest) 40%, var(--text) 50%, var(--bots-glow-rest) 60%);
   background-size: 300% 100%;
   background-position: 100% 0;
@@ -2791,7 +2796,8 @@
   animation: bots-glow 1.4s infinite, bm-working-swap 110ms ease-out both;
 }
 
-.bots-head-sub-live {
+.bots-head-sub-live,
+.bots-head-sub-away {
   --bots-glow-rest: var(--text-2);
 }
 
@@ -5117,7 +5123,9 @@ a.bots-btn.bots-btn-primary {
   .bm-typing,
   .bm-working,
   .bm-working-text,
+  .bm-away-text,
   .bots-head-sub.bots-head-sub-live,
+  .bots-head-sub.bots-head-sub-away,
   .bots-head-dots i,
   .bots-row-typing,
   .bots-sidebar-inner,
