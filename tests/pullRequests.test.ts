@@ -290,3 +290,126 @@ test("a merge from the pull requests tab closes the threads following it at once
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+// Threads a bot started (server/bots/threads.ts) are tidied for it: closed when their pull request is
+// closed unmerged as well as merged, their bot told, and their worktree removed a day later even
+// with "Auto-delete worktrees" off. A thread a person started stays open when its pull request closes.
+const botThreadsScript = `
+  import { strict as assert } from "node:assert";
+  import { existsSync, writeFileSync } from "node:fs";
+  const root = process.env.TEST_ROOT;
+  const sh = (cwd, ...args) => {
+    const r = Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "protocol.file.allow=always", ...args], { cwd });
+    if (r.exitCode !== 0) throw new Error(r.stderr.toString());
+    return r.stdout.toString().trim();
+  };
+  const repo = root + "/repo";
+  const lib = root + "/lib";
+  Bun.spawnSync(["mkdir", "-p", repo, lib]);
+  sh(repo, "init", "-b", "main");
+  sh(repo, "commit", "--allow-empty", "-m", "first");
+  sh(lib, "init", "-b", "main");
+  sh(lib, "commit", "--allow-empty", "-m", "lib");
+
+  const storage = await import("./server/storage.ts");
+  const projects = await import("./server/projects.ts");
+  const pr = await import("./server/pullRequests.ts");
+  const closedWorktrees = await import("./server/closedWorktrees.ts");
+  const aDayOn = () => closedWorktrees.sweepClosedWorktrees(undefined, Date.now() + closedWorktrees.KEEP_FOR + 1000);
+
+  // Pure rules: a closed pull request closes a bot's thread, never a person's.
+  const t0 = Date.parse("2026-11-01T00:00:00Z");
+  const closedPr = { number: 3, url: "u", state: "closed", closedAt: t0 + 5000, checkedAt: t0 + 6000 };
+  const base = { id: "c", title: "t", createdAt: t0, updatedAt: t0, messages: [
+    { id: "u1", role: "user", content: "", createdAt: t0 + 1000 },
+    { id: "a1", role: "assistant", content: "", createdAt: t0 + 1001, status: "done" },
+  ] };
+  const byBot = { ...base, startedBy: { bot: "b1", conversation: "c1" } };
+  assert.equal(pr.shouldClose(base, closedPr, t0 + 7000), false, "a person's thread");
+  assert.equal(pr.shouldClose(byBot, closedPr, t0 + 7000), true);
+  assert.equal(pr.shouldClose({ ...base, messages: [{ ...base.messages[0], sentByBot: "b1" }, base.messages[1]] }, closedPr, t0 + 7000), true, "its first message is a bot's");
+  assert.equal(pr.shouldClose(byBot, { ...closedPr, closedAt: undefined }, t0 + 7000), false, "not known when");
+  assert.equal(pr.shouldClose({ ...byBot, messages: [...base.messages, { id: "u2", role: "user", content: "", createdAt: t0 + 5500 }] }, closedPr, t0 + 7000), false, "written to after it closed");
+  assert.equal(pr.shouldClose({ ...byBot, pinned: true }, closedPr, t0 + 7000), false);
+  pr.botThreadHooks.waiting = (id) => id === "held";
+  assert.equal(pr.shouldClose({ ...byBot, id: "held" }, closedPr, t0 + 7000), false, "a bot's message waits for it");
+  delete pr.botThreadHooks.waiting;
+  assert.equal(pr.toThreadPullRequest({ number: 3, url: "u", state: "CLOSED", headRefName: "b", createdAt: "2026-11-01T00:00:00Z", closedAt: "2026-11-01T00:00:05Z" }, 1).closedAt, t0 + 5000);
+  assert.equal(pr.toThreadPullRequest({ number: 3, url: "u", state: "MERGED", headRefName: "b", createdAt: "2026-11-01T00:00:00Z", mergedAt: "2026-11-01T00:00:05Z", closedAt: "2026-11-01T00:00:05Z" }, 1).closedAt, undefined);
+
+  // End to end, with "Auto-delete worktrees" off.
+  const told = [];
+  pr.botThreadHooks.closed = (chat, pull, bot) => told.push([chat.id, pull.state, bot]);
+  const project = await projects.addProject(repo);
+  const ws = (name) => projects.prepareWorkspace(project.id, "worktree", undefined, name);
+  const [abandoned, person, squashed, nested] = [await ws("abandoned"), await ws("person"), await ws("squashed"), await ws("nested")];
+  sh(abandoned.cwd, "commit", "--allow-empty", "-m", "work that wasn't wanted");
+  const mergedHead = sh(squashed.cwd, "rev-parse", "HEAD");
+  sh(squashed.cwd, "commit", "--allow-empty", "-m", "pushed after the merge");
+  sh(nested.cwd, "submodule", "add", "-q", lib, "lib");
+  sh(nested.cwd, "commit", "-m", "add a submodule");
+  const now = Date.now();
+  const chat = (id, workspace, extra = {}) => ({ id, title: id, createdAt: now - 60_000, updatedAt: now - 60_000, workspace, startedBy: { bot: "b1", conversation: "c1" }, messages: [
+    { id: id + "u", role: "user", content: "go", createdAt: now - 60_000, sentByBot: "b1" },
+    { id: id + "a", role: "assistant", content: "done", createdAt: now - 59_000, status: "done" },
+  ], ...extra });
+  storage.putChat(chat("abandoned", abandoned));
+  storage.putChat(chat("person", person, { startedBy: undefined, messages: [{ id: "pu", role: "user", content: "go", createdAt: now - 60_000 }] }));
+  storage.putChat(chat("squashed", squashed));
+  storage.putChat(chat("nested", nested));
+  const ghPr = (number, workspace, state, extra = {}) => ({ number, url: "https://github.com/o/r/pull/" + number, state, headRefName: workspace.branch, headRefOid: "x", createdAt: new Date(now - 30_000).toISOString(), ...extra });
+  const at = new Date(now - 1000).toISOString();
+  writeFileSync(process.env.FAKE_GH_JSON, JSON.stringify([
+    ghPr(61, abandoned, "CLOSED", { closedAt: at }),
+    ghPr(62, person, "CLOSED", { closedAt: at }),
+    ghPr(63, squashed, "MERGED", { headRefOid: mergedHead, mergedAt: at, closedAt: at }),
+    ghPr(64, nested, "CLOSED", { closedAt: at }),
+  ]));
+  await pr.sweep();
+  for (const id of ["abandoned", "squashed", "nested"]) {
+    assert.equal(storage.getChat(id).archived, true, id + " closed");
+    assert.ok(storage.getChat(id).autoClosedAt);
+  }
+  assert.equal(storage.getChat("abandoned").pullRequest.state, "closed");
+  assert.equal(storage.getChat("person").archived, undefined, "a person's thread stays open");
+  assert.equal(storage.getChat("person").pullRequest.state, "closed");
+  assert.deepEqual(told.sort(), [["abandoned", "closed", "b1"], ["nested", "closed", "b1"], ["squashed", "merged", "b1"]], "each bot hears once");
+  await pr.sweep();
+  assert.equal(told.length, 3, "and only once");
+
+  await closedWorktrees.sweepClosedWorktrees();
+  for (const w of [abandoned, squashed, nested]) assert.equal(existsSync(w.cwd), true, "kept for a day, to be reopened with its files");
+  const warned = [];
+  const warn = console.warn;
+  console.warn = (...args) => warned.push(args.join(" "));
+  try {
+    await aDayOn();
+  } finally {
+    console.warn = warn;
+  }
+  assert.equal(existsSync(abandoned.cwd), false, "a day later it goes, with the setting off");
+  assert.notEqual(sh(repo, "branch", "--list", abandoned.branch), "", "its unmerged commits stay on its branch");
+  assert.equal(existsSync(squashed.cwd), false, "past the merged commit, it goes too");
+  assert.notEqual(sh(repo, "branch", "--list", squashed.branch), "", "and so does its branch");
+  assert.equal(existsSync(person.cwd), true, "a person's open thread keeps its worktree");
+  assert.equal(existsSync(nested.cwd), true, "one with a submodule can't be removed, and stays");
+  assert.equal(warned.filter((w) => w.includes("Kept the worktree " + nested.cwd)).length, 1, "which is logged: " + warned.join("; "));
+  await aDayOn();
+  console.log("ok");
+`;
+
+test("a bot's threads close when their pull request closes or merges, and lose their worktree a day later", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-bot-pull-requests-"));
+  try {
+    const bin = join(root, "bin");
+    Bun.spawnSync(["mkdir", "-p", bin]);
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat "$FAKE_GH_JSON"\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const { stdout: out, stderr: err, code } = await spawnScript(botThreadsScript, { OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root, FAKE_GH_JSON: join(root, "prs.json"), PATH: `${bin}:${process.env.PATH}` });
+    if (code !== 0) console.error(out, err);
+    expect(code).toBe(0);
+    expect(out).toContain("ok");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);

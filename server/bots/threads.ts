@@ -31,6 +31,7 @@ import { listModels as piListModels } from "../pi/sessions";
 import { admitTurn } from "../pi/turn";
 import * as projects from "../projects";
 import * as pullRequestView from "../pullRequestView";
+import { botThreadHooks } from "../pullRequests";
 import { requestRunStop } from "../runStops";
 import { accountPath, withRuntimeAccount } from "../runtimeAccounts";
 import { runtimes } from "../runtimes";
@@ -752,6 +753,23 @@ async function drainNow(threadId: string): Promise<Map<string, string>> {
   }
   return notes;
 }
+
+// ------------------------------------------------------------------ closing with its pull request
+
+// A thread waiting on a bot's message isn't done with, whatever its pull request did.
+botThreadHooks.waiting = (threadId) =>
+  queuedFor(threadId).length > 0 || steeredList().some((s) => s.threadId === threadId) || watches().some((w) => w.threadId === threadId);
+
+/** A thread a bot started closed with its pull request: one line for its next turn, not a wake of its own. */
+botThreadHooks.closed = (chat, pr, botId) => {
+  const bot = db.getBot(botId);
+  if (!bot) return;
+  const what = `its pull request #${pr.number} ${pr.state === "merged" ? "merged" : "was closed without merging"}`;
+  // A retired bot's threads report to the primary until it's rehired.
+  const primary = bot.retiredAt ? db.listBots().find((b) => b.primary && !b.retiredAt) : undefined;
+  if (bot.retiredAt && !primary) return;
+  svc.noteThread(primary?.id ?? botId, `Thread ${titleOf(chat.id)}${primary ? `, which ${bot.name} started,` : ""} was closed: ${what}.`);
+};
 
 // ------------------------------------------------------------------ actions
 

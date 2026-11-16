@@ -1114,7 +1114,9 @@ async function runTurn(botId: string, all: Wake[]) {
     const rehired = lane === "main" ? svc.rehireNote(botId) : "";
     // Memory from before the split, for the bot to sort once: its own lane only, never a friend's, and taken for good now.
     const review = lane === "main" ? svc.memoryReviewNote(botId) : "";
-    const message = [handoff, rehired, svc.renameNoteText(renames), svc.teamNoteText(team), svc.changeNoteText(botId, notes), review, rendered].filter(Boolean).join("\n\n");
+    // News of its coding threads that didn't wake it (one closed when its pull request merged): its own lane only.
+    const threadNotes = lane === "main" ? svc.pendingThreadNotes(botId) : [];
+    const message = [handoff, rehired, svc.renameNoteText(renames), svc.teamNoteText(team), svc.changeNoteText(botId, notes), svc.threadNoteText(threadNotes), review, rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -1221,6 +1223,7 @@ async function runTurn(botId: string, all: Wake[]) {
     svc.settleChangeNotes(botId, notes);
     svc.settleRenameNotes(renames);
     svc.settleTeamNotes(botId, team);
+    svc.settleThreadNotes(threadNotes);
     if (rehired) svc.settleRehireNote(botId);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);

@@ -285,7 +285,9 @@ test("done items don't pile up: a list still going drops the ones finished a whi
 
     // Bots are told to clear done items themselves, and what happens if they don't.
     const prompt = contextFor(pip.bot.id);
-    a.match(prompt, /once the work is finished and you've said so, todo clear in that turn; in a long list still going, todo clear which done/);
+    a.match(prompt, /in a long list still going, todo clear which done/);
+    const { BOT_SYSTEM_PROMPT } = await import('./server/bots/extensions.ts');
+    a.match(BOT_SYSTEM_PROMPT, /close threads you no longer need and question cards settled another way or moot; clear to-dos once reported done/);
     a.doesNotMatch(prompt, /clears by itself after a while/);
     const src = await Bun.file('./server/bots/extension.ts').text();
     a.match(src, /don't leave done items on it: clear it once the last item is done and you've said so, clear which done when several are done/);

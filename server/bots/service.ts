@@ -975,6 +975,41 @@ export function settleTeamNotes(botId: string, shown: TeamNote[]) {
   if (JSON.stringify(next) !== JSON.stringify(list)) db.setValue(TEAM_NOTES, next);
 }
 
+/**
+ * One-line news about a bot's coding threads that isn't worth waking it for (one closed itself once
+ * its pull request merged, say): it rides with the bot's next turn in its own lane, whatever wakes
+ * it, and is dropped once that turn ends well. Only the newest {@link THREAD_NOTES_KEPT} per bot.
+ */
+export interface ThreadNote {
+  id: string;
+  to: string;
+  text: string;
+}
+const THREAD_NOTES = "thread-notes";
+const THREAD_NOTES_KEPT = 20;
+const threadNotes = () => db.getValue<ThreadNote[]>(THREAD_NOTES) ?? [];
+
+export function noteThread(botId: string, text: string) {
+  const list = [...threadNotes(), { id: crypto.randomUUID(), to: botId, text }];
+  const mine = list.filter((n) => n.to === botId);
+  const drop = new Set(mine.slice(0, Math.max(0, mine.length - THREAD_NOTES_KEPT)).map((n) => n.id));
+  db.setValue(THREAD_NOTES, list.filter((n) => !drop.has(n.id)));
+}
+
+export const pendingThreadNotes = (botId: string): ThreadNote[] => threadNotes().filter((n) => n.to === botId);
+
+export function threadNoteText(notes: ThreadNote[]): string {
+  if (!notes.length) return "";
+  if (notes.length === 1) return `Since your last turn: ${notes[0]!.text} That needs no reply.`;
+  return `Since your last turn:\n${notes.map((n) => `- ${n.text}`).join("\n")}\nThat needs no reply.`;
+}
+
+export function settleThreadNotes(shown: ThreadNote[]) {
+  if (!shown.length) return;
+  const seen = new Set(shown.map((n) => n.id));
+  db.setValue(THREAD_NOTES, threadNotes().filter((n) => !seen.has(n.id)));
+}
+
 /** What a rehired bot is told with its first turn back: how long it was away, and what didn't wait for it. */
 const REHIRED = "rehired:";
 export function rehireNote(botId: string): string {
@@ -1182,6 +1217,7 @@ export async function deleteBot(id: string, { by }: { by?: Author } = {}) {
   db.setValue(CHANGE_NOTES, changeNotes().filter((n) => n.botId !== id));
   db.setValue(RENAME_NOTES, renameNotes().filter((n) => n.botId !== id));
   db.setValue(TEAM_NOTES, teamNotes().filter((n) => n.botId !== id && n.to !== id));
+  db.setValue(THREAD_NOTES, threadNotes().filter((n) => n.to !== id));
   settleRehireNote(id);
   status.delete(id);
   emit({ t: "bot-deleted", id });

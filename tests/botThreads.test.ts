@@ -638,6 +638,49 @@ test("closing refuses a working thread, and leaves uncommitted work alone", asyn
   runs.get(stream.id)!.end();
 });
 
+test("a thread it started closes once its pull request merges, and it hears with its next turn instead of being woken", async () => {
+  const { botThreadHooks, mergedHere } = await import("../server/pullRequests");
+  await call("start", { project: project.name, prompt: "Ship it" });
+  const { threadId, stream, cwd } = admitted[0];
+  const url = "https://github.com/o/r/pull/77";
+  const pull = { number: 77, url, state: "open", checkedAt: Date.now() };
+  storage.putChat({ ...(storage.getChat(threadId) as any), pullRequest: pull });
+  const head = execSync("git rev-parse HEAD", { cwd }).toString().trim();
+  // Still followed: its turn is going, so a merge leaves it open.
+  expect(botThreadHooks.waiting?.(threadId)).toBe(true);
+  snapshots[0] = { ...snapshots[0], status: "done", endedAt: Date.now(), events: [{ t: "text", v: "Opened #77" }, { t: "done", finish: "stop" }] };
+  runs.get(stream.id)!.end();
+  await settle();
+  expect(botThreadHooks.waiting?.(threadId)).toBe(false);
+  wakes.length = 0;
+  const [changed] = await mergedHere(url, cwd, head, Date.now());
+  expect(changed?.autoClosedAt).toBeGreaterThan(0);
+  expect((storage.getChat(threadId) as any).archived).toBe(true);
+  // One short line, for whatever turn comes next: nothing wakes the bot for it.
+  await settle();
+  expect(wakes).toEqual([]);
+  const notes = svc.pendingThreadNotes(bot.id);
+  expect(notes.map((n) => n.text)).toEqual([`Thread “${(storage.getChat(threadId) as any).title}” [${threadId.slice(0, 8)}] was closed: its pull request #77 merged.`]);
+  expect(svc.threadNoteText(notes)).toBe(`Since your last turn: ${notes[0]!.text} That needs no reply.`);
+  svc.settleThreadNotes(notes);
+  expect(svc.pendingThreadNotes(bot.id)).toEqual([]);
+});
+
+test("a bot's message queued or steered for a thread keeps it open through its pull request's merge", async () => {
+  const { botThreadHooks, shouldClose } = await import("../server/pullRequests");
+  const now = Date.now();
+  const chat = { id: "waited-on", title: "t", createdAt: now - 9000, updatedAt: now, startedBy: { bot: bot.id, conversation: "c" }, messages: [{ id: "u", role: "user", content: "go", createdAt: now - 9000 }] } as any;
+  const pull = { number: 1, url: "u", state: "merged" as const, mergedAt: now - 1000, checkedAt: now };
+  expect(shouldClose(chat, pull, now)).toBe(true);
+  db.setValue("thread-queue", [{ id: "q", botId: bot.id, threadId: chat.id, text: "more", settings: {}, queuedAt: now }]);
+  expect(shouldClose(chat, pull, now)).toBe(false);
+  db.setValue("thread-queue", []);
+  db.setValue("thread-steers", [{ id: "s", botId: bot.id, threadId: chat.id, runId: "r", text: "more", steeredAt: now }]);
+  expect(botThreadHooks.waiting?.(chat.id)).toBe(true);
+  db.setValue("thread-steers", []);
+  expect(botThreadHooks.waiting?.(chat.id)).toBe(false);
+});
+
 test("merging needs the grant and every check green", async () => {
   view = { number: 7, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "failing" }], canWrite: true, methods: ["squash", "merge"], headSha: "abc" };
   await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/aren't allowed/);
