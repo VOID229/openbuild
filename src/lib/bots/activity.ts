@@ -9,7 +9,10 @@ import type { Bot, BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
 
-/** Busy replying in another chat, with this one's message next in line. Not a group's: it hasn't decided whether that one's its to answer. */
+/**
+ * Busy replying in another chat, with this one's message next in line. Not a group's that doesn't name
+ * it (BotStatus.undecided): it hasn't decided whether that one's its to answer.
+ */
 export const holding = (st: BotStatus | undefined, conversationId: string) =>
   !!st && st.state !== "idle" && st.conversationId !== conversationId && !!st.waiting?.includes(conversationId) && !st.undecided?.includes(conversationId);
 
@@ -118,13 +121,21 @@ export const reading = (st: BotStatus | undefined) => visiblyWorking(st) && !!st
 export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;
 
 /**
- * The conversation's bots that are busy, wherever: working in any chat, or typing in this one. Their
- * mascots fidget, in the sidebar and in the chat's header, so a bot busy in a group still looks busy
- * in its own chat. What they're doing, and where, is the chat's to say (see `elsewhere`).
+ * The conversation's bots that are busy, as it shows them: their mascots fidget (or, busy elsewhere,
+ * are calmer: `awayIn`), in the sidebar, the chat's header and its members, and in a group the rest
+ * doze. A bot's own chat is the bot itself: busy in any chat, it's busy there too, and the chat says
+ * what it's doing where (`elsewhere`). A group or side chat shows only what's its own: a member typing
+ * or at work there, holding on with a message there that names it next in line, or busy elsewhere on
+ * its account (`awayIn`). Busy in a chat that has nothing to do with this one, it dozes here.
  */
-export function busyBots(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: Record<string, string[] | undefined>): string[] {
+export function busyBots(conversation: Pick<Conversation, "id" | "botIds" | "kind">, status: Statuses, typing: Record<string, string[] | undefined>): string[] {
   const here = typing[conversation.id] ?? [];
-  return conversation.botIds.filter((id) => here.includes(id) || visiblyWorking(status[id]));
+  return conversation.botIds.filter((id) => {
+    const st = status[id];
+    if (here.includes(id)) return true;
+    if (conversation.kind === "direct") return visiblyWorking(st);
+    return workingHere(st, conversation.id) || holding(st, conversation.id) || awayIn(conversation, st);
+  });
 }
 
 /**
@@ -135,10 +146,18 @@ export function busyBots(conversation: Pick<Conversation, "id" | "botIds">, stat
  */
 export const awayFrom = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && !betweenTurns(st) && st!.conversationId !== conversationId && !holding(st, conversationId);
 
-/** The conversation's bots at work in another chat (`awayFrom`), and where, but not one typing here. */
-export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: Record<string, string[] | undefined> = {}): { botId: string; conversationId?: string }[] {
+/**
+ * Away from this chat (`awayFrom`) in a way it shows: from the bot's own chat, at work anywhere else;
+ * from a group or side chat, only on that chat's account (BotStatus.from: a handoff from there, a post
+ * about it, a side chat opened from there). Work on anything else shows nothing there.
+ */
+export const awayIn = (conversation: Pick<Conversation, "id" | "kind">, st: BotStatus | undefined) =>
+  awayFrom(st, conversation.id) && (conversation.kind === "direct" || st!.from === conversation.id);
+
+/** The conversation's bots at work in another chat in a way it shows (`awayIn`), and where, but not one typing here. */
+export function elsewhere(conversation: Pick<Conversation, "id" | "botIds" | "kind">, status: Statuses, typing: Record<string, string[] | undefined> = {}): { botId: string; conversationId?: string }[] {
   const here = typing[conversation.id] ?? [];
-  return conversation.botIds.filter((id) => !here.includes(id) && awayFrom(status[id], conversation.id)).map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
+  return conversation.botIds.filter((id) => !here.includes(id) && awayIn(conversation, status[id])).map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
 }
 
 /** What `awayLines` needs to know of the chats and bots the viewer can see. */

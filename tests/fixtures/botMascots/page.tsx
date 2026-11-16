@@ -43,7 +43,7 @@ useBots.setState({
     chat("crowd", "Everyone", "group", ["egg", "moss", "boo", "pill", "tile", "spark"], 5),
     chat("row", "Row group", "group", ["tile", "spark"]),
   ],
-  // Moss is at work in OpenBuild Dev: wherever a group shows it, it's awake, and the rest sleep.
+  // Moss is at work in OpenBuild Dev: awake wherever that group shows it, dozing in its other groups, and the rest sleep.
   status: { moss: { state: "working", conversationId: "dev", activity: "Reading the test" } },
   activeId: "dev",
   detailsOpen: true,

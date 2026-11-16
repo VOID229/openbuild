@@ -99,7 +99,7 @@ export interface BotStatus {
    * its mascot. The chat stays silent while its bots decide.
    */
   deciding?: boolean;
-  /** Of `waiting`, the groups whose messages it hasn't decided on yet: they don't show it holding on. */
+  /** Of `waiting`, the groups whose messages it hasn't decided on yet (none of them names it): they don't show it holding on. */
   undecided?: string[];
   error?: string;
   /** The error is the provider's (every fallback's, say): kept whole, but not for the chat to show. */

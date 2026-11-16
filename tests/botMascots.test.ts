@@ -77,8 +77,8 @@ const started = (page: Page, bot: string) =>
     on: ['bot-eye-fill', 'bot-doze', 'bot-nap'].find((c) => t.target.classList.contains(c)) ?? '', property: t.property, duration: t.duration, delay: t.delay,
   }))`);
 
-const setWorking = (page: Page, ids: string[]) =>
-  page.eval(`bots.setState({ status: Object.fromEntries(${JSON.stringify(ids)}.map((id) => [id, { state: "working", conversationId: "dev" }])) })`);
+const setWorking = (page: Page, ids: string[], where = "dev") =>
+  page.eval(`bots.setState({ status: Object.fromEntries(${JSON.stringify(ids)}.map((id) => [id, { state: "working", conversationId: "${where}" }])) })`);
 
 describe.skipIf(!browser)("bots dozing in a group", () => {
   test("only the member at work is awake, wherever the group shows its bots", async () => {
@@ -87,10 +87,10 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     for (const where of ["tile", "row", "header", "message", "hero", "member"]) expect(bots.some((b) => b.where === where)).toBe(true);
     for (const b of bots) {
       // Moss (green) is at work in OpenBuild Dev: awake, and busy there but beside its messages (the line
-      // saying what it's doing has a busy mascot of its own). In its other groups it's awake and calm,
-      // busy elsewhere. Everyone else dozes, eyes shut.
-      const moss = b.color === "green";
-      expect({ ...b, eye: b.eye < 0.3 }).toEqual({ ...b, asleep: !moss, busy: moss && b.dev && b.where !== "message", away: moss && !b.dev, eye: !moss });
+      // saying what it's doing has a busy mascot of its own). Its other groups have nothing to do with
+      // that work, so there it dozes with everyone else, eyes shut.
+      const awake = b.color === "green" && b.dev;
+      expect({ ...b, eye: b.eye < 0.3 }).toEqual({ ...b, asleep: !awake, busy: awake && b.where !== "message", away: false, eye: !awake });
     }
     // A bot's own chat doesn't doze, and has no "zzz" to show.
     expect(await page.eval<object>(`(() => { const b = [...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Dr Eggbot')).querySelector('.bot'); return { asleep: 'asleep' in b.dataset, zzz: !!b.querySelector('.bot-zzz'), open: ${OPEN}(b) > 0.9 }; })()`)).toEqual({ asleep: false, zzz: false, open: true });
@@ -103,12 +103,15 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     // Three members, and the other three as a count in the fourth seat.
     expect(await colors()).toEqual(["white", "green", "amber"]);
     expect(await page.eval<string>(`(${everyone}).querySelector('.bot-huddle-seat .bot-huddle-more').textContent`)).toBe("+3");
-    // Spark (teal), the sixth, starts work: it takes the last dozing member's place, awake (calm, as
-    // its work is in another chat).
+    // Spark (teal), the sixth, starts work in another chat: nothing changes here, where it isn't at work.
     await setWorking(page, ["moss", "spark"]);
     await page.settle();
+    expect(await colors()).toEqual(["white", "green", "amber"]);
+    // At work in this group, it takes the last dozing member's place, awake and busy.
+    await setWorking(page, ["moss", "spark"], "crowd");
+    await page.settle();
     expect(await colors()).toEqual(["white", "green", "teal"]);
-    expect(await page.eval<object>(`(({ dataset: d }) => ({ asleep: 'asleep' in d, away: 'away' in d }))((${everyone}).querySelector('.bot[data-color="teal"]'))`)).toEqual({ asleep: false, away: true });
+    expect(await page.eval<object>(`(({ dataset: d }) => ({ asleep: 'asleep' in d, busy: 'busy' in d, away: 'away' in d }))((${everyone}).querySelector('.bot[data-color="teal"]'))`)).toEqual({ asleep: false, busy: true, away: false });
   });
 
   test("a bot wakes when it starts work and dozes off when it stops, eased both ways", async () => {

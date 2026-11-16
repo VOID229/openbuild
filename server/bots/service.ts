@@ -47,6 +47,11 @@ export interface Wake {
   from?: string;
   /** A routine's turn: the routine's title (BotStatus.routine). */
   routine?: string;
+  /**
+   * A group message that names this bot (an @mention, a reply to it, a poll), not one said to the whole
+   * group for each bot to decide on: while it's busy elsewhere, the group shows it holding on.
+   */
+  named?: boolean;
 }
 
 type Hooks = {
@@ -1637,7 +1642,8 @@ export function postMessage(conversationId: string, message: BotMessage, { from 
     if (message.author !== "me" && !friendHere) noteHandoffs(c, message, seq, targets);
     // Several bots asked at once: one answers, and the others add only what's theirs.
     const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets, talking) : undefined;
-    for (const botId of targets) if (!skip.has(botId)) wakeUp(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}), ...(from && from !== conversationId ? { from } : {}) });
+    const named = c.kind === "group" && !everyone;
+    for (const botId of targets) if (!skip.has(botId)) wakeUp(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}), ...(from && from !== conversationId ? { from } : {}), ...(named && { named }) });
   }
   return message;
 }

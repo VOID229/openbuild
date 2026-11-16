@@ -149,6 +149,37 @@ test("in a group, a member busy messaging another bot is said by name, and comin
   expect(document.querySelector(".bm-away")).toBeNull();
 });
 
+test("busy in its own chat, it dozes in a group it's only a member of, until a message there names it", async () => {
+  phone = true;
+  await show(Both, "dev");
+  /** Scout's mascot (blue) in the OpenBuild Dev group's sidebar row, its side chat's row, and the open chat's header. */
+  const inRow = (title: (t: string) => boolean) => [...document.querySelectorAll(".bots-row")].find((r) => title(r.querySelector(".bots-row-title")?.textContent ?? ""))!.querySelector('.bot[data-color="blue"]')!;
+  const devRow = () => inRow((t) => t === "OpenBuild Dev");
+  const sideRow = () => inRow((t) => t !== "Scout" && t.includes("Scout") && t.includes("Pip"));
+  const inHead = () => document.querySelector('.bots-head .bot[data-color="blue"]')!;
+  const state = (el: Element) => ({ asleep: el.hasAttribute("data-asleep"), busy: el.hasAttribute("data-busy"), away: el.hasAttribute("data-away"), reading: el.hasAttribute("data-reading") });
+  const dozing = { asleep: true, busy: false, away: false, reading: false };
+  await at("chat", "Reading the logs", { reading: true });
+  // Its own chat's row: at work, and reading along.
+  expect(state(scoutMascot())).toEqual({ asleep: false, busy: true, away: false, reading: true });
+  // The group, and its side chat with Pip: dozing like Pip, with nothing said of it.
+  for (const el of [devRow(), sideRow(), inHead()]) expect(state(el)).toEqual(dozing);
+  expect(document.querySelector(".bm-away")).toBeNull();
+  expect(document.querySelector(".bm-working")).toBeNull();
+  expect(head()).toBe("Scout, Pip");
+  // Named in the group, its message next in line there: it's holding on there, awake.
+  await at("chat", "Reading the logs", { waiting: ["dev"] });
+  expect(document.querySelector(".bm-working-text")!.textContent).toMatch(/^(Hold on a second|Finishing up something|One moment, wrapping something up|Be right with you)$/);
+  expect(state(inHead())).toMatchObject({ asleep: false, busy: true });
+  expect(state(devRow())).toMatchObject({ asleep: false, busy: true });
+  // Said to the whole group, which it hasn't decided on: still nothing.
+  await at("chat", "Reading the logs", { waiting: ["dev"], undecided: ["dev"] });
+  expect(document.querySelector(".bm-working")).toBeNull();
+  expect(state(inHead())).toEqual(dozing);
+  expect(state(devRow())).toEqual(dozing);
+  await status({ state: "idle" });
+});
+
 test("a chat the viewer can't see is never named, and nothing of what's going on there shows", async () => {
   phone = true;
   await show(Both);
