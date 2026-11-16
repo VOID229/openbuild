@@ -316,8 +316,8 @@ test("activity lines in a row fold into one quiet toggle, opened on a click; an 
   const runs = [...document.querySelectorAll(".bm-events")];
   expect(runs).toHaveLength(1);
   const toggle = runs[0]!.querySelector<HTMLButtonElement>(".bm-events-toggle")!;
-  // Who did it (their mascots), and how much, but not the lines themselves until asked.
-  expect(toggle.textContent).toBe("3 background actions");
+  // Who did it (their mascots), and what they did, but not the lines themselves until asked.
+  expect(toggle.textContent).toBe("Set 1 follow-up, followed up once, ran 1 routine");
   expect(toggle.querySelectorAll(".bot")).toHaveLength(2);
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(true);
@@ -375,7 +375,7 @@ test("opened, the same line again and again in a row shows once with how many ti
     ran("e8", "juniper", "Check threads and PRs"),
   ]);
   const toggle = document.querySelector<HTMLButtonElement>(".bm-events-toggle")!;
-  expect(toggle.textContent).toBe("7 background actions");
+  expect(toggle.textContent).toBe("Ran 7 routines");
   await act(async () => toggle.click());
   const shown = [...document.querySelectorAll<HTMLElement>(".bm-events .bm-event")].filter((l) => !l.hidden);
   expect(shown.map((l) => [l.dataset.id, l.querySelector(".bm-event-times")?.textContent ?? null])).toEqual([

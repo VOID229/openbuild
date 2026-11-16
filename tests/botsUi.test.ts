@@ -203,6 +203,43 @@ test("a bot's activity line names the bot that did it, by author id; the user's 
   expect(authoredEventText({ kind: "error", text: "Paused" })).toBeUndefined();
 });
 
+test("a folded run of activity says what was done, with a count, most done first", async () => {
+  const { runLabel } = await import("../shared/bots");
+  const times = (n: number, event: { kind: string; text: string; detail?: string }) => Array.from({ length: n }, () => event);
+  const closed = { kind: "thread", text: "Closed a thread", detail: "Fix the build" };
+  const started = { kind: "thread", text: "Started a thread", detail: "Docs · Claude" };
+  // All one kind: its verb and how many, pluralized.
+  expect(runLabel(times(14, closed))).toBe("Closed 14 threads");
+  expect(runLabel(times(2, started))).toBe("Started 2 threads");
+  expect(runLabel(times(3, { kind: "poll", text: "Poll closed", detail: "Lunch?" }))).toBe("Closed 3 polls");
+  expect(runLabel(times(2, { kind: "thread", text: "Merged a pull request", detail: "#3 Fix" }))).toBe("Merged 2 pull requests");
+  // Mixed: the most done first, the same noun said once ("started 1", not "started 1 thread").
+  expect(runLabel([started, closed, closed, closed])).toBe("Closed 3 threads, started 1");
+  expect(runLabel([closed, closed, { kind: "thread", text: "Wrote a prompt in", detail: "Docs" }])).toBe("Closed 2 threads, wrote 1 prompt");
+  // The same verb said once too.
+  expect(runLabel([...times(2, { kind: "thread", text: "Answered a thread's question" }), { kind: "thread", text: "Answered a permission prompt" }])).toBe("Answered 2 questions, 1 permission prompt");
+  // Equals keep the order they were first done in; a third kind that ends the list is named, a fourth isn't.
+  const routines = [{ kind: "routine", text: "Set a follow-up", detail: "Check CI · in 10 minutes" }, { kind: "routine", text: "Followed up", detail: "Check CI" }, { kind: "routine", text: "Ran a routine", detail: "Standup" }];
+  expect(runLabel(routines)).toBe("Set 1 follow-up, followed up once, ran 1 routine");
+  expect(runLabel([...routines, started])).toBe("Set 1 follow-up, followed up once, 2 more");
+  expect(runLabel([...times(4, closed), ...times(3, started), ...times(2, { kind: "thread", text: "Stopped a thread" }), { kind: "thread", text: "Added a project" }])).toBe("Closed 4 threads, started 3, 3 more");
+  expect(runLabel(times(3, { kind: "routine", text: "Followed up" }))).toBe("Followed up 3 times");
+  // Older wordings count as the thing they meant.
+  expect(runLabel([{ kind: "thread", text: "Wrote a prompt" }, { kind: "thread", text: "Wrote to a thread" }, { kind: "thread", text: "Wrote a prompt in" }])).toBe("Wrote 3 prompts");
+  expect(runLabel([{ kind: "routine", text: "Routine", detail: "Standup · 9:00" }, { kind: "routine", text: "Set a routine", detail: "Lunch · 12:00" }])).toBe("Set 2 routines");
+  expect(runLabel([{ kind: "routine", text: "Routine", detail: "Standup" }, { kind: "routine", text: "Ran routine", detail: "Lunch" }])).toBe("Ran 2 routines");
+  // Bots in and out of a group, and messages between bots, whoever they name.
+  expect(runLabel([{ kind: "joined", text: "Added", detail: "Scout" }, { kind: "joined", text: "Added", detail: "Juniper" }, { kind: "left", text: "Removed", detail: "Tally" }])).toBe("Added 2 bots, removed 1");
+  expect(runLabel([{ kind: "message", text: "Sent a message to Scout" }, { kind: "message", text: "Sent a message to Juniper" }])).toBe("Sent 2 messages");
+  // Lines with no wording of their own count only among the rest, or as the generic label when that's all there is.
+  const huddle = { kind: "message", text: "Scout is talking it over with Juniper" };
+  expect(runLabel([closed, closed, huddle])).toBe("Closed 2 threads, 1 more");
+  expect(runLabel(times(3, huddle))).toBe("3 background actions");
+  expect(runLabel([huddle, { kind: "model", text: "Switched to GPT 6" }])).toBe("2 background actions");
+  // A text that only looks like a key of the table isn't one.
+  expect(runLabel([{ kind: "thread", text: "constructor" }, { kind: "thread", text: "toString" }])).toBe("2 background actions");
+});
+
 test("older follow-up prompts read with the current wording", async () => {
   const { eventText } = await import("../shared/bots");
   expect(eventText({ text: "Wrote to a thread" })).toBe("Wrote a prompt in");

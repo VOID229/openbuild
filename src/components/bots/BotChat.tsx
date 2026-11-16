@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, TYPING } from "../../../shared/bots";
+import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -2103,7 +2103,7 @@ const keepViews = new WeakMap<HTMLElement, (toggle: HTMLElement, folding: boolea
 const RUN_FOLD_MS = 260;
 
 /**
- * Activity lines in a row, folded into one: the bots behind them and how many things they did. Opened,
+ * Activity lines in a row, folded into one: the bots behind them and what they did ("Closed 14 threads"). Opened,
  * each line shows as it would on its own. Folded, they're still there (hidden), so finding a line by
  * its id, or reading its words, works either way.
  */
@@ -2134,7 +2134,7 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
         }}
       >
         {who.length > 0 && <Mascots bots={who.slice(0, 3)} size={14} />}
-        <span>{messages.length} background actions</span>
+        <span className="bm-events-label">{runLabel(messages.flatMap((m) => m.event ?? []))}</span>
         <ChevronRight className="bm-events-chevron" size={13} strokeWidth={2} aria-hidden />
       </button>
       {/* The same thing done again and again, with nothing between, shows once with how many times. The
