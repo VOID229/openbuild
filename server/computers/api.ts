@@ -328,14 +328,19 @@ async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string
   throw refused ?? new TargetError("offline", `${device.name} is unreachable (${last}). Nothing ran; try again once it's online.`);
 }
 
-/** A request to a paired device's server, at the address it was just found answering as itself. */
-async function deviceFetch(deviceId: string, path: string, init: RequestInit = {}): Promise<Response> {
+/**
+ * A request to a paired device's server, at the address it was just found answering as itself.
+ * `timeoutMs` is a deadline for the request itself, headers and body, on top of the caller's
+ * signal: for a question that must not wait on a device that took it and never answers.
+ */
+async function deviceFetch(deviceId: string, path: string, { timeoutMs, ...init }: RequestInit & { timeoutMs?: number } = {}): Promise<Response> {
   const device = devices.deviceCredentials(deviceId);
   if (!device) throw new TargetError("unpaired", "That machine isn't paired with this server anymore. Nothing ran; use another machine.");
   const base = await reach(device, init.signal ?? undefined);
+  const signal = timeoutMs ? AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(timeoutMs)]) : init.signal;
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, { ...init, redirect: "error", headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${device.token}`, "content-type": "application/json" } });
+    res = await fetch(`${base}${path}`, { ...init, signal, redirect: "error", headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${device.token}`, "content-type": "application/json" } });
   } catch (err) {
     verified.delete(deviceId);
     if (init.signal?.aborted) throw new Error("aborted");
@@ -401,19 +406,33 @@ function remote(deviceId: string): ComputerApi {
 
 export const computerApi = (device: string): ComputerApi => (device === "local" ? local : remote(device));
 
+/** How long a paired device gets to say what it allows, once it's been found answering: as long as finding it gets, per address. Tests shorten it. */
+export const timing = { identityMs: 5000 };
+
 /**
  * Every machine bots can reach, and what each allows them right now. Asks each paired device.
  * Without `engines` this server's container engines aren't probed: `podman info` and `docker info`
  * take seconds, and only Settings and the bots' computers list show what they find.
+ *
+ * No request here is open-ended: finding a device has a deadline per address, asking it what it
+ * allows has one too (a device that took the request and never answered used to hold this for as
+ * long as the connection lived), and `signal` ends every request still out at once. A device cut
+ * off either way is listed as unreachable; the others' answers stand.
  */
-export async function computerTargets(opts: { engines?: boolean } = {}): Promise<ComputerTarget[]> {
+export async function computerTargets(opts: { engines?: boolean; signal?: AbortSignal } = {}): Promise<ComputerTarget[]> {
   const here = opts.engines === false ? undefined : await capabilities();
   const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, ...(here ? { engines: here.engines } : {}) };
   const remote = await Promise.all(
     devices.readDevices().map(async (d): Promise<ComputerTarget> => {
       try {
-        const res = await deviceFetch(d.id, "/api/computers/identity");
-        const g = ((await res.json().catch(() => ({}))) as { grants?: BotToolGrants }).grants;
+        const res = await deviceFetch(d.id, "/api/computers/identity", { signal: opts.signal, timeoutMs: timing.identityMs });
+        // The answer's body is under the same deadline and signal: cut off there it's no answer at all, where
+        // one that isn't JSON (an older OpenBuild's) still reads as allowing nothing.
+        const body = await res.json().catch((err: unknown) => {
+          if (opts.signal?.aborted || ["AbortError", "TimeoutError"].includes((err as Error)?.name)) throw err;
+          return {};
+        });
+        const g = (body as { grants?: BotToolGrants }).grants;
         // What Settings shows is what the next tool call goes by (deviceGrants).
         const known = verified.get(d.id);
         if (known) known.grants = g;

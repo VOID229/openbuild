@@ -12,6 +12,7 @@ import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
 import { listModels, onModelsForgotten } from "../pi/sessions";
 import { friendFlags, piFlags } from "./extensions";
+import { warmMachines } from "./machines";
 import { allowsTools } from "../friends/store";
 import { botsDir } from "./db";
 import * as db from "./db";
@@ -858,7 +859,8 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "tool_execution_start") mind.acted = true;
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
-  if (ended?.role === "assistant") mind.meter?.request(ended.usage, ended.stopReason === "error");
+  if (ended?.role === "assistant") mind.meter?.request(ended.usage, ended.stopReason === "error", callsTool(ended));
+  if (record.type === "compaction_start" || record.type === "compaction_end") mind.meter?.compaction(record.type === "compaction_start");
   if (ended?.role === "assistant" && ended.usage) {
     const size = (["input", "cacheRead", "cacheWrite"] as const).reduce((n, key) => n + (typeof ended.usage[key] === "number" ? ended.usage[key] : 0), 0);
     if (size > 0) mind.contextTokens = size;
@@ -1455,6 +1457,13 @@ function waitSettled(mind: Mind): Promise<void> {
  */
 export const STEER_ACK = "Show you saw it before you go on: one short send_message (the answer if that's quick, otherwise what you'll do now, like \"Got it, switching to X\"), or just a reaction when that says enough. Then fold it in and carry on.";
 
+/**
+ * What every turn's prompt ends on: how to answer, and how to end. It's in the session once per turn
+ * until the session compacts, so it says only that (the system prompt has the rest): it was 214
+ * characters, 7% of everything the prompts of two days of real turns said.
+ */
+export const CLOSING = "Reply with send_message, done true on your last call. Nothing to say: reply only [silent].";
+
 /** A turn's prompt, or with `steered` what joins a turn already working: that says what to do mid-work instead of how to reply. */
 export function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>, steered = false): string {
   const bots = db.listBots();
@@ -1479,7 +1488,7 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
   parts.push(`The time is ${new Date().toString()}.`);
   // A reaction steered in says what to do with it itself (service.REACT_BACK).
   if (steered) parts.push(jobs.some((j) => j.kind === "messages") ? `This arrived while you were working. ${STEER_ACK}` : "");
-  else parts.push("Use send_message to reply (one call per bubble, in this conversation unless you name another; done true on the last one ends the turn). If there's nothing to say, send nothing and end with the plain reply [silent].");
+  else parts.push(CLOSING);
   return parts.filter(Boolean).join("\n\n");
 }
 
@@ -1748,6 +1757,8 @@ export function startBots() {
     if (svc.piSetup()) void svc.greetOnFirstOpen();
   });
   resumeWatches();
+  // What the paired devices allow is asked now, behind nobody: the first turn's context has it ready (machines.ts).
+  warmMachines();
   if (!hot.openbotsProc) {
     hot.openbotsProc = true;
     procListeners.add((computerId, proc, tail) => {

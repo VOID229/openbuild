@@ -317,7 +317,7 @@ test("a small session keeps its Pi when the windows are learnt: its next start h
       a.doesNotMatch(prompts[1], /pong from pi/);
       a.doesNotMatch(prompts[1], /already seen/);
       // And the turn can end on its last message: the prompt says how.
-      a.match(prompts[1], /Use send_message to reply \\(one call per bubble, in this conversation unless you name another; done true on the last one ends the turn\\)/);
+      a.match(prompts[1], /Reply with send_message, done true on your last call\\. Nothing to say: reply only \\[silent\\]\\./);
       // A reaction on it is news: the line comes back, with the reaction.
       const mine = db.messages(conversationId, 20).find((r) => r.message.author === bot.id && !r.message.event);
       svc.toggleReaction(conversationId, mine.message.id, '👍', 'me');

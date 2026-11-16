@@ -41,6 +41,8 @@ test("a turn is measured from the user's message: requests, waits, tokens and to
     calls: 5, failedCalls: 1, input: 290, output: 110, cacheRead: 28600, cacheWrite: 1000,
     queuedMs: 400, promptMs: 1500, statusMs: 410, toolMs: 3000, replyMs: 6500, doneMs: 7000,
     firstTool: "load_tools", toolCalls: 4, loads: 1, loaded: 2, unloadedCalls: 1, tools: ["bash"],
+    // Its last request called no tool: it was spent on ending the turn.
+    endedOnCall: false,
   });
   expect(record.turn).toMatch(/^[0-9a-f-]{36}$/);
   // Numbers and OpenBots' own tool names: nothing the bot or the user wrote, and no tool of theirs by name.

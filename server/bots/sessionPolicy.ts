@@ -135,10 +135,20 @@ export function saveDeliveries(path: string, delivered: Set<string>) {
   renameSync(file + ".tmp", file);
 }
 
-/** Compaction starts at 3/4 of the window, and never past COMPACT_AT, so a large-window model
- * doesn't carry (and re-bill) hundreds of thousands of cached tokens each call. Pi compacts when
- * context > window - reserveTokens, and reserveTokens is used for nothing else. */
-export const COMPACT_AT = 128 * 1024;
+/**
+ * Compaction starts at 3/4 of the window, and never past COMPACT_AT. Pi compacts when context >
+ * window - reserveTokens, and reserveTokens is used for nothing else.
+ *
+ * A session grows until it compacts and every request reads all of it, so the compaction point
+ * decides what a request costs. Two days of real sessions carried 74,000 tokens a request at the
+ * mean, growing from about 28,000 right after a compaction to 128,000; replaying their growth with
+ * the point at 80,000 gives 49,000 to 51,000, a third less, for about twice as many compactions
+ * (docs/openbots-context-diet.md). That was a poor trade while one took a minute on the bot's own
+ * model at full thinking; the extension's own summary (extension.ts summarize) takes a third of
+ * that and writes a quarter as much. Lower than this the summaries themselves start to cost more
+ * than the context they save.
+ */
+export const COMPACT_AT = 80_000;
 export function compactionPolicy(models: { provider: string; id: string; contextWindow?: number }[]) {
   return {
     enabled: true, reserveTokens: 16384, keepRecentTokens: 8000,

@@ -10,6 +10,8 @@
 //   bun scripts/bot-turn-timeline.ts --model … --idle                               also a turn after the bot's Pi idled out
 //   bun scripts/bot-turn-timeline.ts --model … --task "what's 2+2?" --effort low
 //   bun scripts/bot-turn-timeline.ts --model … --no-standby --starter "" --search   compare: no standby `claude`, other starter tools, a search provider set up
+//   bun scripts/bot-turn-timeline.ts --model … --device                             a paired device that doesn't answer, as a laptop that's asleep
+//   bun scripts/bot-turn-timeline.ts --model … --task "thanks!" --task "what's 2+2?"   several tasks: the cold turn takes the first, warm turns the rest in turn
 //
 // It runs real model requests on the model you name, with this user's own sign-in for it (a Claude
 // Code login for claude-code/…, Pi's auth.json for the rest), so it costs what those turns cost.
@@ -103,6 +105,10 @@ export interface Turn {
   agentStartMs?: number;
   requests: Request[];
   calls: ToolCall[];
+  /** What the extension's `context` call answered, in characters per system prompt section. */
+  sections?: Record<string, number>;
+  /** The turn's prompt as the runner sent it to Pi, in characters. */
+  promptChars?: number;
   /** `claude` processes the bridge started, and how long each lived. */
   claude: { what: string; at: number; ms?: number }[];
   firstStatusMs?: number;
@@ -116,6 +122,7 @@ export interface Turn {
 
 const args = process.argv.slice(2);
 const option = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+const options = (name: string) => args.flatMap((arg, i) => (arg === name && args[i + 1] !== undefined ? [args[i + 1]!] : []));
 const flag = (name: string) => args.includes(name);
 
 // ------------------------------------------------------------------ the child: one server, its turns
@@ -124,7 +131,8 @@ async function child() {
   const model = option("--model")!;
   const effort = option("--effort");
   const warm = Number(option("--warm") ?? 2);
-  const task = option("--task") ?? TASK;
+  const tasks = options("--task").length ? options("--task") : [TASK];
+  const task = tasks[0]!;
   const out = option("--out")!;
   const verbose = flag("--verbose");
   const claudeLog = process.env.TIMELINE_CLAUDE_LOG;
@@ -163,7 +171,7 @@ async function child() {
     try {
       return await send.call(this, command, timeoutMs);
     } finally {
-      mark("rpc", command.type, { ms: Date.now() - started, proc: procs.get(this), startedAt: started - origin, own: mine(this.cwd) });
+      mark("rpc", command.type, { ms: Date.now() - started, proc: procs.get(this), startedAt: started - origin, own: mine(this.cwd), ...(command.type === "prompt" ? { chars: String((command as { message?: unknown }).message ?? "").length } : {}) });
     }
   } as typeof send;
   const on = PiProcess.prototype.on;
@@ -199,10 +207,13 @@ async function child() {
   const handle = agent.seams.handle;
   agent.seams.handle = async (id, method, p, signal) => {
     const started = Date.now();
+    let sections: Record<string, number> | undefined;
     try {
-      return await handle(id, method, p, signal);
+      const result = await handle(id, method, p, signal);
+      if (method === "context") sections = Object.fromEntries(Object.entries((result as { sections?: Record<string, string> } | undefined)?.sections ?? {}).map(([name, text]) => [name, String(text ?? "").length]));
+      return result;
     } finally {
-      mark("handler", method, { ms: Date.now() - started, startedAt: started - origin, own: !botId || id === botId, ...(verbose && method !== "context" ? { params: JSON.stringify(p).slice(0, 300) } : {}) });
+      mark("handler", method, { ms: Date.now() - started, startedAt: started - origin, own: !botId || id === botId, ...(sections ? { sections } : {}), ...(verbose && method !== "context" ? { params: JSON.stringify(p).slice(0, 300) } : {}) });
     }
   };
 
@@ -223,6 +234,18 @@ async function child() {
   svc.updateSettings({ onboarding: "done", user: { name: "Sam", context: "" } });
   // --search: a web search provider set up (a SearXNG address nothing answers at), as a user who added one has.
   if (flag("--search")) svc.updateSettings({ searxng: ["http://127.0.0.1:9/"] });
+  // --device: a paired device that never answers, as a laptop that's asleep is. Its address accepts the connection and says nothing.
+  if (flag("--device")) {
+    const hole = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {}, open() {} } });
+    const devices = await import("../server/devices");
+    devices.addDevice({ id: crypto.randomUUID(), name: "Laptop", mode: "lan", urls: [`http://127.0.0.1:${hole.port}`], token: "none", pairedAt: Date.now() });
+    // A server that has been up a while has asked its devices already (machines.ts warmMachines); one from before that change has nothing to ask ahead.
+    const machines = (await import("../server/bots/machines")) as { warmMachines?: () => void };
+    if (machines.warmMachines) {
+      machines.warmMachines();
+      await Bun.sleep(6000);
+    }
+  }
   // The bot every install starts with, or one the user just made (which has no instructions or role yet).
   const primary = db.listBots().find((b) => b.primary)!;
   const created = option("--bot") === "primary" ? { bot: primary, conversationId: svc.directId(primary.id)! } : ((await (await api("/api/bots", { name: "Timer" })).json()) as { bot: { id: string }; conversationId: string });
@@ -278,10 +301,10 @@ async function child() {
     return found;
   };
 
-  async function turn(label: Turn["label"]): Promise<Turn> {
+  async function turn(label: Turn["label"], text = task): Promise<Turn> {
     marks = [];
     origin = Date.now();
-    const posted = await api(`/api/bots/conversations/${conversationId}/messages`, { id: crypto.randomUUID(), author: "me", at: Date.now(), text: task });
+    const posted = await api(`/api/bots/conversations/${conversationId}/messages`, { id: crypto.randomUUID(), author: "me", at: Date.now(), text });
     if (!posted.ok) throw new Error(`The route refused the message: ${posted.status} ${await posted.text()}`);
     const routeMs = Date.now() - origin;
     // The turn is over once the bot is idle again with nothing queued, and has stayed so for a moment.
@@ -337,6 +360,8 @@ async function child() {
       setup: all.filter((m) => m.kind === "rpc" && promptAt !== undefined && (m.startedAt as number) < promptAt).map((m) => ({ name: `${m.name}${m.proc ? ` (${m.proc})` : ""}`, at: m.startedAt as number, ms: m.ms! })),
       promptSentMs: promptAt,
       contextMs: all.find((m) => m.kind === "handler" && m.name === "context")?.ms,
+      sections: all.find((m) => m.kind === "handler" && m.name === "context")?.sections as Record<string, number> | undefined,
+      promptChars: promptRpc?.chars as number | undefined,
       agentStartMs: pi("agent_start")[0]?.at,
       requests,
       calls,
@@ -357,7 +382,7 @@ async function child() {
     turns.push(await turn("cold"));
     save();
     for (let i = 0; i < warm; i++) {
-      turns.push(await turn("warm"));
+      turns.push(await turn("warm", tasks.length > 1 ? tasks[1 + (i % (tasks.length - 1))] : task));
       save();
     }
     if (flag("--idle")) {
@@ -424,7 +449,7 @@ export function describe(turn: Turn): string {
   for (const c of turn.claude) row(c.at, `bridge started ${c.what}${c.ms !== undefined ? `, lived ${s(c.ms)}` : ""}`);
   for (const r of turn.setup) row(r.at, `rpc ${r.name}: ${s(r.ms)}`);
   row(turn.promptSentMs, "prompt sent to Pi");
-  row(turn.agentStartMs, `Pi started the agent (its context call took ${s(turn.contextMs)})`);
+  row(turn.agentStartMs, `Pi started the agent (its context call took ${s(turn.contextMs)}${turn.sections ? `; sections ${Object.entries(turn.sections).map(([name, chars]) => `${name.replace(/^openbots_?/, "") || "base"} ${chars}`).join(", ")} chars` : ""}${turn.promptChars ? `; prompt ${turn.promptChars} chars` : ""})`);
   turn.requests.forEach((r, i) => {
     const b = r.bridge;
     const inside = b ? ` [bridge: ${b.continuation ? "same claude" : b.standby ? "standby claude" : `new claude, started after ${s(b.spawnMs)}`}, API called after ${s(b.apiCallMs)}, headers +${s(b.headersMs)}, first bytes +${s(b.firstBytesMs)}, API done +${s(b.apiMs)}]` : "";
@@ -438,10 +463,32 @@ export function describe(turn: Turn): string {
   return lines.sort((a, b) => parseFloat(a) - parseFloat(b)).join("\n");
 }
 
+/**
+ * The environment of a bots server on throwaway data under `dir`: its own data directory, key store
+ * and temp folder, a Pi set up like nobody's, and nothing of the session this script was run from,
+ * as a server started from a login shell has. Shared with scripts/bot-compaction-bench.ts.
+ */
+export function throwawayEnv(dir: string, model: string): Record<string, string> {
+  const agentDir = join(dir, "agent");
+  mkdirSync(agentDir, { recursive: true });
+  mkdirSync(join(dir, "tmp"), { recursive: true });
+  // A model that isn't the bridge's needs the user's Pi sign-ins: a copy, so this Pi's own state stays apart.
+  if (model !== "default" && !model.startsWith("claude-code")) for (const name of ["auth.json", "models.json"]) if (existsSync(join(homedir(), ".pi", "agent", name))) copyFileSync(join(homedir(), ".pi", "agent", name), join(agentDir, name));
+  return {
+    HOME: homedir(), USER: process.env.USER ?? "", LOGNAME: process.env.LOGNAME ?? process.env.USER ?? "", LANG: process.env.LANG ?? "C.UTF-8", TERM: "dumb", SHELL: process.env.SHELL ?? "/bin/sh",
+    PATH: `${join(homedir(), ".local", "bin")}:${join(homedir(), ".bun", "bin")}:/usr/local/bin:/usr/bin:/bin`,
+    ...(process.env.XDG_RUNTIME_DIR ? { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR } : {}),
+    OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agentDir, TMPDIR: join(dir, "tmp"), NODE_ENV: "production",
+    // Its own, empty, key store: the user's search providers and app sign-ins stay out of the bot's context and reach.
+    OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json"),
+    ...(process.env.PI_BIN ? { PI_BIN: process.env.PI_BIN } : {}),
+  };
+}
+
 async function driver() {
   const model = option("--model");
   if (!model || flag("--help") || flag("-h")) {
-    console.log("Usage: bun scripts/bot-turn-timeline.ts --model provider/id [--effort level] [--cold n] [--warm n] [--idle] [--bot primary|new] [--no-standby] [--starter tool,tool] [--search] [--task text] [--json out.json] [--keep] [--verbose]");
+    console.log("Usage: bun scripts/bot-turn-timeline.ts --model provider/id [--effort level] [--cold n] [--warm n] [--idle] [--bot primary|new] [--no-standby] [--starter tool,tool] [--search] [--device] [--task text]… [--json out.json] [--keep] [--verbose]");
     process.exit(model ? 0 : 1);
   }
   const cold = Number(option("--cold") ?? 1);
@@ -458,26 +505,14 @@ async function driver() {
     }
     for (let i = 0; i < cold; i++) {
       const dir = join(base, `run-${i + 1}`);
-      const agentDir = join(dir, "agent");
-      mkdirSync(agentDir, { recursive: true });
-      mkdirSync(join(dir, "tmp"), { recursive: true });
-      // A model that isn't the bridge's needs the user's Pi sign-ins: a copy, so this Pi's own state stays apart.
-      if (model !== "default" && !model.startsWith("claude-code")) for (const name of ["auth.json", "models.json"]) if (existsSync(join(homedir(), ".pi", "agent", name))) copyFileSync(join(homedir(), ".pi", "agent", name), join(agentDir, name));
       const out = join(dir, "timeline.json");
-      // A server started from a login shell: nothing of the session this script was run from.
       const env: Record<string, string> = {
-        HOME: homedir(), USER: process.env.USER ?? "", LOGNAME: process.env.LOGNAME ?? process.env.USER ?? "", LANG: process.env.LANG ?? "C.UTF-8", TERM: "dumb", SHELL: process.env.SHELL ?? "/bin/sh",
-        PATH: `${join(homedir(), ".local", "bin")}:${join(homedir(), ".bun", "bin")}:/usr/local/bin:/usr/bin:/bin`,
-        ...(process.env.XDG_RUNTIME_DIR ? { XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR } : {}),
-        OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agentDir, TMPDIR: join(dir, "tmp"), NODE_ENV: "production",
-        // Its own, empty, key store: the user's search providers and app sign-ins stay out of the bot's context and reach.
-        OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json"),
-        ...(process.env.PI_BIN ? { PI_BIN: process.env.PI_BIN } : {}),
+        ...throwawayEnv(dir, model),
         ...(realClaude ? { CLAUDE_BIN: wrapper, TIMELINE_CLAUDE_LOG: join(dir, "claude.log") } : {}),
         PI_CLAUDE_CODE_TRACE: join(dir, "bridge-trace.jsonl"),
         ...(flag("--no-standby") ? { PI_CLAUDE_CODE_STANDBY: "0" } : {}),
       };
-      const passed = ["--model", model, "--warm", option("--warm") ?? "2", "--task", option("--task") ?? TASK, "--out", out, ...(option("--effort") ? ["--effort", option("--effort")!] : []), ...(flag("--idle") ? ["--idle"] : []), ...(flag("--verbose") ? ["--verbose"] : []), ...(option("--bot") ? ["--bot", option("--bot")!] : []), ...(option("--starter") !== undefined ? ["--starter", option("--starter")!] : []), ...(flag("--search") ? ["--search"] : [])];
+      const passed = ["--model", model, "--warm", option("--warm") ?? "2", ...(options("--task").length ? options("--task") : [TASK]).flatMap((text) => ["--task", text]), "--out", out, ...(flag("--device") ? ["--device"] : []), ...(option("--effort") ? ["--effort", option("--effort")!] : []), ...(flag("--idle") ? ["--idle"] : []), ...(flag("--verbose") ? ["--verbose"] : []), ...(option("--bot") ? ["--bot", option("--bot")!] : []), ...(option("--starter") !== undefined ? ["--starter", option("--starter")!] : []), ...(flag("--search") ? ["--search"] : [])];
       const proc = spawn(process.execPath, [import.meta.path, "--child", ...passed], { cwd: checkout, env, stdio: ["ignore", "inherit", "inherit"] });
       const code = await new Promise<number>((done) => proc.on("close", (c) => done(c ?? -1)));
       if (existsSync(out)) results.push(JSON.parse(readFileSync(out, "utf8")));

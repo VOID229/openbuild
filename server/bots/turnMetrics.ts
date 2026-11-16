@@ -71,6 +71,11 @@ export interface TurnRecord {
   unloadedCalls?: number;
   /** Catalog tools the turn used. */
   tools?: string[];
+  /** Times its session was summarized (compacted) during the turn, and how long that took in all. */
+  compactions?: number;
+  compactMs?: number;
+  /** The turn's last model request called a tool that ended it (done, or a question card): no request was spent only on ending. */
+  endedOnCall?: boolean;
 }
 
 const USAGE_KEYS = ["input", "output", "cacheRead", "cacheWrite"] as const;
@@ -88,6 +93,8 @@ export class TurnMeter {
   private readonly used = new Set<string>();
   private readonly names: ToolNames;
   private prompted = false;
+  private compacting?: number;
+  private lastCalled = false;
 
   /** `since` is when the message that woke the bot arrived; `now` when its turn starts. */
   constructor(init: { bot: string; trigger: TurnTrigger; friend?: boolean; waiting: boolean; since: number; tools: ToolNames }, now = Date.now()) {
@@ -121,8 +128,18 @@ export class TurnMeter {
     this.record.statusMs ??= this.elapsed(now);
   }
 
-  /** A model request ended, with what the provider said it used. */
-  request(usage: Record<string, unknown> | undefined, failed: boolean) {
+  /** Pi started, or finished, summarizing the session. */
+  compaction(started: boolean, now = Date.now()) {
+    if (started) return void (this.compacting ??= now);
+    if (this.compacting === undefined) return;
+    this.record.compactions = (this.record.compactions ?? 0) + 1;
+    this.record.compactMs = (this.record.compactMs ?? 0) + Math.max(0, now - this.compacting);
+    this.compacting = undefined;
+  }
+
+  /** A model request ended, with what the provider said it used. `called` is whether it called a tool. */
+  request(usage: Record<string, unknown> | undefined, failed: boolean, called = false) {
+    this.lastCalled = called;
     this.record.calls = (this.record.calls ?? 0) + 1;
     if (failed) this.record.failedCalls = (this.record.failedCalls ?? 0) + 1;
     if (!usage) return;
@@ -168,6 +185,7 @@ export class TurnMeter {
       outcome: outcome ?? (!this.prompted ? "skipped" : this.record.replyMs === undefined ? "silent" : "replied"),
       doneMs: this.elapsed(now),
       ...(this.used.size ? { tools: [...this.used].sort() } : {}),
+      ...(this.record.calls ? { endedOnCall: this.lastCalled } : {}),
     };
   }
 }
@@ -192,6 +210,10 @@ export interface TurnSummary {
   requestsPerTurn: Spread;
   /** Share of all requests whose model call failed. */
   failedRequestShare?: number;
+  /** Of the turns that say (written since 2026-11-16): the share that ended on a tool call, with no request spent only on ending. */
+  endedOnCallShare?: number;
+  /** Summarizing (compaction): the share of turns that waited on one, and how long one took. */
+  compaction?: { turnShare: number; ms: Spread };
   tokens: {
     /** Prompt tokens (uncached input + cache read + cache write) per turn and per request. */
     promptPerTurn: Spread;
@@ -275,6 +297,8 @@ export function summarizeTurns(records: TurnRecord[]): TurnSummary {
   const detailedRequests = detailed.reduce((n, r) => n + (r.calls ?? 0), 0);
   const tools: Record<string, number> = {};
   for (const r of detailed) for (const name of r.tools ?? []) tools[name] = (tools[name] ?? 0) + 1;
+  // Lines that say how the turn ended: written from when a turn could end on any of its last calls.
+  const told = detailed.filter((r) => typeof r.endedOnCall === "boolean");
   const outcomes: Record<string, number> = {};
   for (const r of records.filter((r) => r.v === 2)) outcomes[r.outcome ?? "unknown"] = (outcomes[r.outcome ?? "unknown"] ?? 0) + 1;
   return {
@@ -284,6 +308,8 @@ export function summarizeTurns(records: TurnRecord[]): TurnSummary {
     ...(turns.length ? { from: Math.min(...turns.map((r) => r.at)), to: Math.max(...turns.map((r) => r.at)) } : {}),
     requestsPerTurn: spread(turns.map((r) => r.calls ?? 0)),
     ...(detailed.length ? { failedRequestShare: share(detailed.reduce((n, r) => n + (r.failedCalls ?? 0), 0), detailedRequests) } : {}),
+    ...(told.length ? { endedOnCallShare: share(told.filter((r) => r.endedOnCall).length, told.length) } : {}),
+    ...(told.length ? { compaction: { turnShare: share(told.filter((r) => r.compactions).length, told.length), ms: spread(told.flatMap((r) => (r.compactions && typeof r.compactMs === "number" ? [r.compactMs / r.compactions] : [])), 0) } } : {}),
     tokens: {
       promptPerTurn: spread(turns.filter((r) => r.measured).map(prompt), 0),
       promptPerRequest: requests ? Math.round(promptTotal / requests) : 0,
@@ -329,6 +355,9 @@ export function summaryRows(summaries: TurnSummary[]): string[][] {
     row("From – to (UTC)", (s) => `${day(s.from)} – ${day(s.to)}`),
     row("Model requests per turn: mean / p50 / p90", (s) => `${s.requestsPerTurn.mean} / ${s.requestsPerTurn.p50} / ${s.requestsPerTurn.p90}`),
     row("Requests that failed (retry or fallback)", (s) => pct(s.failedRequestShare)),
+    row("Turns that ended on a call, no request after", (s) => pct(s.endedOnCallShare)),
+    row("Turns that summarized the session first", (s) => pct(s.compaction?.turnShare)),
+    row("  one summary: p50 / p90", (s) => (s.compaction?.ms.n ? `${ms(s.compaction.ms.p50)} / ${ms(s.compaction.ms.p90)}` : "–")),
     row("Requests spent loading tools", (s) => pct(s.loads.requestShare)),
     row("Turns that loaded a tool first", (s) => pct(s.loads.turnsLoadingShare)),
     row("load_tools calls per turn", (s) => (s.loads.loadsPerTurn === undefined ? "–" : String(s.loads.loadsPerTurn))),

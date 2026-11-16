@@ -75,7 +75,7 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
 
     // The time rides with each prompt instead.
     const prompt = runner.render([{ kind: 'messages', conversationId: boss.conversationId }], boss.bot.id);
-    a.match(prompt, /The time is .*\\d{2}:\\d{2}:\\d{2}.*\\.\\n\\nUse send_message/);
+    a.match(prompt, /The time is .*\\d{2}:\\d{2}:\\d{2}.*\\.\\n\\nReply with send_message/);
     process.exit(0);
   `);
 }, 30_000);

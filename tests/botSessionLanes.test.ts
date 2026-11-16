@@ -89,7 +89,7 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       // Its own listing is kept, so the next Pi compacts where a model with a 1M-token window should.
       await until(() => runner.knownWindows().length === 1, 'the model windows were never learnt');
       const b1 = await say(group.id, '@Alpha B1');
-      a.deepEqual(settings().compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 131072, keepRecentTokens: 8000 });
+      a.deepEqual(settings().compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 80000, keepRecentTokens: 8000 });
       const startB = starts().at(-1);
       a.notEqual(startB.pid, startA.pid);
       a.notEqual(startB.dir, startA.dir);

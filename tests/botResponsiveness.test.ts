@@ -106,7 +106,8 @@ test("the system prompt asks for one quick ack before real work, a reaction when
   a.ok(ack[0].length < 450, String(ack[0].length));
   // Nothing in the prompt says a reaction can be let be any more.
   a.doesNotMatch(agent.contextFor(alpha.bot.id), /owe a reply to every message or reaction|doesn't need an answer/);
-  a.match(agent.contextFor(alpha.bot.id), /To end a turn without a message, make \\[silent\\] your whole final reply\\./);
+  // How a turn ends is said once: on its last call when that call says so, else with [silent] alone.
+  a.match(agent.contextFor(alpha.bot.id), /A turn ends on its last call when that call says done true \\(send_message, react, memory, todo and routine take it\\), so say it there\\. With nothing left to do or say, make \\[silent\\] your whole reply\\./);
 `), 30_000);
 
 test("the runner steers no late nudge of its own into a turn that keeps the user waiting", () => run("ack-no-nudge", `
@@ -134,7 +135,7 @@ test("a message steered into a working turn asks for one quick ack, and a reacti
   post(own, 'me', 'run the build');
   await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
   // The turn's own prompt says how to reply; the ack before real work is the system prompt's.
-  a.match(of(alpha.bot)[0].message, /Use send_message to reply/);
+  a.match(of(alpha.bot)[0].message, /Reply with send_message/);
   a.doesNotMatch(of(alpha.bot)[0].message, /arrived while you were working/);
   await send(alpha.bot, 'On it.');
   const mine = db.messages(own, 5).at(-1).message;
@@ -147,7 +148,7 @@ test("a message steered into a working turn asks for one quick ack, and a reacti
   a.ok(steer.endsWith('This arrived while you were working. ' + runner.STEER_ACK), steer);
   a.match(runner.STEER_ACK, /one short send_message \\(the answer if that's quick, otherwise what you'll do now, like "Got it, switching to X"\\), or just a reaction when that says enough\\. Then fold it in and carry on\\./);
   // Mid-work it isn't told how to end a turn.
-  a.doesNotMatch(steer, /\\[silent\\]|Use send_message to reply/);
+  a.doesNotMatch(steer, /\\[silent\\]|Reply with send_message/);
 
   // They react to its message mid-work: it's told to react back, not that it can let it be.
   svc.toggleReaction(own, mine.id, '👍', 'me');
@@ -155,7 +156,7 @@ test("a message steered into a working turn asks for one quick ack, and a reacti
   const reacted = steersOf(alpha.bot)[1];
   a.match(reacted, /reacted 👍 to your message \\[\\w{8}\\]: “On it\\.”\\. That's reaction #1 there\\. React back to it with react's to_reaction so they know you saw it, and write only if it calls for words\\. Mid-work, carry on after\\./);
   a.ok(reacted.includes(svc.REACT_BACK));
-  a.doesNotMatch(reacted, /doesn't need an answer|if you like|arrived while you were working|Use send_message to reply/);
+  a.doesNotMatch(reacted, /doesn't need an answer|if you like|arrived while you were working|Reply with send_message/);
   of(alpha.bot)[0].finish('');
   await until(() => !runner.busy(alpha.bot.id));
 

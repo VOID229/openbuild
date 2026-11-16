@@ -9,6 +9,7 @@
   "tests/botComposerCaret.test.ts": 13.4,
   "tests/botComposerScroll.test.ts": 23.9,
   "tests/botComposerSend.test.ts": 8.8,
+  "tests/botContextDiet.test.ts": 10.5,
   "tests/botContextSections.test.ts": 3.7,
   "tests/botCoordination.test.ts": 2.3,
   "tests/botDetailsOverflow.test.ts": 17.4,
