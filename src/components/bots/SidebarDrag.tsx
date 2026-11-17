@@ -3,6 +3,10 @@
 // Bots says or the small menu that asks), or onto a section's heading (first in it). A press that
 // doesn't move is still a click, and one that dragged never is. Touch keeps its scrolling and press
 // and hold; the chat's menu and Alt+arrow keys move chats there instead.
+//
+// Nothing moves until the drop: the lines and rings are drawn on the chats where they are, and the
+// list is re-rendered in its new order only once it's dropped. So the page's order, which ⌥1–9
+// numbers (switchKeys.tsx), is always what's on the screen.
 import { ArrowLeftRight, UsersRound } from "lucide-react";
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -204,7 +208,8 @@ export const DragGhost = forwardRef<HTMLDivElement, { id?: string }>(function Dr
   const bots = useBots((s) => s.bots);
   if (!id || !conversation) return null;
   return createPortal(
-    <div ref={ref} className="bots-drag-ghost" aria-hidden>
+    // Drawn afresh, not cloned, and outside the sidebar: nothing in it is a chat ⌥1–9 counts (switchKeys.tsx) or a place to drop.
+    <div ref={ref} className="bots-drag-ghost" aria-hidden inert>
       <ConversationAvatar conversation={conversation} size={20} still badge={false} lineup />
       <span className="bots-drag-ghost-name">{conversationName(conversation, bots).split(" · ")[0]}</span>
     </div>,

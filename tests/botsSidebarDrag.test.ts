@@ -66,6 +66,27 @@ describe.skipIf(!browser)("dragging in the OpenBots sidebar", () => {
     expect(await page.eval<string>(`bots.getState().activeId`)).toBe("row-bot");
   });
 
+  test("⌥1–9 count the page's order: unchanged mid-drag, the new one after the drop, never the ghost", async () => {
+    const page = await open();
+    const slots = () => page.eval<string[]>(`[...document.querySelectorAll('.bots-sidebar [data-bot-slot]')].map((el) => el.dataset.botSlot)`);
+    const before = ["pinned-bot", "pinned-group", "row-bot", "row-group", "busy-group"];
+    expect(await slots()).toEqual(before);
+    // The tiles stay a plain grid, left to right and row by row, as the keys count them.
+    expect(await page.eval<{ flow: string; orders: string[] }>(`({ flow: getComputedStyle(document.querySelector('.bots-tiles')).gridAutoFlow, orders: [...document.querySelectorAll('.bots-tile, .bots-row')].map((el) => getComputedStyle(el).order) })`)).toEqual({ flow: "row", orders: ["0", "0", "0", "0", "0"] });
+    await drag(page, await at(page, "row-group"), await at(page, "busy-group", 0.5, 0.8), true);
+    // Mid-drag, nothing has moved yet: the order is the page's, and the ghost isn't in it.
+    expect(await slots()).toEqual(before);
+    expect(await page.eval<{ inside: boolean; slots: number; inert: boolean }>(`(() => { const g = document.querySelector('.bots-drag-ghost'); return { inside: !!g.closest('.bots-sidebar'), slots: g.querySelectorAll('[data-bot-slot], [data-drag-id]').length + (g.matches('[data-bot-slot]') ? 1 : 0), inert: g.inert }; })()`)).toEqual({ inside: false, slots: 0, inert: true });
+    await mouse(page, "mouseReleased", await at(page, "busy-group", 0.5, 0.8), 0);
+    await page.settle();
+    expect(await slots()).toEqual(["pinned-bot", "pinned-group", "row-bot", "busy-group", "row-group"]);
+    // And ⌥5 goes to what's fifth now.
+    await page.eval(`document.activeElement?.blur()`);
+    for (const type of ["rawKeyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "5", code: "Digit5", windowsVirtualKeyCode: 53, modifiers: 1 });
+    await page.settle();
+    expect(await page.eval<string>(`bots.getState().activeId`)).toBe("row-group");
+  });
+
   test("a click without a drag still opens the chat", async () => {
     const page = await open();
     await page.click('[data-drag-id="row-group"] .bots-row-main');
