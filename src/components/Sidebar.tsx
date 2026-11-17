@@ -2,7 +2,7 @@ import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { appRelease, isHosted } from "../lib/runtime";
 import { channelName, releaseLabel } from "../../shared/version";
 import { ReleaseUpdate } from "./ReleaseUpdate";
-import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
+import { AlarmClock, AlarmClockCheck, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { adoptHistory, stopGeneration } from "../lib/chat";
@@ -29,7 +29,6 @@ import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, Code
 import { PluginSlot } from "../lib/plugins";
 import { FilterIcon, PanelIcon, SearchIcon } from "./HeaderIcons";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
-import { BotsGlyph } from "./bots/BotAvatar";
 import { clock } from "../lib/clock";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
@@ -1167,7 +1166,7 @@ export function toggleBots() {
     const st = useStore.getState();
     const open = st.botsOpen;
     st.setBotsOpen(!open);
-    // On a phone the sidebar is a drawer and the toggle sits in it, so the other drawer takes its place.
+    // On a phone the sidebar is a drawer and the switch sits in it, so the other drawer takes its place.
     if (window.innerWidth <= 768) {
       st.setSidebarOpen(open);
       st.setBotsSidebarOpen(!open);
@@ -1186,23 +1185,6 @@ export function expandBotsThread() {
     // On a phone the sidebar is a drawer, which would cover the thread just opened out.
     if (window.innerWidth <= 768) st.setSidebarOpen(false);
   });
-}
-
-/** The rail's button for that switch: OpenBots' puff to go in, a back arrow to leave. */
-export function BotsToggle() {
-  const open = useStore((s) => s.botsOpen);
-  return (
-    <button
-      type="button"
-      className="bots-toggle"
-      aria-label={open ? "Back to threads" : "OpenBots"}
-      data-tooltip={open ? "Back to threads" : "OpenBots"}
-      data-tooltip-side="top"
-      onClick={toggleBots}
-    >
-      {open ? <ArrowLeft size={19} /> : <BotsGlyph size={19} />}
-    </button>
-  );
 }
 
 /**

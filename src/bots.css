@@ -857,25 +857,7 @@
    OpenBots — sidebar (src/components/bots/BotsSidebar.tsx)
    ========================================================================== */
 
-.bots-toggle {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  flex: none;
-  border-radius: var(--radius);
-  color: var(--text-2);
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
-}
-
-@media (hover: hover) {
-  .bots-toggle:hover {
-    background: var(--hover);
-    color: var(--text);
-  }
-}
-
-/* Marketplace, in the footer beside the toggle, at the toggle's size. */
+/* Marketplace, in the footer beside Settings. */
 .bots-apps-btn {
   width: 32px;
   height: 32px;
@@ -1378,7 +1360,7 @@
   background: var(--border);
 }
 
-/* New, Marketplace, back to OpenBuild and you: monochrome tools of one size, one under the other. */
+/* New, Marketplace and you: monochrome tools of one size, one under the other. */
 .bots-rail-foot {
   display: flex;
   flex-direction: column;
@@ -1387,8 +1369,7 @@
   padding-top: 6px;
 }
 
-.bots-rail-foot .bots-rail-btn:not(:hover),
-.bots-rail-foot .bots-toggle:not(:hover) {
+.bots-rail-foot .bots-rail-btn:not(:hover) {
   color: var(--text-2);
 }
 
@@ -1396,11 +1377,6 @@
   width: 40px;
   height: 40px;
   border-radius: var(--radius);
-}
-
-.bots-rail-foot .bots-toggle {
-  width: 40px;
-  height: 40px;
 }
 
 .bots-rail-me {

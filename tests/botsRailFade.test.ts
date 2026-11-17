@@ -1,7 +1,8 @@
 // The closed OpenBots sidebar's rail of avatars, in a real Chrome, with more bots than fit. Where the
 // list is cut short its avatars fade into the sidebar's background, in either theme, instead of being
 // sliced off with a hard edge; only at an end with more past it. The fade lets clicks through, and
-// the buttons under the list stay crisp and clickable.
+// the buttons under the list stay crisp and clickable. Those are New, Marketplace and you: no back arrow,
+// since the open sidebar's Build/Bots switch (or the shortcut) goes back to threads.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -170,8 +171,18 @@ describe.skipIf(!browser)("the OpenBots rail's fade", () => {
     expect(await page.eval<boolean[]>(`[...document.querySelectorAll('.bots-rail-foot > *')].map((b) => {
       const r = b.getBoundingClientRect();
       return b.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-    })`)).toEqual([true, true, true, true]);
+    })`)).toEqual([true, true, true]);
     await page.click(".bots-rail-foot [aria-label='New']");
     expect(await page.eval<boolean>(`!!document.querySelector('.bots-new-menu')`)).toBe(true);
+  }, 30_000);
+
+  test("the rail has no back arrow: the way back to threads is the open sidebar's Build/Bots switch", async () => {
+    const page = await open("dark", 0);
+    expect(await page.eval<string[]>(`[...document.querySelectorAll('.bots-rail-foot > *')].map((b) => b.getAttribute('aria-label'))`)).toEqual(["New", "Marketplace", "Settings"]);
+    expect(await page.eval<boolean>(`!!document.querySelector('.bots-rail-inner [aria-label="Back to threads"]')`)).toBe(false);
+    await page.click(".bots-rail-inner [aria-label='Open sidebar']");
+    await page.until(`!!document.querySelector('.bots-sidebar-inner .mode-switch')`);
+    await page.eval(`[...document.querySelectorAll('.bots-sidebar-inner .mode-pill')].find((b) => b.textContent === 'Build').click()`);
+    await page.until(`store.getState().botsOpen === false`);
   }, 30_000);
 });
