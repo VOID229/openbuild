@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -319,6 +319,13 @@ export function setStatus(botId: string, next: BotStatus) {
     turnStartedAt: next.state === "working" && !betweenTurns(next) ? (previous?.state === "working" && !betweenTurns(previous) ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
     lastActivityAt: now,
   });
+  // The group it's pointed at stands for it, as its own chat does otherwise (BotStatus.home).
+  if (next.state !== "idle") {
+    const home = targetOf(botId);
+    next = { ...next };
+    if (home) next.home = home;
+    else delete next.home;
+  }
   if (next.state === "idle") status.delete(botId);
   else status.set(botId, next);
   emit({ t: "status", botId, status: next });
@@ -360,6 +367,68 @@ function emitConversation(id: string) {
 
 export function directId(botId: string): string | undefined {
   return db.listConversations().find((c) => c.kind === "direct" && c.botIds[0] === botId)?.id;
+}
+
+/** The group a bot is pointed at (Bot.target), while it's still one it can be: undefined otherwise. */
+export function targetOf(botId: string): string | undefined {
+  const target = db.getBot(botId)?.target;
+  return target && validTarget(db.getConversation(target), botId) ? target : undefined;
+}
+
+/**
+ * Where a bot works when nothing says where: the group it's pointed at (Bot.target), else its own
+ * chat. Its check-ins, routines that name no chat, background results and the reports of what it
+ * started with no chat of its own go here, and so its status, typing and question cards do too.
+ */
+export function homeId(botId: string): string | undefined {
+  return targetOf(botId) ?? directId(botId);
+}
+
+/**
+ * Point a bot at one of its groups, or back at its own chat (undefined): see Bot.target. Said in
+ * both chats it concerns, by whoever did it. The same target again changes nothing.
+ */
+export function setTarget(botId: string, conversationId: string | undefined, { by }: { by?: Author } = {}): Bot {
+  const bot = db.getBot(botId);
+  if (!bot) throw new BotsError("No such bot.", 404);
+  const c = conversationId ? db.getConversation(conversationId) : undefined;
+  if (conversationId) {
+    if (!c) throw new BotsError("No such conversation.", 404);
+    if (c.kind === "direct" && c.botIds[0] === botId) conversationId = undefined;
+    else if (c.friend) throw new BotsError("A bot can't be pointed at a chat shared with a friend.");
+    else if (!validTarget(c, botId)) throw new BotsError(`${mentionName(bot.name)} can only be pointed at a group it's in.`);
+  }
+  const before = targetOf(botId);
+  if ((bot.target || undefined) === conversationId) return fullBot(botId)!;
+  db.putBot({ ...bot, target: conversationId });
+  emitBot(botId);
+  // Its status says where it now shows.
+  const now = getStatus(botId);
+  if (now) setStatus(botId, now);
+  // Only a target it couldn't use anymore went: nothing it did changed.
+  if (before === conversationId) return fullBot(botId)!;
+  const author: Author = by === "me" ? "me" : botId;
+  const name = mentionName(bot.name);
+  const say = (where: string | undefined, text: string, detail?: string) => where && postMessage(where, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text, ...(detail ? { detail } : {}), bot: botId } });
+  const group = (id: string) => db.getConversation(id)?.name?.trim() || "Untitled group";
+  if (conversationId) {
+    say(directId(botId), `${name} now works in a group`, group(conversationId));
+    say(conversationId, `${name} now works here`);
+  } else say(directId(botId), `${name} works in its own chat again`);
+  if (before && before !== conversationId) say(before, `${name} no longer works here`);
+  return fullBot(botId)!;
+}
+
+/** Bots pointed at a group they can't be pointed at anymore (they left it, or it's gone) go back to their own chats. */
+function dropTargets(conversationId: string) {
+  const c = db.getConversation(conversationId);
+  for (const bot of db.listBots()) {
+    if (bot.target !== conversationId || validTarget(c, bot.id)) continue;
+    db.putBot({ ...bot, target: undefined });
+    emitBot(bot.id);
+    const now = getStatus(bot.id);
+    if (now) setStatus(bot.id, now);
+  }
 }
 
 // ------------------------------------------------------------------ lifecycle
@@ -548,6 +617,11 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
     bot.effort = patch.effort;
   }
   if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, scope: patch.threads.scope === "all" || patch.threads.scope === "exclude" ? patch.threads.scope : "choose", projects: strings(patch.threads.projects, 200), excluded: strings(patch.threads.excluded, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true, others: patch.threads.others === true };
+  if ("target" in patch) {
+    setTarget(id, typeof patch.target === "string" && patch.target ? patch.target : undefined, { by: opts.by });
+    Object.assign(bot, { target: db.getBot(id)?.target });
+    before.target = bot.target;
+  }
   if (patch.primary) {
     if (bot.retiredAt) throw new BotsError(`${bot.name} is retired. Rehire it before making it primary.`);
     for (const other of db.listBots()) if (other.primary && other.id !== id) db.putBot({ ...other, primary: undefined });
@@ -575,7 +649,7 @@ export function rememberModelNames(models: { provider: string; id: string; name?
 
 /** Fields read whole by settingChanges, and ones that aren't settings worth a line (or are said elsewhere). */
 const HANDLED = new Set(["model", "effort", "fallbackModels", "noFallbacks", "proactivity", "computer", "threads", "name", "primary", "role"]);
-const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look", "formerNames"]);
+const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look", "formerNames", "target"]);
 const CHECK_INS: Record<string, string> = { off: "off", low: "every 8 hours", normal: "every 3 hours", high: "every hour" };
 const THREAD_FLAGS = [
   ["others", "control others' threads"],
@@ -829,7 +903,7 @@ export function settleChangeNotes(botId: string, shown: ChangeNote[]) {
  */
 export function tellPrimary(text: string, about?: string) {
   const primary = db.listBots().find((b) => b.primary);
-  const conversationId = primary && primary.id !== about ? directId(primary.id) : undefined;
+  const conversationId = primary && primary.id !== about ? homeId(primary.id) : undefined;
   if (primary && conversationId) wakeUp(primary.id, { kind: "note", conversationId, text });
 }
 
@@ -1294,7 +1368,10 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   }
   db.putConversation(c);
   emitConversation(id);
-  if (patch.botIds && c.kind === "group") settlePolls(id);
+  if (patch.botIds && c.kind === "group") {
+    settlePolls(id);
+    dropTargets(id);
+  }
   if (c.friend && !c.friend.ended && c.botIds.join() !== before) friendHooks.members(c);
   if ("section" in patch) pruneSections(c.section);
   return conversationView(id)!;
@@ -1315,6 +1392,7 @@ export function deleteConversation(id: string) {
   if (c.friend && !c.friend.ended) friendHooks.left(c);
   db.deleteConversation(id);
   emit({ t: "conversation-deleted", id });
+  dropTargets(id);
   pruneSections();
 }
 
@@ -1690,10 +1768,14 @@ export function stopConversation(conversationId: string, botId?: string): string
   return haltBots(conversationId, botId ? [botId] : c.botIds.filter((id) => workingIn(c, id)));
 }
 
-/** Whether a stop in this conversation is for this bot: at work there or with a message of it next in line, or anywhere for its own chat. */
+/**
+ * Whether a stop in this conversation is for this bot: at work there or with a message of it next in
+ * line, or anywhere for the chat that stands for it (its own, or the group it's pointed at).
+ */
 function workingIn(c: db.StoredConversation, botId: string): boolean {
   const now = getStatus(botId);
-  return c.kind === "direct" || now?.conversationId === c.id || !!now?.waiting?.includes(c.id);
+  const target = targetOf(botId);
+  return (target ? c.id === target : c.kind === "direct") || now?.conversationId === c.id || !!now?.waiting?.includes(c.id);
 }
 
 /** Whether the bot's turn in a conversation is one nobody is waiting on (see Hooks.background). */
@@ -2215,7 +2297,8 @@ export function tick(busy: (botId: string) => boolean) {
   closeQuietHuddles(now, busy);
   clearOldTodos(now);
   for (const { botId, routine } of db.dueRoutines(now)) {
-    const conversationId = routine.conversationId || directId(botId);
+    // One that reports to the bot's own chat (where it was made, say) follows the bot to its group.
+    const conversationId = !routine.conversationId || routine.conversationId === directId(botId) ? homeId(botId) : routine.conversationId;
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;
     if (!active(botId) || !conversation?.botIds.includes(botId)) {
       db.putRoutine(botId, { ...routine, enabled: false, nextRunAt: undefined });
@@ -2259,7 +2342,7 @@ export function tick(busy: (botId: string) => boolean) {
     db.setValue(key, now + every * 60 * 60 * 1000 * (0.75 + Math.random() * 0.5));
     wakeUp(bot.id, {
       kind: "heartbeat",
-      conversationId: directId(bot.id),
+      conversationId: homeId(bot.id),
       text: "Nobody has messaged you in a while. Look at your memory, routines and recent chats. If something is worth telling the user, send it. If not, reply [silent].",
     });
   }

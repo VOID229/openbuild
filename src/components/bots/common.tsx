@@ -138,7 +138,9 @@ export const useAway = (conversation: Pick<Conversation, "id" | "botIds" | "kind
  */
 export function useAwayLines(conversationId: string, botId: string | undefined): string[] | undefined {
   const key = useBots((s) => {
-    if (!botId || !awayFrom(s.status[botId], conversationId) || s.typing[conversationId]?.includes(botId)) return "";
+    const conversation = s.conversations.find((c) => c.id === conversationId);
+    // A bot's own chat says nothing of its work elsewhere while it's pointed at a group (awayIn): that group does.
+    if (!botId || !(conversation ? awayIn(conversation, s.status[botId]) : awayFrom(s.status[botId], conversationId)) || s.typing[conversationId]?.includes(botId)) return "";
     return awayLines(conversationId, botId, s.status[botId], { conversations: s.conversations, bots: s.bots, typing: s.typing, shown: s.shown[botId] }).join("\n");
   });
   return useMemo(() => (key ? key.split("\n") : undefined), [key]);
@@ -263,12 +265,13 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   // A group's member busy in a chat that has nothing to do with this one dozes here (busyBots): no
   // dots or reading of that work either.
   const shared = useDots(conversation.botIds);
-  const here = useBusyBots(conversation.kind === "direct" ? undefined : conversation);
-  const ownDots = useMemo(() => (conversation.kind === "direct" ? shared : shared.map((d, i) => d && here.includes(conversation.botIds[i]!))), [shared, here, conversation.kind, conversation.botIds]);
+  // A bot's own chat is the bot, busy anywhere, unless it's pointed at a group (activity.ts, homeHere): the same filter then holds it to its work there.
+  const here = useBusyBots(conversation);
+  const ownDots = useMemo(() => shared.map((d, i) => d && here.includes(conversation.botIds[i]!)), [shared, here, conversation.botIds]);
   const dots = still ? NO_DOTS : ownDots;
   if (still) [alive, busy, track, working] = [false, false, false, undefined];
   const allReads = useReading(conversation.botIds);
-  const reads = useMemo(() => (conversation.kind === "direct" ? allReads : allReads.map((r, i) => r && here.includes(conversation.botIds[i]!))), [allReads, here, conversation.kind, conversation.botIds]);
+  const reads = useMemo(() => allReads.map((r, i) => r && here.includes(conversation.botIds[i]!)), [allReads, here, conversation.botIds]);
   // At work in another chat: calmer, here.
   const aways = useAway(conversation);
   const away = still ? undefined : aways;

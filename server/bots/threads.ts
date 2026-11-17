@@ -407,10 +407,10 @@ export async function tell(watch: Pick<Watch, "botId" | "conversationId">, text:
   // A retired bot's threads keep running, and report to the primary in its own chat until the bot is rehired.
   if (bot.retiredAt) {
     const primary = db.listBots().find((b) => b.primary && !b.retiredAt);
-    if (primary) wake(primary.id, { kind: "note", conversationId: svc.directId(primary.id), text: retiredReport(bot, text) });
+    if (primary) wake(primary.id, { kind: "note", conversationId: svc.homeId(primary.id), text: retiredReport(bot, text) });
     return;
   }
-  const conversationId = watch.conversationId && db.getConversation(watch.conversationId) ? watch.conversationId : svc.directId(bot.id);
+  const conversationId = watch.conversationId && db.getConversation(watch.conversationId) ? watch.conversationId : svc.homeId(bot.id);
   wake(bot.id, { kind: "note", conversationId, text });
 }
 
@@ -538,7 +538,7 @@ async function follow(watch: Watch) {
       return new Map();
     });
     await tell(watch, [batch.take(), finished, queued.get(watch.botId)].filter(Boolean).join("\n\n"));
-    for (const [botId, note] of queued) if (botId !== watch.botId) await tell({ botId, conversationId: getFocus(botId) ?? svc.directId(botId) }, note);
+    for (const [botId, note] of queued) if (botId !== watch.botId) await tell({ botId, conversationId: getFocus(botId) ?? svc.homeId(botId) }, note);
   } finally {
     batch.cancel();
     following.delete(watch.runId);
@@ -574,7 +574,7 @@ export function resumeWatches() {
 }
 
 function startFollowing(botId: string, threadId: string, runId: string) {
-  const conversationId = getFocus(botId) ?? svc.directId(botId);
+  const conversationId = getFocus(botId) ?? svc.homeId(botId);
   const watch: Watch = { runId, threadId, botId, conversationId, told: [] };
   saveWatch(watch);
   void follow(watch).catch((err) => console.error("[bots] Following a thread failed:", err));
@@ -775,7 +775,7 @@ botThreadHooks.closed = (chat, pr, botId) => {
 
 /** Shows in the bot's conversation, so the user can see what it did with their threads. */
 function record(botId: string, text: string, detail: string, threadId?: string, pullUrl?: string) {
-  const conversationId = getFocus(botId) ?? svc.directId(botId);
+  const conversationId = getFocus(botId) ?? svc.homeId(botId);
   if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}), ...(pullUrl ? { pullUrl } : {}) } });
 }
 
@@ -982,7 +982,7 @@ async function start(botId: string, p: Record<string, unknown>) {
   const now = Date.now();
   const title = clip((typeof p.title === "string" && p.title.trim()) || prompt.split("\n")[0]!, 80);
   // Which bot started it and where, so that conversation can list it while it works (BotDetails).
-  const conversation = getFocus(botId) ?? svc.directId(botId);
+  const conversation = getFocus(botId) ?? svc.homeId(botId);
   const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", ...(conversation ? { startedBy: { bot: botId, conversation } } : {}), runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), ...(remoteControl ? { remoteControl } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
   // Before the turn starts, so the status names it by these words from the first moment it waits.
   noteAbout(chat.id, p.about);
@@ -1147,7 +1147,7 @@ async function deliver(botId: string, p: Record<string, unknown>) {
       if ((await pendingRuns(found.id)).some((r) => r.id === run.id)) return;
       const notes = await drainQueue(found.id);
       const note = notes.get(botId);
-      if (note) void tell({ botId, conversationId: getFocus(botId) ?? svc.directId(botId) }, note);
+      if (note) void tell({ botId, conversationId: getFocus(botId) ?? svc.homeId(botId) }, note);
     };
     const settings = Object.fromEntries(SETTINGS.filter((key) => given(p[key])).map((key) => [key, p[key]]));
     let attempt: SteerAttempt;

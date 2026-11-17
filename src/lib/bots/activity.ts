@@ -117,6 +117,12 @@ export const typingAnywhere = (typing: Record<string, string[] | undefined>, bot
 /** Reading something right now (BotStatus.reading): its mascot reads, line by line, wherever it shows. */
 export const reading = (st: BotStatus | undefined) => visiblyWorking(st) && !!st!.reading;
 
+/**
+ * The chat that stands for the bot, busy anywhere and showing where: its own chat, or the group it's
+ * pointed at (Bot.target, BotStatus.home). Its own chat then shows only its work there, as a group does.
+ */
+export const homeHere = (conversation: Pick<Conversation, "id" | "kind">, st: BotStatus | undefined) => (st?.home ? st.home === conversation.id : conversation.kind === "direct");
+
 /** Working in this chat, quietly or not. */
 export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;
 
@@ -133,7 +139,7 @@ export function busyBots(conversation: Pick<Conversation, "id" | "botIds" | "kin
   return conversation.botIds.filter((id) => {
     const st = status[id];
     if (here.includes(id)) return true;
-    if (conversation.kind === "direct") return visiblyWorking(st);
+    if (homeHere(conversation, st)) return visiblyWorking(st);
     return workingHere(st, conversation.id) || holding(st, conversation.id) || awayIn(conversation, st);
   });
 }
@@ -152,7 +158,7 @@ export const awayFrom = (st: BotStatus | undefined, conversationId: string) => v
  * about it, a side chat opened from there). Work on anything else shows nothing there.
  */
 export const awayIn = (conversation: Pick<Conversation, "id" | "kind">, st: BotStatus | undefined) =>
-  awayFrom(st, conversation.id) && (conversation.kind === "direct" || st!.from === conversation.id);
+  awayFrom(st, conversation.id) && (homeHere(conversation, st) || st!.from === conversation.id);
 
 /** The conversation's bots at work in another chat in a way it shows (`awayIn`), and where, but not one typing here. */
 export function elsewhere(conversation: Pick<Conversation, "id" | "botIds" | "kind">, status: Statuses, typing: Record<string, string[] | undefined> = {}): { botId: string; conversationId?: string }[] {
@@ -320,7 +326,7 @@ export function stoppable(conversation: Pick<Conversation, "id" | "botIds" | "ki
   return conversation.botIds.filter((id) => {
     const st = status[id];
     // One still deciding has nothing to stop yet that anyone can see, nor one only waiting on threads: they're the threads' to stop.
-    return visiblyWorking(st) && !(st!.threads && !st!.jobs) && (conversation.kind === "direct" || st!.conversationId === conversation.id || (!!st!.waiting?.includes(conversation.id) && !st!.undecided?.includes(conversation.id)));
+    return visiblyWorking(st) && !(st!.threads && !st!.jobs) && (homeHere(conversation, st) || st!.conversationId === conversation.id || (!!st!.waiting?.includes(conversation.id) && !st!.undecided?.includes(conversation.id)));
   });
 }
 

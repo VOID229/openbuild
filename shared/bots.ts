@@ -124,6 +124,11 @@ export interface BotStatus {
   from?: string;
   /** Its turn is one of its routines: this one, by title. */
   routine?: string;
+  /**
+   * The group it's pointed at (Bot.target): that group stands for it the way its own chat does
+   * otherwise, showing it busy wherever it works, and its own chat shows only its work there.
+   */
+  home?: string;
   since?: number;
 }
 
@@ -286,7 +291,21 @@ export interface Bot {
   retiredFrom?: string[];
   /** The routines that were on when it was retired, by id. Retiring paused them, and they stay paused when it's rehired. */
   retiredRoutines?: string[];
+  /**
+   * The group chat it mainly works in, by id: its target. While it's set, what would go to its own chat
+   * goes there instead (check-ins, routines that name no chat, background results, thread reports and
+   * the questions they bring), and that group shows it at work wherever it is, as its own chat does
+   * otherwise (BotStatus.home). A message the user writes in its own chat is still answered there.
+   * Unset: its own chat, as ever. Only one of its groups, never one shared with a friend (validTarget).
+   */
+  target?: string;
 }
+
+/**
+ * Whether a bot can be pointed at this conversation (Bot.target): one of its groups, and not one shared
+ * with a friend, where its routines and reports would reach someone who isn't the user.
+ */
+export const validTarget = (c: Pick<Conversation, "kind" | "botIds" | "friend"> | undefined, botId: string): boolean => !!c && c.kind === "group" && !c.friend && c.botIds.includes(botId);
 
 /** Retired (see Bot.retiredAt): still there, but out of the team until it's rehired. */
 export const isRetired = (bot: Pick<Bot, "retiredAt"> | undefined): boolean => !!bot?.retiredAt;

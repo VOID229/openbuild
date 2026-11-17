@@ -13,7 +13,7 @@ import { OptionSelect } from "../ModelSelect";
 import { openSettingsPage, settingsUp } from "../../lib/pages";
 import { SettingsHeading } from "../primitives";
 import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
-import { BotMachines, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
+import { BotMachines, BotModel, BotModelSelect, BotWorksIn, DefaultFallbacks, WORKS_IN_DESC } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, LookPicker, RetireBotDialog } from "./BotDialogs";
 import { Instructions, Members, RoleField, Routines } from "./BotDetails";
@@ -142,6 +142,13 @@ function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversat
             <p className="setting-desc">How often it checks whether anything's worth telling you, outside quiet hours. Each check uses its model.</p>
           </div>
           <OptionSelect label="Check in on its own" value={bot.proactivity ?? "normal"} options={CHECK_INS} onChange={(proactivity) => st.updateBot(bot.id, { proactivity })} />
+        </div>
+        <div className="setting-row">
+          <div className="setting-text">
+            <div className="setting-label">Works in</div>
+            <p className="setting-desc">{WORKS_IN_DESC}</p>
+          </div>
+          <BotWorksIn bot={bot} />
         </div>
       </section>
 

@@ -253,7 +253,7 @@ export async function run<T>(
     if (first.ok) return first.value;
     throw first.error;
   }
-  const conversationId = opts.conversationId ?? svc.directId(botId);
+  const conversationId = opts.conversationId ?? svc.homeId(botId);
   // Stopped meanwhile (a call that can't be interrupted still runs to its end), nowhere to report to
   // (the bot is gone), or enough out already: the call is waited out, as any call used to be.
   if (abort.signal.aborted || !conversationId || !db.getBot(botId) || runningJobs(botId).length >= JOB_CAP) {
@@ -338,7 +338,7 @@ function finish(botId: string, id: number, outcome: { text: string } | { error: 
 
 /** Wake the bot with a job's result, where the job was started, or in its own chat if that one is gone. */
 function tell(botId: string, job: Job, text: string) {
-  const origin = db.getConversation(job.conversationId)?.botIds.includes(botId) ? job.conversationId : svc.directId(botId);
+  const origin = db.getConversation(job.conversationId)?.botIds.includes(botId) ? job.conversationId : svc.homeId(botId);
   const note = resultNote(job, text, origin);
   change(botId, job.id, (j) => {
     j.told = true;
@@ -461,7 +461,7 @@ export function recover() {
         j.endedAt = Date.now();
         j.told = true;
       });
-      const origin = db.getConversation(job.conversationId)?.botIds.includes(bot.id) ? job.conversationId : svc.directId(bot.id);
+      const origin = db.getConversation(job.conversationId)?.botIds.includes(bot.id) ? job.conversationId : svc.homeId(bot.id);
       if (!origin) continue;
       const queued = job.followUps.length ? ` You had queued behind it: ${job.followUps.join("; ")}.` : "";
       svc.wakeBot(bot.id, { kind: "note", conversationId: origin, text: `Job ${job.id} (${describe(job)}, for “${job.label}”) was cut off when OpenBuild restarted, so it has no result.${queued} Run it again if it still matters, and tell ${svc.getSettings().user?.name || "the user"} if they're waiting on it; otherwise stay [silent].` });
