@@ -354,7 +354,7 @@ function setStatus(botId: string, next: BotStatus) {
   if (next.state === "idle") {
     const jobs = waitingLine(botId);
     const threads = threadWait(botId);
-    const conversationId = jobs?.conversationId ?? threads?.conversationId ?? svc.directId(botId);
+    const conversationId = jobs?.conversationId ?? threads?.conversationId ?? svc.homeId(botId);
     if (jobs || threads) return svc.setStatus(botId, { state: "working", activity: (jobs ?? threads)!.activity, conversationId, jobs: jobs?.jobs, threads: threads?.threads, since: jobs?.since ?? Date.now() });
   }
   const waiting = next.state === "idle" ? [] : waitingIn(botId);
@@ -724,7 +724,7 @@ function noteRan(botId: string, conversationId: string | undefined, chain: (stri
   if (last?.model === on.model) return;
   const recovered = !!last && last.index > index;
   if (index === 0 && !recovered) return;
-  const where = conversationId ?? svc.directId(botId);
+  const where = conversationId ?? svc.homeId(botId);
   if (!where || !on.model) return;
   console.info(`[bots] ${botId} model switch ${last?.model ?? "none"} → ${on.model} (${recovered ? "primary retry succeeded" : "fallback after model failure"})`);
   const slash = on.model.indexOf("/");
@@ -1085,7 +1085,7 @@ async function run(botId: string, all: Wake[]) {
 async function runTurn(botId: string, all: Wake[]) {
   const jobs = all.filter((j) => !j.reaction || stillReacted(j.reaction));
   if (!jobs.length || svc.retired(botId)) return;
-  const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.directId(botId);
+  const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.homeId(botId);
   const lane = laneOf(conversationId);
   const key = mindKey(botId, lane);
   // A reaction gets a reaction back as a rule, not a message, so the chat shows nothing unless the bot starts typing.
@@ -1288,7 +1288,7 @@ async function runTurn(botId: string, all: Wake[]) {
     setStatus(botId, { state: "error", error: redactSecrets(message), provider: provider || undefined, since: Date.now() });
     const detail = shownReplyError(message, provider);
     if (provider || detail !== message.trim()) console.warn(`[bots] ${botId} couldn't reply:`, redactSecrets(message));
-    const where = conversationId ?? svc.directId(botId);
+    const where = conversationId ?? svc.homeId(botId);
     const last = db.getValue<number>(`told:${botId}`) ?? 0;
     if (where && Date.now() - last > 60_000) {
       db.setValue(`told:${botId}`, Date.now());
@@ -1809,7 +1809,7 @@ export function startBots() {
       if (!db.getBot(computerId)) return;
       wake(computerId, {
         kind: "note",
-        conversationId: svc.directId(computerId),
+        conversationId: svc.homeId(computerId),
         text: `A process on your computer finished: ${proc.name || proc.command} (exit ${proc.exitCode ?? "?"}).\n${tail.slice(-2000)}\nTell the user if it matters.`,
       });
     });

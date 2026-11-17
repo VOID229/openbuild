@@ -394,6 +394,7 @@ export function contextSections(botId: string): Record<string, string> {
       ? `Other bots (manage_bot team gives one's full instructions):\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? ", primary" : ""}: ${roleOf(b)}`).join("\n")}`
       : "There are no other bots yet.",
     away.length ? `Retired, off the team until rehired (manage_bot rehire): ${away.map((b) => `${b.name} (${b.id.slice(0, 8)})`).join(", ")}` : "",
+    targetLine(botId),
     `You're in ${chats.length} ${chats.length === 1 ? "chat" : "chats"}; manage_bot conversations lists them with their short ids.${shared.length ? ` Shared with friends, where you answer separately and anything you write goes to them:\n${shared.map((c) => conversationLine(c, user)).join("\n")}` : ""}`,
     threads.brief(bot),
     plugins.guide(bot),
@@ -407,6 +408,14 @@ export function contextSections(botId: string): Record<string, string> {
     openbots_routines: routines,
     openbots_memory: memory,
   };
+}
+
+/** Where the bot works when nothing says where, while it's pointed at a group (Bot.target). Nothing otherwise. */
+function targetLine(botId: string): string {
+  const target = svc.targetOf(botId);
+  const c = target ? db.getConversation(target) : undefined;
+  if (!c) return "";
+  return `You're pointed at the group “${conversationTitle(c, db.listBots())}” (${c.id.slice(0, 8)}): you mainly work there. Your check-ins, routines without a chat of their own, background results, thread reports and questions go there, not to your own chat; a message the user writes in your own chat you still answer there. When the user wants you back in your own chat, manage_bot target with conversation own.`;
 }
 
 /** Longest a teammate's role runs in the roster: as long as a role can be. */
@@ -984,7 +993,7 @@ export const LOOKUP_MS = 5 * 60_000;
 export function background(botId: string, p: Record<string, unknown>) {
   const task = String(p.task ?? "").trim().slice(0, 4000);
   if (!task) throw new svc.BotsError("Say what to check.");
-  const origin = getFocus(botId) ?? svc.directId(botId);
+  const origin = getFocus(botId) ?? svc.homeId(botId);
   if (!origin) throw new svc.BotsError("Say which conversation.");
   const request = svc.requestIn(botId, origin);
   const started = startJob(botId, "lookup", async (signal) => {
@@ -1109,6 +1118,17 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (!db.getBot(target)?.retiredAt) throw new svc.BotsError(`${db.getBot(target)?.name ?? "That bot"} isn't retired. Retire it first with manage_bot retire: only a retired bot can be deleted, and deleting is for good. Nothing changed.`);
     return svc.deleteBot(target, { by: botId }).then(() => ({ ok: true }));
   }
+  if (action === "target") {
+    if (!self.primary && target !== botId) throw new svc.BotsError("You can only point yourself at a group.");
+    const given = typeof p.conversation === "string" ? p.conversation.trim() : "";
+    const own = !given || /^(own|none|solo|direct|off|clear)$/i.test(given);
+    const conversationId = own ? undefined : resolveConversation(target, given);
+    const bot = svc.setTarget(target, conversationId, { by: botId });
+    const where = bot.target ? db.getConversation(bot.target) : undefined;
+    return where
+      ? { target: where.id.slice(0, 8), name: where.name || "Untitled group", note: `${bot.name} now works mainly in this group: check-ins, routines without a chat of their own, background results, thread reports and questions go there instead of ${bot.id === botId ? "your" : "its"} own chat. Messages the user writes in ${bot.id === botId ? "your" : "its"} own chat are still answered there.` }
+      : { target: null, note: `${bot.name} works in ${bot.id === botId ? "your" : "its"} own chat again.` };
+  }
   if (action === "update") {
     const patch: Partial<Bot> = {};
     if (typeof p.name === "string") patch.name = p.name;
@@ -1135,7 +1155,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
     // The whole update is one write, after every model it names checks out.
     return checkModels(modelChange(p)).then((settings) => modelSummary(svc.updateBot(target, { ...patch, ...settings }, { conversationId: where })));
   }
-  throw new svc.BotsError("action is create, create_group, update, retire, rehire, delete, add_to_group, remove_from_group, models, defaults, computers, team or conversations.");
+  throw new svc.BotsError("action is create, create_group, update, target, retire, rehire, delete, add_to_group, remove_from_group, models, defaults, computers, team or conversations.");
 }
 
 /**

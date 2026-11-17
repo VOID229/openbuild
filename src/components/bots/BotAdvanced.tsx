@@ -5,10 +5,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { providerName, providerOf } from "../../lib/models";
 import { useBotModels } from "../../lib/bots/models";
 import { useBots } from "../../lib/bots/store";
+import { useShallow } from "zustand/react/shallow";
 import type { Bot } from "../../lib/bots/types";
 import { loadTargets, showDevice, targetNote, targetStatus, targetSummary } from "../../lib/bots/targets";
 import { isLocalWorkspace, workspaceName } from "../../lib/bots/workspace";
-import { fallbackMode, type ComputerTarget, type FallbackMode } from "../../../shared/bots";
+import { fallbackMode, validTarget, type ComputerTarget, type FallbackMode } from "../../../shared/bots";
 import { cx } from "../../lib/ui";
 import { ModelMenu, OptionSelect } from "../ModelSelect";
 import { BrandIcon, IconButton, Popover } from "../primitives";
@@ -306,6 +307,22 @@ function Group({ title, hint, card = true, className, children }: { title: strin
   );
 }
 
+export const WORKS_IN_DESC = "Where it mainly works. Pointed at a group, its check-ins, routines, reports, questions and status show there instead of its own chat. It still answers you in its own chat when you write there.";
+
+/** The value that stands for the bot's own chat in the Works in menu: no target (Bot.target). */
+const OWN_CHAT = "";
+
+/**
+ * Where a bot mainly works (Bot.target): its own chat, or one of the groups it's in. A chat shared with
+ * a friend isn't offered. The bot can change it too (manage_bot target).
+ */
+export function BotWorksIn({ bot }: { bot: Bot }) {
+  const groups = useBots(useShallow((s) => s.conversations.filter((c) => validTarget(c, bot.id)).map((c) => `${c.id}\n${c.name || "Untitled group"}`)));
+  const options = [{ value: OWN_CHAT, label: "Its own chat" }, ...groups.map((g) => ({ value: g.slice(0, g.indexOf("\n")), label: g.slice(g.indexOf("\n") + 1) }))];
+  const value = bot.target && options.some((o) => o.value === bot.target) ? bot.target : OWN_CHAT;
+  return <OptionSelect label="Works in" value={value} options={options} disabled={!!bot.retiredAt || options.length < 2} onChange={(target) => useBots.getState().updateBot(bot.id, { target })} />;
+}
+
 /**
  * The details panel's Advanced tab: the same settings as Settings → Bots, in three groups (its model,
  * the machines it reaches, what it may do in OpenBuild). The model's settings stack, each label over a
@@ -339,6 +356,14 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
             </div>
           )}
         />
+      </Group>
+      <Group title="Works in">
+        <div className="setting-row">
+          <div className="setting-label" data-tooltip={WORKS_IN_DESC} data-tooltip-side="left">
+            Works in
+          </div>
+          <BotWorksIn bot={bot} />
+        </div>
       </Group>
       <Group title="Machines" hint={MACHINES_DESC} card={false}>
         <BotMachines compact />
