@@ -705,9 +705,14 @@ test("a bot that's only waiting on jobs shows what it's waiting on where they st
   const waiting = { b: { state: "working" as const, activity: "Waiting on: Building the release", conversationId: "c1", jobs: 1 } };
   const working = { b: { state: "working" as const, activity: "Building the release", conversationId: "c1" } };
   const there = { id: "c1", botIds: ["b"], kind: "group" as const };
+  const own = { id: "own", botIds: ["b"], kind: "direct" as const };
   const other = { id: "c2", botIds: ["b"], kind: "group" as const };
   expect(showWorking("c1", waiting, [])).toEqual(["b"]);
-  expect(elsewhere(other, working)).toEqual([{ botId: "b", conversationId: "c1" }]);
+  // Its own chat says where it's at work, but not where it's only waiting on its jobs.
+  expect(elsewhere(own, working)).toEqual([{ botId: "b", conversationId: "c1" }]);
+  expect(elsewhere(own, waiting)).toEqual([]);
+  // Another group it's in has nothing to do with either.
+  expect(elsewhere(other, working)).toEqual([]);
   expect(elsewhere(other, waiting)).toEqual([]);
   // The stop button still reaches it where its jobs are, and anywhere in its own chat.
   expect(stoppable(there, waiting)).toEqual(["b"]);

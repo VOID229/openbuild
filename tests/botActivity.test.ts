@@ -9,9 +9,9 @@ import type { BotStatus, Conversation } from "../src/lib/bots/types";
 const solo = { id: "solo", kind: "direct", botIds: ["egg"] } as Conversation;
 const group = { id: "group", kind: "group", botIds: ["egg", "other"] } as Conversation;
 
-test("work in another chat keeps the bot busy everywhere, but never shows as thinking in the solo chat", () => {
+test("work in a group keeps the bot busy in its own chat, but never shows as thinking there", () => {
   const status: Record<string, BotStatus> = { egg: { state: "working", conversationId: "group", activity: "Reading a file" } };
-  // The sidebar (and the header) animate a busy bot in every chat it's in: in groups, just that member.
+  // The sidebar (and the header) animate a busy bot in its own chat and the group it's at work in: in the group, just that member.
   expect(busyBots(solo, status, {})).toEqual(["egg"]);
   expect(busyBots(group, status, {})).toEqual(["egg"]);
   // The solo chat says where it's busy, with no working line of its own.
@@ -20,6 +20,33 @@ test("work in another chat keeps the bot busy everywhere, but never shows as thi
   // The group it's actually working in shows its working line.
   expect(showWorking("group", status, [])).toEqual(["egg"]);
   expect(elsewhere(group, status)).toEqual([]);
+});
+
+test("a group shows a member busy only with work of its own, never for work in a chat it has nothing to do with", () => {
+  const other = { id: "other-group", kind: "group", botIds: ["egg", "other"] } as Conversation;
+  const side = { id: "side", kind: "side", botIds: ["egg", "other"] } as Conversation;
+  // At work in its own chat (or a group, or a side chat): its own chat is the bot, so it's busy there,
+  // but every other group or side chat it's in shows it dozing, with nothing said of it.
+  for (const where of ["solo", "group", "side"]) {
+    const status: Record<string, BotStatus> = { egg: { state: "working", conversationId: where, activity: "Running the tests" } };
+    expect(busyBots(solo, status, {})).toEqual(["egg"]);
+    expect(busyBots(other, status, {})).toEqual([]);
+    expect(elsewhere(other, status)).toEqual([]);
+    if (where !== "side") expect(busyBots(side, status, {})).toEqual([]);
+    if (where !== "group") expect(busyBots(group, status, {})).toEqual([]);
+  }
+  // Typing there, or holding on with a message there that names it next, it's busy there.
+  const working: BotStatus = { state: "working", conversationId: "solo", activity: "Running the tests" };
+  expect(busyBots(other, { egg: working }, { "other-group": ["egg"] })).toEqual(["egg"]);
+  expect(busyBots(other, { egg: { ...working, waiting: ["other-group"] } }, {})).toEqual(["egg"]);
+  expect(showWorking("other-group", { egg: { ...working, waiting: ["other-group"] } }, [])).toEqual(["egg"]);
+  // A message to the whole group it hasn't decided on doesn't.
+  expect(busyBots(other, { egg: { ...working, waiting: ["other-group"], undecided: ["other-group"] } }, {})).toEqual([]);
+  // At work elsewhere on this group's account (a handoff from it, a side chat opened from it): away here.
+  const forIt: Record<string, BotStatus> = { egg: { ...working, conversationId: "side", from: "other-group" } };
+  expect(busyBots(other, forIt, {})).toEqual(["egg"]);
+  expect(elsewhere(other, forIt)).toEqual([{ botId: "egg", conversationId: "side" }]);
+  expect(busyBots(group, forIt, {})).toEqual([]);
 });
 
 test("quiet work in the solo chat animates its mascot everywhere, with no working line", () => {

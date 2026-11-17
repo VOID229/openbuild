@@ -2,7 +2,7 @@
 import { Star } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { awayFrom, awayLines, busyBots, plainPhase, plainPhaseEnds, reading, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
+import { awayFrom, awayIn, awayLines, busyBots, plainPhase, plainPhaseEnds, reading, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -28,8 +28,8 @@ export function useSlow(busy: boolean, delay = 1200) {
 
 const NONE: string[] = [];
 
-/** The conversation's bots at work (see `busyBots`). In a group, these are awake and the rest doze. */
-export function useBusyBots(conversation: Pick<Conversation, "id" | "botIds"> | undefined): string[] {
+/** The conversation's bots at work, as it shows them (see `busyBots`). In a group, these are awake and the rest doze. */
+export function useBusyBots(conversation: Pick<Conversation, "id" | "botIds" | "kind"> | undefined): string[] {
   return useBots(useShallow((s) => (conversation ? busyBots(conversation, s.status, s.typing) : NONE)));
 }
 
@@ -128,9 +128,9 @@ export function useDots(botIds: readonly string[]): boolean[] {
   return useMemo(() => phases.map((phase) => phase === "dots"), [phases]);
 }
 
-/** Whether each of a conversation's bots is at work in another chat (`awayFrom`), and not typing here: its mascot is calmer here. */
-export const useAway = (conversation: Pick<Conversation, "id" | "botIds">): boolean[] =>
-  useBots(useShallow((s) => conversation.botIds.map((id) => awayFrom(s.status[id], conversation.id) && !s.typing[conversation.id]?.includes(id))));
+/** Whether each of a conversation's bots is at work in another chat in a way it shows (`awayIn`), and not typing here: its mascot is calmer here. */
+export const useAway = (conversation: Pick<Conversation, "id" | "botIds" | "kind">): boolean[] =>
+  useBots(useShallow((s) => conversation.botIds.map((id) => awayIn(conversation, s.status[id]) && !s.typing[conversation.id]?.includes(id))));
 
 /**
  * What a bot at work in another chat is doing there, in words for this one (activity.ts, awayLines),
@@ -260,10 +260,15 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
   // Three dots exactly when the chat's working row and header show them (useDots); never held still.
+  // A group's member busy in a chat that has nothing to do with this one dozes here (busyBots): no
+  // dots or reading of that work either.
   const shared = useDots(conversation.botIds);
-  const dots = still ? NO_DOTS : shared;
+  const here = useBusyBots(conversation.kind === "direct" ? undefined : conversation);
+  const ownDots = useMemo(() => (conversation.kind === "direct" ? shared : shared.map((d, i) => d && here.includes(conversation.botIds[i]!))), [shared, here, conversation.kind, conversation.botIds]);
+  const dots = still ? NO_DOTS : ownDots;
   if (still) [alive, busy, track, working] = [false, false, false, undefined];
-  const reads = useReading(conversation.botIds);
+  const allReads = useReading(conversation.botIds);
+  const reads = useMemo(() => (conversation.kind === "direct" ? allReads : allReads.map((r, i) => r && here.includes(conversation.botIds[i]!))), [allReads, here, conversation.kind, conversation.botIds]);
   // At work in another chat: calmer, here.
   const aways = useAway(conversation);
   const away = still ? undefined : aways;

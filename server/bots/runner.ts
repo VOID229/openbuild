@@ -317,9 +317,14 @@ function enqueue(botId: string, item: Wake) {
   void pump(botId);
 }
 
-/** Of waitingIn, the groups: every bot there gets each message and may well let it be, so it doesn't show holding on (see BotStatus.undecided). */
-function undecidedIn(waiting: string[]): string[] {
-  return waiting.filter((id) => db.getConversation(id)?.kind === "group");
+/**
+ * Of waitingIn, the groups with nothing waiting that names the bot: every bot there gets each message
+ * and may well let it be, so it doesn't show holding on (see BotStatus.undecided). One named there
+ * (Wake.named) does.
+ */
+function undecidedIn(botId: string, waiting: string[]): string[] {
+  const named = new Set((queue.get(botId) ?? []).filter((j: Wake) => j.kind === "messages" && j.named).map((j: Wake) => j.conversationId));
+  return waiting.filter((id) => db.getConversation(id)?.kind === "group" && !named.has(id));
 }
 
 /** Conversations whose messages wait for the bot to finish elsewhere. Reactions and routines don't need an answer shown. */
@@ -351,7 +356,7 @@ function setStatus(botId: string, next: BotStatus) {
     if (jobs || threads) return svc.setStatus(botId, { state: "working", activity: (jobs ?? threads)!.activity, conversationId, jobs: jobs?.jobs, threads: threads?.threads, since: jobs?.since ?? Date.now() });
   }
   const waiting = next.state === "idle" ? [] : waitingIn(botId);
-  const undecided = undecidedIn(waiting);
+  const undecided = undecidedIn(botId, waiting);
   // A message waiting in the chat it's working in isn't quiet work: the chat shows it busy until it gets there.
   // In a group, the bot is still to decide whether that one is its to answer too.
   const owed = !!next.quiet && !next.deciding && (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === next.conversationId);
