@@ -10,7 +10,7 @@ import { claudeBin, claudeEnv } from "./claude/install";
 import { codexBin, codexEnv } from "./codex/install";
 import { cursorBin, cursorEnv, modelSlug } from "./cursor/install";
 import { sessionPath as cursorSession } from "./cursor/sessions";
-import { fxBin, fxEnv } from "./fx/install";
+import { fxBin, fxEnv, providerNames, splitModel } from "./fx/install";
 import { grokBin, grokEnv } from "./grok/install";
 import { sessionDir as grokSessions } from "./grok/sessions";
 import { complete as opencodeComplete } from "./opencode-agent/sessions";
@@ -54,10 +54,14 @@ export const codexArgs = (r: CompleteRequest, files: string[]) => [
   ...files.flatMap((f) => ["--image", f]), "--", r.prompt,
 ];
 
-export const fxArgs = (r: CompleteRequest, files: string[]) => [
-  "ask", "--no-save", "--no-color", "--model", r.model.replace(/^fx\//, ""), "--system", r.system,
+/** `providers`: the ones fx knows, which tell "fx/<provider>/<model>" from an older "fx/<model>" id. */
+export const fxArgs = (r: CompleteRequest, files: string[], providers: string[] = []) => {
+  const { provider, model } = splitModel(r.model, providers);
+  return [
+  "ask", "--no-save", "--no-color", ...(provider ? ["--provider", provider] : []), "--model", model, "--system", r.system,
   ...(r.effort && r.effort !== "off" ? ["--effort", r.effort] : []), ...files.flatMap((f) => ["--image", f]), "--", r.prompt,
-];
+  ];
+};
 
 /** Plan mode is Grok's read-only one; images only go in as JSON content blocks. */
 export const grokArgs = (r: CompleteRequest) => [
@@ -99,7 +103,9 @@ export async function complete(r: CompleteRequest, signal: AbortSignal): Promise
     const files = images.map((image, i) => join(cwd, `image-${i}.${EXTENSIONS[image.mimeType] ?? "png"}`));
     await Promise.all(images.map((image, i) => Bun.write(files[i]!, Buffer.from(image.data, "base64"))));
     if (r.runtime === "codex") return await run([installed(codexBin(), "Codex"), ...codexArgs(r, files)], cwd, codexEnv(), signal);
-    return await run([installed(fxBin(), "fx"), ...fxArgs(r, files)], cwd, fxEnv(), signal);
+    const bin = installed(fxBin(), "fx");
+    const providers = await providerNames();
+    return await run([bin, ...fxArgs(r, files, providers)], cwd, fxEnv(), signal);
   } finally {
     await rm(cwd, { recursive: true, force: true });
     // Cursor can't run without saving a chat, and the sidebar imports its chats.

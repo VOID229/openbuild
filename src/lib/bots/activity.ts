@@ -376,6 +376,8 @@ export function threadProvider(chat: Pick<Chat, "runtime" | "messages">): string
     const parts = model.id.split("/");
     if (OPENCODE_PLANS.has(model.plan)) return "opencode";
     if (model.plan === "pi") return parts.length > 1 ? parts[0] : undefined;
+    // fx's own name for the Vercel AI Gateway ("fx/gateway/openai/gpt-5").
+    if (model.plan === "fx" && parts[1] === "gateway") return "vercel";
     if ((model.plan === "opencode" || model.plan === "fx" || model.plan === "hermes") && parts.length > 2) return parts[1];
   }
   return SERVED_BY[runtime];
