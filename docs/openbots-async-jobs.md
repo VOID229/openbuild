@@ -23,8 +23,9 @@ Three gaps were left for messages to bots.
 - **The tool call itself.** Pi can't hand a steer over until the step's calls return, and that is
   where the wait is long. This is what the job board below is for.
 
-Left as they are on purpose: a message in another chat than the one the turn is in (each chat has its
-own session, so it can't join that turn; it now frees the call holding the turn instead), unscoped
+Left as they are on purpose: a message in another chat than the one the turn is in (a turn answers
+in one chat, so it gets a turn of its own on the same session; it now frees the call holding the
+turn instead), unscoped
 group wakes, and notes such as a job's result, which get a turn of their own.
 
 The runner also follows which steered messages Pi has actually handed over (Pi announces each as a

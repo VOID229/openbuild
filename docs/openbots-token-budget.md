@@ -1,13 +1,30 @@
 # OpenBots session and context budgets
 
-The runner serializes turns per bot, but persists Pi sessions per **bot + full conversation id + execution lane**.
-Direct, group, and any friend conversation with a distinct conversation id have separate lanes.
-Friends use their explicit friend lane, with the existing restricted tool/auth scope retained.
-Changing a conversation's lane cannot reuse its earlier session or delivery ledger. The old bot-wide JSONL sessions are retained and never resumed by the
-new lane scheme. Auth, tools, extension selection, model/fallback selection and the durable
-SQLite assignment/change-note records remain shared as before; transcript context is isolated.
+The runner serializes turns per bot and keeps **one Pi session per bot** for all its own chats:
+its own chat and every group it is in (`runner.ts` `sessionHome`). A bot is one mind wherever it
+is talking: what it was told, said, ran and found out in one chat is in its context in the others,
+and switching chats neither restarts its Pi nor starts another session. The chat a turn is in is
+only where that turn came from and where its output goes. Each turn's prompt says which one
+(`Conversation <id> (<kind>, “<title>”), where this turn is and what you send goes:`), and
+`send_message`, `question` and `todo` act there unless given another conversation id. A to-do
+list still belongs to its chat, where the user watches it; the prompt carries the list of the
+turn's chat with its transcript and, after it, the lists of the bot's other chats under their
+conversations, up to 2,400 characters (a list past that is named with its progress only).
 
-Each lane has retained generations. The defaults are 8 MiB of JSONL or 24 hours per generation.
+From 2026-11-08 (#186) to 2026-11-17 sessions were kept per bot + conversation, which kept each
+chat's context small but meant a bot in a group knew nothing of what its user had just told it in
+its own chat. The shared session is the one the bot's own chat had (same directory), so it carries
+on from there; a group's old per-chat session is retained on disk and never resumed, like the
+bot-wide JSONL sessions from before #186. The session's cost is bounded by compaction (below), not
+by splitting it: a bot busy in several chats compacts sooner, and its summary is asked to say
+which conversation each thing belongs to.
+
+A chat shared with a friend is apart from all of this: the friend lane keeps its own Pi, tool/auth
+scope and a session per shared chat, nothing of it reaches the bot's own session and nothing of
+the bot's own chats (their to-do lists included) reaches it. Auth, tools, extension selection,
+model/fallback selection and the durable SQLite assignment/change-note records are shared as before.
+
+Each session directory (a bot's own, or one of its friend chats') has retained generations. The defaults are 8 MiB of JSONL or 24 hours per generation.
 These are soft caps: rotation is allowed only after a successful settled turn, with queue release
 completed. A failed or ambiguous turn removes the settled marker and suppresses rotation until
 successful recovery and a completed turn. A single large turn can exceed the size cap. Files are
@@ -37,7 +54,7 @@ the turn in one model call instead of one each (`docs/openbots-async-jobs.md`).
 The real-Pi test verifies effective settings, including a model override, without an inference.
 
 Transcript delivery fingerprints use the full message object and conversation id, not truncated
-chat ids, cursors or text matching. Edits, reactions and poll changes produce new fingerprints.
+chat ids, cursors or text matching, in one ledger per session: all of a bot's own chats together. Edits, reactions and poll changes produce new fingerprints.
 Only a successfully settled initial prompt commits its candidate fingerprints. Queued direct
 steers contribute fingerprints only after queue release proves they were read. Dropped and failed
 steers remain replayable. Pending assigned requests are always explicit, even if their context
@@ -139,7 +156,8 @@ Since #234 a request declares a small core (`send_message`, `react`, `question`,
 `load_tools`), and since 2026-11-14 the shell (`bash`, see [turn latency](openbots-turn-latency.md)),
 and a bot loads the rest by name. A loaded tool is meant to stay loaded for the
 session. In practice bots lost their tools at almost every Pi restart, and a bot's Pi restarts
-often: after 20 idle minutes, and whenever the bot moves to another conversation (a session each).
+often: after 20 idle minutes, and whenever the bot moves to another conversation (a session each,
+until 2026-11-17).
 
 The cause: the extension's `session_start` restore only took tools away. It assumed Pi starts with
 every tool active, which is true only with `--tools`. When a user extension is switched on for bots,

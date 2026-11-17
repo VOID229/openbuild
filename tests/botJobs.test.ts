@@ -27,7 +27,7 @@ async function run(name: string, body: string) {
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
       const { getFocus } = agent;
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
       svc.setHooks({ wake: runner.wake, stop: runner.stop, pendingAssignments: runner.pendingAssignments, unseen: runner.unseen, userWoke: runner.userWoke, halt: runner.halt, background: runner.background });
       jobs.setJobHooks({ waiting: runner.waitedOn, label: runner.toolLabel, changed: runner.jobsChanged });
       svc.updateSettings({ onboarding: 'done', user: { name: 'Sam' } });

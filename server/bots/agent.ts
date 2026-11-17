@@ -269,7 +269,7 @@ function requireBot(id: string): Bot {
  * So a section stays as the session last got it in one case only: everything it was made from is
  * still there exactly as it was, and everything new is something that same session added and is
  * still exactly as it added it. What's held back is the add, never the item. Anything else sends
- * the section afresh at once: a memory another chat's turn wrote, one reworded, replaced, moved or
+ * the section afresh at once: a memory written outside this session, one reworded, replaced, moved or
  * forgotten (one too old to be listed as well: the section counts them), a routine paused,
  * resumed, removed or run, the user's edits, and all of those just the same when the item is one
  * this session added. So does a Pi that just started or just compacted (`fresh`), whose session
@@ -283,8 +283,14 @@ interface Kept {
   own: Map<string, string>;
 }
 const keptSections = ((globalThis as { openbotsKeptSections?: Map<string, Kept> }).openbotsKeptSections ??= new Map<string, Kept>());
-/** A bot's session: one per conversation it works in. */
-const sessionKey = (botId: string) => `${botId}:${getFocus(botId) ?? ""}`;
+/**
+ * The session a bot's turn is on: one for all its own chats, and one for each chat shared with a friend
+ * (runner.ts sessionHome), where a friend allowed tools can have it write a memory its own session never saw.
+ */
+const sessionKey = (botId: string) => {
+  const here = getFocus(botId);
+  return here && db.getConversation(here)?.friend ? `${botId}:${here}` : botId;
+};
 /** What a memory or a routine says, as its section shows it (the day a memory is dated included): two with the same mark read the same. */
 const memoryMark = (m: { kind?: string; text: string; at: number }) => `${m.kind}\n${memoryDate(m.at)}\n${m.text}`;
 const routineMark = (r: { title: string; schedule: string; enabled: boolean; task?: string }) => `${r.title}\n${r.schedule}\n${r.enabled}\n${r.task ?? ""}`;

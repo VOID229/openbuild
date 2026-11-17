@@ -6,7 +6,7 @@ import { untrustedData } from "./transcriptData";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, findTags, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, betweenTurns, type BotMessage, type Question } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, findTags, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, todoProgress, replyBubbles, roleLine, shownReplyError, workingPhrase, betweenTurns, type BotMessage, type Question } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -512,6 +512,19 @@ export function preloadFor(botId: string, lane = "main"): string[] {
   return friend && !allowsTools(friend) ? [] : preloadWithStarter(db.toolUsage(botId));
 }
 
+/**
+ * Where a bot's session is kept. In its own chats a bot is one mind: its own chat and every group it's
+ * in run on one session, so what it said, did and found out in one of them is there in all of them, and
+ * a turn's chat is only where that turn came from and where what it sends goes (render says which).
+ * That session is the one its own chat had while each chat kept a session to itself, so it carries on
+ * from there; a group's old session stays on disk and isn't resumed. A chat shared with a friend keeps
+ * a session to itself, apart from all of this (laneOf).
+ */
+export function sessionHome(botId: string, lane = "main"): string {
+  const own = svc.directId(botId);
+  return laneDirectory(sessionDir(), botId, (lane === "main" ? own : (getFocus(botId) ?? own)) ?? "default", lane);
+}
+
 async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
   const key = mindKey(botId, lane);
   let existing = minds.get(key);
@@ -520,7 +533,7 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     await retire(key, existing);
     existing = undefined;
   }
-  const path = sessionGeneration(laneDirectory(sessionDir(), botId, getFocus(botId) ?? svc.directId(botId) ?? "default", lane));
+  const path = sessionGeneration(sessionHome(botId, lane));
   const flags = flagsFor(lane);
   const compaction = compactionPolicy(knownWindows());
   const overrides: Record<string, unknown> = compaction.modelOverrides;
@@ -736,8 +749,9 @@ function noteRan(botId: string, conversationId: string | undefined, chain: (stri
 /**
  * A message the bot just wrote is in its session already, as the call that sent it: the next prompt's
  * transcript leaves it out instead of showing it its own words again as a line it has "already seen".
- * It comes back when it changes (a reaction, an answer), as any line does. Only in the session that
- * wrote it: another chat's session, or a helper that wrote for the bot, never saw the call.
+ * It comes back when it changes (a reaction, an answer), as any line does. Whichever of its chats it
+ * wrote in: they share the session. Only in the session that wrote it: a helper that wrote for the
+ * bot, or its Pi for a friend's chat, never saw the call.
  */
 function ownWords(mind: Mind, messageId: string) {
   const row = db.getMessage(messageId);
@@ -1141,7 +1155,7 @@ async function runTurn(botId: string, all: Wake[]) {
     mind.starting = true;
     const delivered = readDeliveries(mind.sessionPath!);
     const candidates = new Set<string>();
-    const rendered = render(jobs, botId, delivered, candidates);
+    const rendered = render(jobs, botId, delivered, candidates, false, conversationId);
     mind.contextKeys = new Set([...delivered, ...candidates]);
     if (!rendered.trim()) return;
     // Settings the user changed in the app, for the primary: shown once, in whatever turn comes next.
@@ -1508,12 +1522,16 @@ export const STEER_ACK = "Show you saw it before you go on: one short send_messa
  */
 export const CLOSING = "Reply with send_message, done true on your last call. Nothing to say: reply only [silent].";
 
-/** A turn's prompt, or with `steered` what joins a turn already working: that says what to do mid-work instead of how to reply. */
-export function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>, steered = false): string {
+/**
+ * A turn's prompt, or with `steered` what joins a turn already working: that says what to do mid-work instead of how to reply.
+ * `turn` is the conversation the turn runs in when no wake names one (a routine with no chat of its own).
+ */
+export function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>, steered = false, turn?: string): string {
   const bots = db.listBots();
   const user = svc.getSettings().user?.name || "User";
   const parts: string[] = [];
   const seen = new Set<string>();
+  const here = jobs.find((j) => j.conversationId)?.conversationId ?? turn;
   for (const job of jobs) {
     if (job.conversationId && !seen.has(job.conversationId)) {
       seen.add(job.conversationId);
@@ -1521,12 +1539,17 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
       const assigned = scoped.every(j => j.messageIds) ? scoped.flatMap(j => j.messageIds!) : undefined;
       const leads = new Map(scoped.flatMap(j => (j.lead ? (j.messageIds ?? []).map(id => [id, j.lead!] as const) : [])));
       const replies = new Set(scoped.flatMap(j => j.replies ?? []));
-      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates, leads, replies));
+      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates, leads, replies, !steered && job.conversationId === here));
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
+  if (!steered && here) {
+    // No wake named a chat, so nothing above says where this turn is.
+    if (!seen.has(here)) parts.unshift(turnNote(here, bots));
+    // Its other chats' lists: the session is one for all of them, and so is what it has to do.
+    if (laneOf(here) === "main") parts.push(todosElsewhere(botId, here, bots));
+  }
   // What it has running in the background rides with the prompt, like the clock: never in a friend's chat.
-  const here = jobs.find((j) => j.conversationId)?.conversationId;
   if (laneOf(here) === "main") parts.push(jobBoard(botId, here));
   // The clock rides with each prompt: in the system prompt it would re-send the whole context every turn.
   parts.push(`The time is ${new Date().toString()}.`);
@@ -1536,7 +1559,49 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
   return parts.filter(Boolean).join("\n\n");
 }
 
-export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>, leads?: Map<string, string>, replies?: Set<string>): string {
+/** A conversation as a prompt names it: its short id, which the tools take, its kind and its title. */
+function chatName(c: db.StoredConversation, bots: { id: string; name: string }[]): string {
+  return `${c.id.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”)`;
+}
+
+/**
+ * What marks the conversation a turn is in. A bot's chats share its session (sessionHome), so the
+ * prompts of all of them are in it one after another: this says which one the turn came from, which
+ * is the one its tools mean when they aren't given another (send_message, question, todo).
+ */
+export const TURN_HERE = "where this turn is and what you send goes";
+
+/** Where a turn is, when no transcript says: the conversation its messages go to. */
+function turnNote(conversationId: string, bots: { id: string; name: string }[]): string {
+  const c = db.getConversation(conversationId);
+  return c ? `Conversation ${chatName(c, bots)} is ${TURN_HERE}.` : "";
+}
+
+/** The most the to-do lists of a bot's other chats take in a prompt, in characters; a list past it is named with its progress only. */
+export const TODOS_ELSEWHERE_MAX = 2400;
+
+/**
+ * The to-do lists of the bot's other chats, each under its conversation. A list belongs to its chat,
+ * where the user watches it, but the bot is one mind in all of them (sessionHome) and has to know
+ * everything it has open: the todo tool changes any of them by conversation id. Never the lists of
+ * chats shared with a friend, which hold their words.
+ */
+export function todosElsewhere(botId: string, here: string, bots: { id: string; name: string }[] = db.listBots()): string {
+  let room = TODOS_ELSEWHERE_MAX;
+  const lists = db.listConversations().flatMap((c) => {
+    if (c.id === here || c.friend || !c.botIds.includes(botId)) return [];
+    const list = db.todos(c.id);
+    if (!list.length) return [];
+    const whole = `Conversation ${chatName(c, bots)}: ${todoText(list, botId)}`;
+    const { done, total } = todoProgress(list);
+    const text = whole.length <= room ? whole : `Conversation ${chatName(c, bots)}: To-do list, ${done}/${total} done (todo list with conversation shows it).`;
+    room -= text.length;
+    return [text];
+  });
+  return lists.length ? `Your to-do lists in your other chats (todo with conversation changes one):\n${lists.join("\n")}` : "";
+}
+
+export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>, leads?: Map<string, string>, replies?: Set<string>, here = false): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const rows = db.messages(conversationId, 16);
@@ -1554,7 +1619,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   }).map(line(c, bots, user, botId, assigned, undefined, leads, replies));
   const list = db.todos(conversationId);
   const todos = list.length ? `${c.friend ? untrustedData(todoText(list, botId)) : todoText(list, botId)}\n` : "";
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${membersNote(c, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${todos}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
+  return `Conversation ${chatName(c, bots)}${here ? `, ${TURN_HERE}` : ""}:\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${membersNote(c, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${todos}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
 }
 
 /** Who's in a group and what each does, so a bot can tell whether a message is its job or someone else's. */

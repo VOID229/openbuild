@@ -794,7 +794,7 @@ test("any number of routines stay active at once, each bot's separate, each in i
       const { wake, stop } = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
 
@@ -918,7 +918,7 @@ test("a screenshot sent while a bot is replying reaches it, by steering or in th
       const { wake, stop } = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
       const { bot, conversationId } = svc.createBot({ name: 'Shot' });
@@ -1260,7 +1260,7 @@ test("a bot falls back through its models in order, only before its reply has do
       const { wake, stop, busy, onRecord, modelChain } = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
       const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); a.ok(ok()); };

@@ -17,7 +17,7 @@ test('a bot busy in its own chat shows busy only there, and in a group once a me
       const runner = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
       const { busyBots, elsewhere, showWorking } = await import('./src/lib/bots/activity.ts');
       // No helper session starts for a message that finds the bot mid-call (botResponsiveness.test.ts).
       const helpers = await import('./server/bots/helpers.ts');

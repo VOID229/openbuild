@@ -14,7 +14,7 @@ test('a group message reaches every bot there, and only the ones that act show; 
       const runner = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
       const { busyBots, holding, showWorking } = await import('./src/lib/bots/activity.ts');
       // A bot busy in a tool answers a new message through a helper session (botResponsiveness.test.ts): a stand-in, so no real Pi starts here.
       const helpers = await import('./server/bots/helpers.ts');

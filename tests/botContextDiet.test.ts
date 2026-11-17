@@ -736,12 +736,17 @@ test("a memory or routine the bot adds itself doesn't send its section again; an
     a.match(fresh.openbots_routines, /Standup notes/);
     a.deepEqual(await context(), fresh);
 
-    // A memory it wrote in another chat's turn isn't in this session: the section goes again, whole.
+    // Its chats share one session: a memory it wrote in the group's turn is held back like one from its own chat.
     agent.memory(bot.id, { action: 'write', text: 'Own note one' });
     agent.setFocus(bot.id, group.id);
     agent.memory(bot.id, { action: 'write', text: 'Said in the group' });
+    a.equal((await context()).openbots_memory, fresh.openbots_memory);
     agent.setFocus(bot.id, conversationId);
+    a.equal((await context()).openbots_memory, fresh.openbots_memory);
+    // One written outside its session isn't in it: the section goes again, whole.
+    svc.addMemory(bot.id, 'Noted by its helper', { by: bot.id });
     const third = await context();
+    a.match(third.openbots_memory, /Noted by its helper/);
     a.match(third.openbots_memory, /Said in the group/);
     a.match(third.openbots_memory, /Own note one/);
 
@@ -766,11 +771,15 @@ test("a memory or routine the bot adds itself doesn't send its section again; an
     a.equal((await context()).openbots_routines, paused.openbots_routines);
     a.equal((await context()).openbots_memory, before.openbots_memory);
 
-    // Each chat's session keeps its own: the group's has seen none of this, and gets it as it stands.
+    // A turn in the group is the same session: being there sends nothing again. A Pi that starts over gets it all.
+    const held = await context();
     agent.setFocus(bot.id, group.id);
-    const there = await context({ fresh: true });
-    a.match(there.openbots_routines, /Check the build/);
-    a.match(there.openbots_memory, /Ships on Thursdays/);
+    const there = await context();
+    a.deepEqual([there.openbots_routines, there.openbots_memory], [held.openbots_routines, held.openbots_memory]);
+    a.doesNotMatch(there.openbots_routines, /Check the build/);
+    const restarted = await context({ fresh: true });
+    a.match(restarted.openbots_routines, /Check the build/);
+    a.match(restarted.openbots_memory, /Ships on Thursdays/);
 
     // The extension says a Pi is fresh on its first run and on the one after a compaction, and not otherwise.
     const extension = (await import('./server/bots/extension.ts')).default;
@@ -886,13 +895,10 @@ test("only the add is held back: pausing, resuming, rewording or deleting what t
     const fewer = await context();
     a.notEqual(fewer.openbots_memory, counted.openbots_memory);
     a.equal(fewer.openbots_memory, real().openbots_memory);
-    // A note written in another chat's turn, then enough of this session's own to push it off the list: it's still news.
-    const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [bot.id, svc.createBot({ name: 'Beta' }).bot.id] });
-    agent.setFocus(bot.id, group.id);
-    agent.memory(bot.id, { action: 'write', text: 'Said in the group' });
-    agent.setFocus(bot.id, conversationId);
+    // A note written outside this session, then enough of the session's own to push it off the list: it's still news.
+    svc.addMemory(bot.id, 'Noted by its helper', { by: bot.id });
     for (let i = 1; i <= 6; i++) agent.memory(bot.id, { action: 'write', text: 'Own note ' + i });
-    a.doesNotMatch(real().openbots_memory, /Said in the group/);
+    a.doesNotMatch(real().openbots_memory, /Noted by its helper/);
     const pushed = await context();
     a.notEqual(pushed.openbots_memory, fewer.openbots_memory);
     a.equal(pushed.openbots_memory, real().openbots_memory);
