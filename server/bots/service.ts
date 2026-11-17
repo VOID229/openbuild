@@ -3,7 +3,7 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
+import type { ArrangeRequest, Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
 import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
@@ -1349,6 +1349,39 @@ export function createConversation(input: { id?: string; kind: Conversation["kin
   emitConversation(id);
   for (const m of db.messages(id, 50)) emit({ t: "message", conversationId: id, message: m.message });
   return conversationView(id)!;
+}
+
+/**
+ * A sidebar move, all of it at once (ArrangeRequest): each chat's list (pinned or not, its section),
+ * then the order. Sections are pruned only once every chat is where it's going, so in a swap the
+ * section one chat leaves and the other enters stays. Nothing changes when any chat isn't there.
+ */
+export function arrange(input: unknown): { conversations: Conversation[]; settings: BotsSettings } {
+  const body = (input && typeof input === "object" ? input : {}) as Partial<Record<keyof ArrangeRequest, unknown>>;
+  const patches = Array.isArray(body.patches) ? body.patches : [];
+  if (patches.length > 8) throw new BotsError("A move changes at most a few chats.");
+  const changes = patches.map((entry) => {
+    const [id, patch] = Array.isArray(entry) ? entry : [];
+    if (typeof id !== "string" || !patch || typeof patch !== "object") throw new BotsError("Expected [conversation id, change] pairs.");
+    const c = db.getConversation(id);
+    if (!c) throw new BotsError("No such conversation.", 404);
+    return [c, patch as { pinnedAt?: unknown; section?: unknown }] as const;
+  });
+  const now = Date.now();
+  for (const [c, patch] of changes) {
+    if ("pinnedAt" in patch) c.pinnedAt = patch.pinnedAt ? (c.pinnedAt ?? now) : undefined;
+    if ("section" in patch) c.section = clip(patch.section, 40);
+    db.putConversation(c);
+  }
+  for (const [c] of changes) emitConversation(c.id);
+  const next: Partial<BotsSettings> = {};
+  if (changes.some(([, patch]) => "section" in patch)) {
+    const used = new Set(db.listConversations().map((c) => c.section));
+    const { sections } = settings();
+    if (sections.some((s) => !used.has(s))) next.sections = sections.filter((s) => used.has(s));
+  }
+  if ("order" in body) next.order = body.order as string[];
+  return { conversations: changes.map(([c]) => conversationView(c.id)!), settings: Object.keys(next).length ? updateSettings(next) : settings() };
 }
 
 export function updateConversation(id: string, patch: Partial<Conversation>): Conversation {

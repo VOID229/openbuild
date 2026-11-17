@@ -727,6 +727,16 @@ export interface SideHuddle {
 /** A huddle's message cap: three each, at most twelve. */
 export const huddleLimit = (members: number) => Math.min(12, 3 * members);
 
+/**
+ * A move in the sidebar, sent as one write (POST /api/bots/arrange): the chats that changed list,
+ * pinned or not and their section (null clears either), and the new order. One write, so a swap
+ * that empties a section only for the other chat to fill it never loses the section on the way.
+ */
+export interface ArrangeRequest {
+  patches: [string, { pinnedAt?: number | null; section?: string | null }][];
+  order: string[];
+}
+
 export interface BotsSettings {
   /** "provider/model" for bots without their own. Pi's default when unset. */
   defaultModel?: string;

@@ -18,7 +18,7 @@ import { botModels } from "../pi";
 import { useStore } from "../store";
 import { trackShown, type Shown } from "./activity";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { answerText, castVote, cleanRole, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
+import { answerText, castVote, cleanRole, marksUnread, toggleReactionIn, type ArrangeRequest, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import type { Arrangement } from "./sidebarOrder";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
@@ -416,9 +416,9 @@ export const useBots = create<BotsState>()(
         const into = patches.find(([, p]) => p.section)?.[1].section;
         return { conversations, order: next, ...(patches.some(([, p]) => "section" in p) ? withSections(s, filedSections(s.sections, conversations, into)) : {}) };
       });
-      // The chats' own changes first: the server files them, then saves the order of the lists they're now in.
-      for (const [id, patch] of patches) void send("PATCH", `/api/bots/conversations/${id}`, wirePatch(patch));
-      void send("PATCH", "/api/bots/settings", { order: next });
+      // One write: sent as separate ones, a swap's first half would empty a section the second half fills, and the server would drop it in between.
+      const body: ArrangeRequest = { patches: patches.map(([id, patch]) => [id, wirePatch(patch)]), order: next };
+      void send("POST", "/api/bots/arrange", body);
     },
     resetOrder: () => {
       set({ order: NO_ORDER });
