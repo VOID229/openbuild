@@ -74,6 +74,8 @@ interface Mind {
    * group turn it hasn't acted on yet ("deciding", until it types or uses a tool: BotStatus.deciding).
    */
   quiet: false | "reaction" | "sent" | "deciding";
+  /** Ends a "sent" quiet the turn has held for too long to be only wrapping up (QUIET_AFTER_SENT). */
+  sentTimer?: ReturnType<typeof setTimeout>;
   /** The status line as last shown (BotStatus.activity): the live step, or plain working words between steps. */
   activity: string;
   /** The turn's steps as Pi reports them (steps.ts): what `activity` is read from. */
@@ -822,6 +824,30 @@ function refresh(botId: string, mind: Mind, boundary = false) {
 /** Tools a bot uses to make up its mind, not to act: a group turn on them is still deciding. */
 const DECIDING_TOOLS = new Set(["load_tools"]);
 
+/**
+ * How long a turn stays out of the chat after its message went out (quiet "sent") with nothing new to
+ * show, ms. Four times in five a turn that's only wrapping up after its reply has ended by then; one
+ * still going is at work, thinking its next step through, and its chat shows that, as the sidebar and
+ * the stop button already do. Tests shorten it.
+ */
+export const QUIET_AFTER_SENT = { ms: 6000 };
+
+/** Its message is out: whatever it does next stays out of the chat, for as long as wrapping up takes (QUIET_AFTER_SENT). */
+function quietAfterSent(botId: string, mind: Mind) {
+  mind.quiet = "sent";
+  clearTimeout(mind.sentTimer);
+  const timer = setTimeout(() => {
+    if (mind.sentTimer !== timer) return;
+    mind.sentTimer = undefined;
+    // Settled (or stopped) in the meantime: the turn is over, not at work.
+    if (mind.quiet !== "sent" || !mind.steerable) return;
+    mind.quiet = false;
+    refresh(botId, mind, true);
+  }, QUIET_AFTER_SENT.ms);
+  timer.unref?.();
+  mind.sentTimer = timer;
+}
+
 /** It acted on a group turn it was deciding on: from now the chat shows it. */
 function decided(mind: Mind, next: Mind["quiet"] = false) {
   if (mind.quiet === "deciding") mind.quiet = next;
@@ -895,7 +921,16 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     // Another bubble already written is the first; work running beside it, or called with it and up next, the second.
     const more = live.steps.some((s) => WRITING.has(s.tool));
     setTyping(botId, mind, more);
-    if (!more && !live.steps.some((s) => works(s) && counts(mind)(s))) mind.quiet = "sent";
+    if (!more && !live.steps.some((s) => works(s) && counts(mind)(s))) quietAfterSent(botId, mind);
+  }
+  // Pi summarizing the session, or trying a failed call again: work of its own, at times a minute of
+  // it, that shows in the chat whatever went out before (a reply, a reaction). A group turn still
+  // deciding stays out of it.
+  if ((record.type === "compaction_start" || record.type === "auto_retry_start") && (mind.quiet === "sent" || mind.quiet === "reaction")) mind.quiet = false;
+  // The response that ends the turn: it's wrapping up, not going on to more.
+  if (ended?.role === "assistant" && !callsTool(ended)) {
+    clearTimeout(mind.sentTimer);
+    mind.sentTimer = undefined;
   }
   // The model has started writing a call: the status says so now, not once the whole call is written and running.
   if (began && WRITING.has(began.tool)) {

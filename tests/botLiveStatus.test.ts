@@ -299,6 +299,91 @@ test("tools side by side each keep their line until their own end, and a sent me
   await over(prompt);
 `), 30_000);
 
+test("after a message goes out the turn keeps out of its chat only while it wraps up: Pi summarizing, or the model going on past that, shows", () => run("after-sent", `
+  // What the bot's own chat shows of it: its working row and the header's line, beside the stop button.
+  const { showWorking, liveLine, stoppable } = await import('./src/lib/bots/activity.ts');
+  const dm = svc.snapshot().conversations.find((c) => c.id === own);
+  const statuses = () => ({ [alpha.bot.id]: status() });
+  const shows = () => showWorking(own, statuses(), []).includes(alpha.bot.id) && liveLine(dm, statuses(), []) !== undefined;
+  const stops = () => stoppable(dm, statuses()).includes(alpha.bot.id);
+  runner.QUIET_AFTER_SENT.ms = 150;
+  const reply = async (id) => {
+    update({ type: 'toolcall_start', contentIndex: 0, id, toolName: 'send_message' });
+    start('send_message', id, { text: 'Passed it to the thread.' });
+    end('send_message', id, { details: await agent.sendMessage(alpha.bot.id, { text: 'Passed it to the thread.' }) });
+    a.equal(status().quiet, true);
+    a.equal(stops(), true);
+    a.equal(shows(), false);
+  };
+
+  // Pi summarizing the session after the reply: a minute of work at times, stop button and all. The chat shows it.
+  const summarizing = await turn();
+  start('openbuild', 'o1', { action: 'send', thread: '3b4257fb', text: 'Swap them.', status: 'Clarifying for the thread' });
+  end('openbuild', 'o1');
+  await reply('s1');
+  feed({ type: 'compaction_start', reason: 'threshold' });
+  a.equal(status().quiet, undefined);
+  a.equal(line(), 'Summarizing the conversation so far');
+  a.equal(shows(), true);
+  feed({ type: 'compaction_end', reason: 'threshold' });
+  a.equal(shows(), true);
+  // A response that ends the turn after it doesn't hide it again before the turn is over.
+  feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '[silent]' }] } });
+  a.equal(shows(), true);
+  await over(summarizing);
+  a.equal(status(), undefined);
+
+  // The model thinking its next step through after the reply: past the moment wrapping up takes, it's at work.
+  const thinking = await turn();
+  start('bash', 'b1', { status: 'Checking #258', command: 'gh pr view 258' });
+  end('bash', 'b1');
+  await reply('s2');
+  feed({ type: 'turn_end' });
+  feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  update({ type: 'thinking_start', contentIndex: 0 });
+  update({ type: 'thinking_delta', contentIndex: 0, delta: 'Still waiting on the desktop build' });
+  a.equal(shows(), false);
+  await until(() => status().quiet === undefined);
+  a.equal(status().state, 'working');
+  a.equal(line(), 'Checking #258');
+  a.equal(shows(), true);
+  // And it goes on to its next step from there, as ever.
+  update({ type: 'toolcall_start', contentIndex: 1, id: 'r1', toolName: 'routine' });
+  a.equal(shows(), true);
+  await over(thinking);
+
+  // Only wrapping up: the turn ends inside that moment, and the chat never showed it at work after the reply.
+  const wrapping = await turn();
+  start('bash', 'b2', { status: 'Checking #259', command: 'gh pr view 259' });
+  end('bash', 'b2');
+  await reply('s3');
+  sent.length = 0;
+  feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
+  feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '[silent]' }] } });
+  await Bun.sleep(runner.QUIET_AFTER_SENT.ms * 2);
+  a.deepEqual(sent.filter((s) => s.state === 'working' && !s.quiet), []);
+  await over(wrapping);
+
+  // A turn that settles before then leaves nothing behind to wake the bot's status after it.
+  const settles = await turn();
+  await reply('s4');
+  await over(settles);
+  const later = sent.length;
+  await Bun.sleep(runner.QUIET_AFTER_SENT.ms * 2);
+  a.equal(status(), undefined);
+  a.equal(sent.length, later);
+
+  // A group turn still deciding stays out of its chat, summarizing or not.
+  const deciding = await turn(group.id, '@Alpha can you check the build?');
+  a.equal(status().deciding, true);
+  feed({ type: 'compaction_start', reason: 'threshold' });
+  a.equal(status().deciding, true);
+  a.equal(status().quiet, true);
+  feed({ type: 'compaction_end', reason: 'threshold' });
+  await over(deciding);
+`), 30_000);
+
 test("while its step reads something the status says it's reading, and not a moment past that step's end", () => run("reading", `
   const first = await turn();
   a.equal(status().reading, undefined);
