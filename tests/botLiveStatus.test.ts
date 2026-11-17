@@ -57,6 +57,15 @@ async function run(name: string, body: string) {
       const end = (toolName, toolCallId, result = {}) => feed({ type: 'tool_execution_end', toolName, toolCallId, result });
       const turn = async (where = own, text = 'do the thing') => { const before = prompts.length; post(where, 'me', text); await until(() => prompts.length > before && mind.steerable); return prompts.at(-1); };
       const over = async (prompt) => { prompt.finish(); await until(() => !runner.busy(alpha.bot.id)); };
+      // A group message Beta answers (its role fits): Alpha only decides whether any of it is its own.
+      const deciding = async () => {
+        svc.updateBot(beta.bot.id, { role: 'Checks the build.' }, { quiet: true });
+        const before = prompts.filter(p => p.bot === alpha.bot.id).length;
+        post(group.id, 'me', 'can you check the build?');
+        await until(() => prompts.filter(p => p.bot === alpha.bot.id).length > before && mind.steerable);
+        a.equal(svc.getStatus(beta.bot.id).deciding, undefined);
+        return prompts.findLast(p => p.bot === alpha.bot.id);
+      };
       ${body}
       process.exit(0);
     `, { OPENCHAT_DATA_DIR: dir });
@@ -375,13 +384,13 @@ test("after a message goes out the turn keeps out of its chat only while it wrap
   a.equal(sent.length, later);
 
   // A group turn still deciding stays out of its chat, summarizing or not.
-  const deciding = await turn(group.id, '@Alpha can you check the build?');
+  const decides = await deciding();
   a.equal(status().deciding, true);
   feed({ type: 'compaction_start', reason: 'threshold' });
   a.equal(status().deciding, true);
   a.equal(status().quiet, true);
   feed({ type: 'compaction_end', reason: 'threshold' });
-  await over(deciding);
+  await over(decides);
 `), 30_000);
 
 test("while its step reads something the status says it's reading, and not a moment past that step's end", () => run("reading", `
@@ -458,7 +467,7 @@ test("a record that trails in after the turn doesn't put the bot back to work, a
 `), 30_000);
 
 test("a group bot still deciding shows nothing, and shows its step the moment it starts writing a call", () => run("deciding", `
-  const prompt = await turn(group.id, '@Alpha can you check the build?');
+  const prompt = await deciding();
   a.equal(status().deciding, true);
   // Loading tools is still making up its mind.
   update({ type: 'toolcall_start', contentIndex: 0, id: 'l1', toolName: 'load_tools' });
@@ -474,6 +483,12 @@ test("a group bot still deciding shows nothing, and shows its step the moment it
   update({ type: 'toolcall_delta', contentIndex: 0, delta: '{"status":"Checking the build",' });
   a.equal(line(), 'Checking the build');
   await over(prompt);
+  // Asked by name, it's the one to answer: on show from the start, as in its own chat.
+  const asked = await turn(group.id, '@Alpha and the docs?');
+  a.equal(status().deciding, undefined);
+  a.equal(status().quiet, undefined);
+  a.equal(status().conversationId, group.id);
+  await over(asked);
 `), 30_000);
 
 test("a turn that came from another chat says where from, every status of it, and a routine's turn says which routine", () => run("from", `
