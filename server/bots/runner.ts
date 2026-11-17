@@ -289,9 +289,10 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
       const row = db.getMessage(id);
       return row?.conversationId === conversationId ? imagesBetween(conversationId, row.seq - 1, row.seq) : [];
     }).slice(-IMAGE_LIMIT);
-    // Still deciding whether the group's messages are its to answer: this one is decided on with them.
-    if (mind.quiet !== "deciding") mind.quiet = false;
     const asked = !item.lead || item.lead === botId;
+    // Still deciding whether the group's messages are its to answer: this one is decided on with them.
+    // Unless it's the one to answer this one: then the user is waiting on it, and the chat shows it.
+    if (mind.quiet !== "deciding" || asked) mind.quiet = false;
     if (asked) mind.waitingUser = true;
     if (asked) mind.unread = (mind.unread ?? 0) + 1;
     show(botId, mind);
@@ -1091,8 +1092,10 @@ async function runTurn(botId: string, all: Wake[]) {
   // A reaction gets a reaction back as a rule, not a message, so the chat shows nothing unless the bot starts typing.
   const quiet = jobs.every((j) => j.kind === "reaction");
   // Every bot in a group reads what's said there and decides whether it's theirs: nothing shows of it,
-  // not even its mascot, until it acts (BotStatus.deciding).
-  const deciding = db.getConversation(conversationId ?? "")?.kind === "group" && jobs.every((j) => j.kind === "messages" || j.kind === "reaction");
+  // not even its mascot, until it acts (BotStatus.deciding). Not the one answering for the group (the
+  // one asked, or the lead): the user is waiting on it, so its chat shows it at work at once, as its own
+  // chat does, not seconds later, once the model's first call comes in.
+  const deciding = db.getConversation(conversationId ?? "")?.kind === "group" && jobs.every((j) => j.kind === "messages" || j.kind === "reaction") && !jobs.some((j) => waitsOnBot(botId, j));
   // A stop is for the turn it was said to: one left over from between turns isn't this one's.
   halted.delete(botId);
   if (nothingNew(botId, jobs, conversationId)) return;

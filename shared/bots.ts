@@ -96,7 +96,8 @@ export interface BotStatus {
   /**
    * Woke for a group message and hasn't acted on it yet: every bot in a group reads each message and
    * decides whether it's theirs, so until one types or picks up a tool nothing shows of it, not even
-   * its mascot. The chat stays silent while its bots decide.
+   * its mascot. The chat stays silent while its bots decide. The one answering for the group (the one
+   * asked, or the lead) never decides: it shows at work at once, as in its own chat.
    */
   deciding?: boolean;
   /** Of `waiting`, the groups whose messages it hasn't decided on yet (none of them names it): they don't show it holding on. */
