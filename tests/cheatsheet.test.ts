@@ -33,7 +33,7 @@ describe("⌘K cheatsheet", () => {
   test("finds a combination however it's written", () => {
     for (const q of ["⌘b", "cmd b", "ctrl+b", "mod b"]) expect(labels(q)).toContain("General: Toggle left sidebar");
     for (const q of ["⌥w", "alt w", "option+w"]) expect(labels(q)).toEqual(["Side panel: Close tab", "Terminal: Close terminal tab"]);
-    expect(labels("⌥3")).toEqual(["Side panel: Go to tab", "Terminal: Go to terminal tab"]);
+    expect(labels("⌥3")).toEqual(["General: Go to a bot in OpenBots", "Side panel: Go to tab", "Terminal: Go to terminal tab"]);
     expect(labels("shift")).toEqual(["General: New thread", "Composer: New line", "Composer: Use the last stash"]);
     expect(labels("⌘⇧s")).toEqual(["Composer: Use the last stash"]);
     // A rebound shortcut is found by its new keys, and no longer by its old ones.

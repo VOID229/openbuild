@@ -22,6 +22,7 @@ import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
 import { betweenNames, ConversationAvatar, DmMark, FitText, previewOf, shortTime, useAwayLines, useBusyBots } from "./common";
+import { SwitchKeyBadge, useBotSwitchKeys } from "./switchKeys";
 
 type Dialog =
   | { kind: "bot" }
@@ -208,8 +209,9 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
         onMenu({ id: conversation.id, x: e.clientX, y: e.clientY });
       }}
     >
-      <button type="button" className="bots-row-main" {...peek(conversation.id, "right")} onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
+      <button type="button" className="bots-row-main" data-bot-slot={conversation.id} {...peek(conversation.id, "right")} onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
         <SidebarAvatar conversation={conversation} size={avatar} retired={retired} />
+        <SwitchKeyBadge id={conversation.id} />
         <span className="bots-row-text">
           <span className="bots-row-name">
             <span className="bots-row-title">{title}</span>
@@ -239,6 +241,8 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
     <button
       type="button"
       className={cx("bots-tile", active && "bots-tile-active")}
+      data-bot-slot={conversation.id}
+      data-pinned
       aria-current={active ? "page" : undefined}
       onClick={() => select(conversation.id)}
       {...longPress.handlers}
@@ -252,6 +256,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
         {/* A group's huddle is drawn bigger than the box, into the tile's padding, so its members read at a glance. */}
         <SidebarAvatar conversation={conversation} size={conversation.kind === "direct" ? 52 : 64} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
+        <SwitchKeyBadge id={conversation.id} />
       </span>
       <span className="bots-tile-name">{name}</span>
     </button>
@@ -542,6 +547,8 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned
       className={cx("bots-rail-item", c.id === activeId && "bots-rail-item-active")}
       aria-label={railLabel(c, bots)}
       aria-current={c.id === activeId ? "page" : undefined}
+      data-bot-slot={c.id}
+      data-pinned={pinned.includes(c) || undefined}
       {...peek(c.id, "right")}
       onClick={() => {
         useBots.getState().select(c.id);
@@ -554,6 +561,7 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned
     >
       <SidebarAvatar conversation={c} size={42} />
       {c.unread && <span className="unread-dot bots-rail-dot" aria-label="Unread" />}
+      <SwitchKeyBadge id={c.id} />
     </button>
   );
   return (
@@ -646,6 +654,7 @@ export function BotsSidebar() {
   const { peek, bind: bindPeek, hide: hidePeek } = usePeek();
   // The hovered tile or avatar goes away with the layout, without a pointerleave.
   useEffect(() => hidePeek(), [rail, hidePeek]);
+  useBotSwitchKeys();
 
   useEffect(() => useBots.getState().ensureSeeded(), []);
   useEffect(() => {

@@ -123,6 +123,8 @@ export interface Settings {
    * action has no shortcut (it was taken over by another).
    */
   shortcuts?: Record<string, string>;
+  /** ⌥1–9 in OpenBots counts the pinned bots and groups first, then the list (absent = on); off, only the list. */
+  botKeysIncludePinned?: boolean;
 }
 
 export interface NewWorkspace {

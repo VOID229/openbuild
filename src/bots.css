@@ -1252,6 +1252,53 @@
   outline-offset: -2px;
 }
 
+/* ⌥N on a tile, row or rail avatar while Option is held (switchKeys.tsx): a keycap on its corner. */
+.bots-row-main {
+  position: relative;
+}
+
+.bots-switch-key {
+  position: absolute;
+  z-index: 1;
+  top: 2px;
+  left: 2px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  animation: bots-switch-key-in 120ms var(--ease) both;
+}
+
+.bots-tile-avatar .bots-switch-key {
+  top: -4px;
+  left: -10px;
+}
+
+@keyframes bots-switch-key-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-switch-key {
+    animation: none;
+  }
+}
+
 /* Hover card for a tile or rail avatar: the full name and the latest message. */
 .bots-peek {
   position: fixed;
