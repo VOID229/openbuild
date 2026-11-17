@@ -19,8 +19,8 @@ import {
 } from "../lib/shortcuts";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
-import { Hint } from "./SettingsUI";
-import { SettingsHeading } from "./primitives";
+import { Hint, SettingRow } from "./SettingsUI";
+import { SettingsHeading, Toggle } from "./primitives";
 
 const Heading = SettingsHeading;
 
@@ -159,6 +159,12 @@ export function ShortcutsSection() {
           );
         })}
       </div>
+      <SettingRow
+        label={`Include pinned in ${mac ? "Option" : "Alt"} + 1–9`}
+        hint={`${mac ? "Option" : "Alt"} + 1–9 goes to a bot in the OpenBots sidebar. On, the pinned ones count first, row by row, then the list below; off, only the list.`}
+      >
+        <Toggle checked={settings.botKeysIncludePinned ?? true} onChange={(botKeysIncludePinned) => update({ botKeysIncludePinned })} label={`Include pinned in ${mac ? "Option" : "Alt"} + 1–9`} />
+      </SettingRow>
       <div className="shortcut-footer">
         <button
           type="button"

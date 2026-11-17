@@ -34,6 +34,7 @@ const GROUPS: { title: string; entries: Entry[] }[] = [
       { label: "Toggle OpenBots", id: "toggleBots", also: "bots" },
       { label: "Settings", id: "openSettings", also: "preferences" },
       { label: "Usage & limits", id: "openUsage" },
+      { label: "Go to a bot in OpenBots", bind: "alt+Digit1", last: "1–9", also: "switch bots groups pinned" },
       { label: "Close a dialog or go back", keys: ["Esc"], also: "escape" },
     ],
   },
