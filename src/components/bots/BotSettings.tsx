@@ -8,11 +8,12 @@ import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
 import { useBotModels } from "../../lib/bots/models";
 import { useStore } from "../../lib/store";
+import type { BotGroupDrop } from "../../lib/types";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
 import { openSettingsPage, settingsUp } from "../../lib/pages";
 import { SettingsHeading } from "../primitives";
-import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
+import { NavRow, SettingRow, SettingsGroup, SubPage } from "../SettingsUI";
 import { BotMachines, BotModel, BotModelSelect, BotWorksIn, DefaultFallbacks, WORKS_IN_DESC } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, LookPicker, RetireBotDialog } from "./BotDialogs";
@@ -315,6 +316,32 @@ function BotModels({ bots }: { bots: Bot[] }) {
   );
 }
 
+const GROUP_DROPS: { value: BotGroupDrop; label: string }[] = [
+  { value: "ask", label: "Ask each time" },
+  { value: "add", label: "Add it to the group" },
+  { value: "swap", label: "Swap places" },
+];
+
+/** How the OpenBots sidebar's drag and drop behaves, and its order back to the usual one. */
+function SidebarSettings() {
+  const groupDrop = useStore((s) => s.settings.botGroupDrop ?? "ask");
+  const placed = useBots((s) => s.order.length > 0);
+  return (
+    <SettingsGroup title="Sidebar" className="sgroup-rows">
+      <SettingRow label="Dropping a bot on a group" desc="Add the bot to the group, or swap the two's places in the sidebar.">
+        <OptionSelect label="Dropping a bot on a group" value={groupDrop} options={GROUP_DROPS} onChange={(botGroupDrop) => useStore.getState().updateSettings({ botGroupDrop })} />
+      </SettingRow>
+      <SettingRow label="Order" desc={placed ? "Some bots and groups are where you dragged them." : "Pins as you pinned them, the rest by their latest message. Drag them to put them in your own order."}>
+        {placed && (
+          <button type="button" className="btn btn-sm" onClick={() => useBots.getState().resetOrder()}>
+            <RotateCcw size={14} /> Reset order
+          </button>
+        )}
+      </SettingRow>
+    </SettingsGroup>
+  );
+}
+
 export function BotsSettingsSection() {
   const bots = useBots((s) => s.bots);
   const conversations = useBots((s) => s.conversations);
@@ -459,6 +486,8 @@ export function BotsSettingsSection() {
           {!groups.length && <li className="pi-empty">No groups yet.</li>}
         </ul>
       </SettingsGroup>
+
+      <SidebarSettings />
 
       <SettingsGroup title="Shared by every bot" className="sgroup-rows">
         <NavRow label="Models" value={modelName} to="models" />

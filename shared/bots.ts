@@ -738,6 +738,13 @@ export interface BotsSettings {
   user?: { name?: string; context?: string };
   /** Sections the user made in the sidebar, in order. */
   sections: string[];
+  /**
+   * The sidebar's order where the user dragged chats into place, by conversation id: each list (the
+   * pinned tiles, the rows, each section) sorts the chats it holds by where they are in this. Chats
+   * not in it sit where they would anyway: new pins after the rest, rows by their latest message
+   * above the ones placed by hand.
+   */
+  order?: string[];
   /** The primary bot is still welcoming the user (naming itself, setting up bots). */
   onboarding?: "active" | "done";
   /** SearXNG instances for bot_web_search, in priority order. Other providers' keys live in the vault. */

@@ -197,6 +197,11 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
   if ("defaultFallbackModels" in patch) next.defaultFallbackModels = modelList(patch.defaultFallbackModels);
   if (patch.quietHours) next.quietHours = { from: num(patch.quietHours.from, 0, 23), to: num(patch.quietHours.to, 0, 23) };
   if (patch.sections) next.sections = patch.sections.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 40);
+  if ("order" in patch) {
+    // Only chats that are still here: a deleted one's place goes with it, the next time the order is saved.
+    const order = strings(patch.order, 2000).filter((id) => !!db.getConversation(id));
+    next.order = order.length ? order : undefined;
+  }
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
   if ("searxng" in patch) next.searxng = [...new Set((Array.isArray(patch.searxng) ? patch.searxng : []).filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim().slice(0, 500)))].slice(0, 8);
   if (patch.customExtensions) next.customExtensions = { enabled: patch.customExtensions.enabled === true, ids: [...new Set((Array.isArray(patch.customExtensions.ids) ? patch.customExtensions.ids : []).filter((id) => typeof id === "string"))].slice(0, 200) };

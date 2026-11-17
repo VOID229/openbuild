@@ -1043,6 +1043,124 @@
   font-weight: 400;
 }
 
+/* Dragging chats in the sidebar (SidebarDrag.tsx). What's picked up fades where it was; a line shows
+   where it goes, between rows or beside a tile; a tile or group it would go onto is ringed. */
+.bots-row,
+.bots-tile {
+  position: relative;
+}
+
+.bots-row[data-dragging],
+.bots-tile[data-dragging] {
+  opacity: 0.4;
+}
+
+.bots-list .bots-row[data-drop="before"]::before,
+.bots-list .bots-row[data-drop="after"]::after,
+.bots-tile[data-drop="before"]::before,
+.bots-tile[data-drop="after"]::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.bots-list .bots-row[data-drop="before"]::before,
+.bots-list .bots-row[data-drop="after"]::after {
+  left: 6px;
+  right: 6px;
+  height: 2px;
+}
+
+.bots-list .bots-row[data-drop="before"]::before {
+  top: -1px;
+}
+
+.bots-list .bots-row[data-drop="after"]::after {
+  bottom: -1px;
+}
+
+/* In the gap between tiles (4px), halfway. */
+.bots-tile[data-drop="before"]::before,
+.bots-tile[data-drop="after"]::after {
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+}
+
+.bots-tile[data-drop="before"]::before {
+  left: -3px;
+}
+
+.bots-tile[data-drop="after"]::after {
+  right: -3px;
+}
+
+.bots-list .bots-row[data-drop="onto"],
+.bots-tile[data-drop="onto"],
+.bots-list .bots-row[data-drop="onto"]:hover,
+.bots-tile[data-drop="onto"]:hover {
+  background: var(--accent-bg);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.bots-section[data-drop="into"] > .history-heading {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.bots-drag-active,
+.bots-drag-active * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+/* No hover marks under a drag: only where it goes is marked. */
+.bots-list-dragging .bots-row:not([data-drop="onto"]),
+.bots-list-dragging .bots-tile:not([data-drop="onto"]):not(.bots-tile-active) {
+  background: transparent;
+}
+
+.bots-list-dragging .bots-row-active:not([data-drop="onto"]) {
+  background: var(--active);
+}
+
+.bots-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 320;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 220px;
+  padding: 4px 11px 4px 5px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  font-weight: 500;
+  pointer-events: none;
+  /* Placed by the pointer before it shows: off-screen until then. */
+  transform: translate(-1000px, -1000px);
+}
+
+.bots-drag-ghost-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-drop-menu {
+  max-width: 300px;
+}
+
+.bots-drop-remember {
+  padding: 6px 8px 4px;
+}
+
 /* Friends under their shared chats: a name and whether their OpenBuild is connected. */
 .bots-friends-line {
   margin: 6px 12px 10px;
