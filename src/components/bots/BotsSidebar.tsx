@@ -16,7 +16,7 @@ import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/g
 import { arrowNav, canHover, copyText, cx, OPEN_SEARCH, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { useScrollRestore } from "../../lib/scrollRestore";
 import { Avatar, IconButton, Popover } from "../primitives";
-import { BotsToggle, ModeSwitch, ReleaseLabel, ScrollThumb } from "../Sidebar";
+import { ModeSwitch, ReleaseLabel, ScrollThumb } from "../Sidebar";
 import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
@@ -583,7 +583,6 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned
             <Store size={18} />
           </IconButton>
         )}
-        <BotsToggle />
         <button type="button" className="bots-rail-me" aria-label="Settings" data-tooltip="Settings" data-tooltip-side="right" onClick={() => useStore.getState().openSettings()}>
           <Avatar src={avatar} name={name} size={32} />
         </button>

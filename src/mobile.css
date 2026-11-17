@@ -280,7 +280,6 @@
   .bots-pick:active,
   .bm-reaction:active .bm-reaction-pill,
   .bm-reaction-reply:active,
-  .bots-toggle:active,
   .bots-composer-btn:active:not(:disabled),
   .bm-jump:active,
   .bm-quote:active {
@@ -312,7 +311,6 @@
   .history-heading-toggle,
   .scroll-down,
   .bots-pick,
-  .bots-toggle,
   .bots-composer-btn {
     transition-property: background-color, border-color, color, opacity, transform;
     transition-duration: 200ms;
@@ -334,7 +332,6 @@
   .history-heading-toggle:active,
   .scroll-down:active,
   .bots-pick:active,
-  .bots-toggle:active,
   .bots-composer-btn:active {
     transition-duration: 70ms;
   }

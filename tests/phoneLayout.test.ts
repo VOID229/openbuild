@@ -30,7 +30,7 @@ const resize = (page: Page, width: number, height: number) =>
 
 /** What shows in a sidebar's header and footer. */
 const sidebarParts = (page: Page, sidebar: string) =>
-  page.eval<{ switch: string | null; wordmark: boolean; search: boolean; searchButton: boolean; toggle: boolean }>(`(() => {
+  page.eval<{ switch: string | null; wordmark: boolean; search: boolean; searchButton: boolean }>(`(() => {
     const aside = document.querySelector(${JSON.stringify(sidebar)});
     const shown = (el) => !!el && el.getBoundingClientRect().width > 0;
     return {
@@ -38,7 +38,6 @@ const sidebarParts = (page: Page, sidebar: string) =>
       wordmark: shown(aside.querySelector('.wordmark')),
       search: shown(aside.querySelector('label.search')),
       searchButton: shown(aside.querySelector('.brand-row [aria-label="Search"]')),
-      toggle: shown(aside.querySelector('.settings-row .bots-toggle')),
     };
   })()`);
 
@@ -59,7 +58,7 @@ describe.skipIf(!browser)("phone layout", () => {
     const page = await Page.open(chrome!.ws, server!.url.href, PHONE.width, PHONE.height, READY);
     await page.eval("store.setState({ botsOpen: false, sidebarOpen: true })");
     await page.finish();
-    expect(await sidebarParts(page, ".sidebar:not(.bots-sidebar)")).toEqual({ switch: "Build", wordmark: false, search: false, searchButton: true, toggle: false });
+    expect(await sidebarParts(page, ".sidebar:not(.bots-sidebar)")).toEqual({ switch: "Build", wordmark: false, search: false, searchButton: true });
     // The search opens from its button, ready to type in.
     await page.click('.sidebar:not(.bots-sidebar) .brand-row [aria-label="Search"]');
     await page.until("document.activeElement?.matches('.sidebar:not(.bots-sidebar) label.search input')");
@@ -73,7 +72,7 @@ describe.skipIf(!browser)("phone layout", () => {
     await page.until("store.getState().botsOpen");
     await page.finish();
     expect(await page.eval<[boolean, boolean]>("[store.getState().botsSidebarOpen, store.getState().sidebarOpen]")).toEqual([true, false]);
-    expect(await sidebarParts(page, ".bots-sidebar")).toEqual({ switch: "Bots", wordmark: false, search: false, searchButton: true, toggle: false });
+    expect(await sidebarParts(page, ".bots-sidebar")).toEqual({ switch: "Bots", wordmark: false, search: false, searchButton: true });
     // The list is the whole screen, its switch inside it.
     const [left, right] = await page.eval<[number, number]>("(() => { const r = document.querySelector('.bots-sidebar .mode-switch').getBoundingClientRect(); return [r.left, r.right]; })()");
     expect(left).toBeGreaterThanOrEqual(0);
