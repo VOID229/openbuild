@@ -429,7 +429,7 @@ test("a turn's chat is where what the bot sends and lists goes, and it sees the 
       a.ok(steered.startsWith(name(direct, 'direct', 'Alpha') + ':\\n') && !steered.includes(runner.TURN_HERE) && !steered.includes('Your to-do lists'), steered);
       runner.stop(bot.id);
       process.exit(0);
-    `, { OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") });
+    `, { OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(root, "secrets.json") });
     expect({ code, stderr: stderr.replace(/\[bots\] \S+ couldn't reply:.*\n/g, "") }).toEqual({ code: 0, stderr: "" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 }, 60_000);
