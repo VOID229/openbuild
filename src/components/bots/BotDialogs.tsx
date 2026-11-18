@@ -1,4 +1,5 @@
-// OpenBots' dialogs: making a bot, a group or a poll, naming things, and confirming a retire or a delete.
+// OpenBots' dialogs: making a bot, a group or a poll, naming things, and confirming a retire, a delete
+// or another change worth a second look.
 // The shape and colour picker here is also the details panel's avatar editor.
 import { Archive, Check, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -363,12 +364,12 @@ export function NameDialog({ title, initial = "", action, placeholder, onSubmit,
  * Confirms something worth a second look. `tone` is how its button reads: red for what can't be undone
  * (a delete, a reset), plain ink for what can (retiring a bot).
  */
-export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /> Delete</>, tone = "danger", onConfirm, onClose }: { title: string; body: string; action?: React.ReactNode; tone?: "danger" | "calm"; onConfirm: () => void; onClose: () => void }) {
+export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /> Delete</>, tone = "danger", onConfirm, onClose }: { title: string; body: React.ReactNode; action?: React.ReactNode; tone?: "danger" | "calm"; onConfirm: () => void; onClose: () => void }) {
   const modal = useModal(onClose);
   return (
     <dialog {...modal} className="confirm-dialog bots-small-dialog" aria-label={title}>
       <h2>{title}</h2>
-      <p>{body}</p>
+      {typeof body === "string" ? <p>{body}</p> : body}
       <div className="confirm-actions">
         <button type="button" className="btn btn-sm" onClick={onClose} autoFocus>
           Cancel

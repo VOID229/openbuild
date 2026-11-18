@@ -66,6 +66,9 @@ const saved = () => useBots.getState().bots[0]!.threads;
 const trigger = (label: string) => document.querySelector<HTMLButtonElement>(`button[aria-haspopup="listbox"][aria-label="${label}"]`);
 const rowLabels = () => [...host.querySelectorAll(".setting-row .setting-label")].map((el) => el.textContent);
 const options = (label: string) => [...document.querySelectorAll<HTMLButtonElement>(`[role="listbox"][aria-label="${label}"] [role="option"]`)];
+const dialog = () => document.querySelector<HTMLDialogElement>("dialog.confirm-dialog");
+const button = (within: Element, text: string) => [...within.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === text)!;
+const toggle = (label: string) => host.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`);
 const frames = () => act(async () => { await new Promise((r) => setTimeout(r, 40)); });
 async function key(el: Element, k: string) {
   await act(async () => { el.dispatchEvent(new win.KeyboardEvent("keydown", { key: k, bubbles: true }) as any); });
@@ -112,8 +115,9 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(trigger("Projects this bot can work in")!.disabled).toBe(false);
     expect(host.querySelector(".setting-row-disabled")).toBeNull();
 
-    // And turning it off again greys it out without touching the scope.
+    // And turning it off again, once confirmed, greys it out without touching the scope.
     await press(host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Use OpenBuild"]')!);
+    await press(button(dialog()!, "Turn off"));
     expect(saved()).toEqual(threads);
     expect(trigger("Projects this bot can work in")!.disabled).toBe(true);
   });
@@ -183,7 +187,63 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(trigger("Projects to choose")).toBeNull();
     expect(patches.map((p) => p.body.threads.scope)).toEqual(["exclude", "exclude", "exclude", "choose", "all"]);
   });
+
+  test(`${surface}: Use OpenBuild is the one switch, with only Merge pull requests apart`, async () => {
+    await mount(surface, { enabled: true, scope: "all", projects: [] });
+    const labels = rowLabels();
+    for (const gone of ["Control others' threads", "Choose permissions", "Answer permission prompts"]) expect(labels).not.toContain(gone);
+    expect(labels.indexOf("Merge pull requests")).toBe(labels.indexOf("Use OpenBuild") + 1);
+    expect(toggle("Use OpenBuild")!.getAttribute("aria-checked")).toBe("true");
+    expect(toggle("Merge pull requests")!.getAttribute("aria-checked")).toBe("false");
+    await press(toggle("Merge pull requests")!);
+    expect(patches.at(-1)!.body.threads).toEqual({ enabled: true, scope: "all", projects: [], merge: true });
+  });
+
+  test(`${surface}: turning Use OpenBuild off asks first, listing what the bot loses`, async () => {
+    await mount(surface, { enabled: true, scope: "all", projects: [], merge: true });
+    await press(toggle("Use OpenBuild")!);
+    // Nothing is saved until it's confirmed.
+    expect(patches).toEqual([]);
+    expect(saved()!.enabled).toBe(true);
+    const asked = dialog()!;
+    expect(asked.querySelector("h2")!.textContent).toBe("Turn off OpenBuild for “manager”?");
+    expect([...asked.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "Start threads in its projects, and read them",
+      "Send to, stop and close threads, including yours and other bots'",
+      "Choose each thread's permission mode",
+      "Answer the questions and permission prompts threads ask",
+      "Merge pull requests",
+    ]);
+
+    // Cancel keeps it on.
+    await press(button(asked, "Cancel"));
+    expect(dialog()).toBeNull();
+    expect(patches).toEqual([]);
+    expect(toggle("Use OpenBuild")!.getAttribute("aria-checked")).toBe("true");
+
+    // Without merging, the list doesn't claim it loses that.
+    await press(toggle("Merge pull requests")!);
+    patches = [];
+    await press(toggle("Use OpenBuild")!);
+    expect([...dialog()!.querySelectorAll("li")].map((li) => li.textContent)).not.toContain("Merge pull requests");
+    await press(button(dialog()!, "Turn off"));
+    expect(dialog()).toBeNull();
+    expect(patches.map((p) => p.body.threads)).toEqual([{ enabled: false, scope: "all", projects: [], merge: false }]);
+    expect(toggle("Merge pull requests")).toBeNull();
+
+    // Turning it on needs no confirmation.
+    await press(toggle("Use OpenBuild")!);
+    expect(dialog()).toBeNull();
+    expect(saved()!.enabled).toBe(true);
+  });
 }
+
+test("a bot without a grant shows OpenBuild off, and turning it on gives the default: all projects", async () => {
+  await mount("settings", undefined);
+  expect(toggle("Use OpenBuild")!.getAttribute("aria-checked")).toBe("false");
+  await press(toggle("Use OpenBuild")!);
+  expect(patches.at(-1)!.body.threads).toEqual({ enabled: true, scope: "all", projects: [] });
+});
 
 test("opening a dropdown with the mouse leaves focus where it was", async () => {
   await mount("settings", { enabled: true, scope: "all", projects: [] });

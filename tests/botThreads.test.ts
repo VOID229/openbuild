@@ -106,7 +106,7 @@ const threads = await import("../server/bots/threads");
 const db = await import("../server/bots/db");
 const { serverId } = await import("../server/devices");
 const { coversProject } = await import("../shared/bots");
-const { handle, answerRefusal, assertWithinDefaults, replyFor, resolvePermission, waitingAsks, guide, brief } = threads;
+const { handle, answerRefusal, replyFor, resolvePermission, waitingAsks, guide, brief } = threads;
 
 const project = await projects.addProject(repo);
 const { bot } = svc.createBot({ name: "Juniper" });
@@ -213,16 +213,16 @@ test("a worktree thread starts from the branch's remote branch unless told not t
   }
 });
 
-test("without the choice, a thread gets the user's default for that harness", async () => {
+test("a thread the bot picks no mode for gets the user's default for that harness", async () => {
   svc.updateSettings({ harnesses: { permissions: { claude: "safe" } } });
-  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "yolo" });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude" });
   expect(admitted[0].permission).toBe("safe");
   expect(started.permission).toBe("safe");
-  expect(started.note).toContain("default");
+  expect(started.note).toBeUndefined();
+  expect((await call("options", { harness: "claude" })).permissions).toMatchObject({ modes: expect.any(Array), used_when_you_pick_none: "safe" });
 });
 
-test("with the choice, a bot's pick wins but must be a mode the harness offers", async () => {
-  grant({ choosePermission: true });
+test("a bot's pick wins but must be a mode the harness offers", async () => {
   svc.updateSettings({ harnesses: { permissions: { claude: "safe" } } });
   await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "yolo" });
   expect(admitted[0].permission).toBe("yolo");
@@ -257,10 +257,10 @@ test("remote control is off unless asked, and only Claude Code takes it per thre
 
 test("permission resolution never falls back past a mode that's gone", async () => {
   const list = async () => modes;
-  const access = { enabled: true, projects: [] };
-  expect(await resolvePermission("claude", undefined, access, undefined, list)).toBeUndefined();
-  expect(await resolvePermission("pi", "yolo", access, { claude: "safe" }, list)).toBeUndefined();
-  await expect(resolvePermission("claude", undefined, access, { claude: "gone" }, list)).rejects.toThrow(/Settings → Bots/);
+  expect(await resolvePermission("claude", undefined, undefined, list)).toBeUndefined();
+  expect(await resolvePermission("pi", "yolo", { claude: "safe" }, list)).toBeUndefined();
+  await expect(resolvePermission("claude", undefined, { claude: "gone" }, list)).rejects.toThrow(/Settings → Bots/);
+  await expect(resolvePermission("claude", "gone", { claude: "safe" }, list)).rejects.toThrow(/It offers/);
 });
 
 test("the user can keep bots off a harness", async () => {
@@ -289,7 +289,7 @@ test("questions wake the bot once, and it can answer them", async () => {
   expect(wakes.filter((w) => w.text.includes("Which?")).length).toBe(1);
 });
 
-test("permission prompts stay the user's without the grant, whatever the bot claims", async () => {
+test("Use OpenBuild answers permission prompts; a bot that has lost it is told they're the user's", async () => {
   await call("start", { project: project.name, prompt: "Go" });
   const { threadId, stream } = admitted[0];
   const prompt = ask({ id: "p1", title: "Allow rm -rf?", options: ["Allow once", "Deny"] });
@@ -297,20 +297,31 @@ test("permission prompts stay the user's without the grant, whatever the bot cla
   runs.get(stream.id)!.push(prompt);
   await settle();
   const note = wakes.find((w) => w.text.includes("Allow rm"));
-  expect(note.text).toContain("only the user");
-  expect(note.text).not.toContain("question p1");
-  await expect(call("answer", { thread: threadId, question: "p1", answer: "Allow once", kind: "question", question_kind: "question" })).rejects.toThrow(/permission prompt/);
-  expect(answers).toEqual([]);
-  grant({ approve: true });
+  expect(note.text).toContain("question p1");
+  // It's shown as a permission prompt, from the worker's record, so the bot knows it's allowing something.
+  expect((await call("read", { thread: threadId })).waiting_on[0]).toMatchObject({ id: "p1", kind: "permission" });
   await call("answer", { thread: threadId, question: "p1", answer: "Allow once" });
   expect(answers[0][2]).toEqual({ value: "Allow once" });
+
+  // Turned off while a thread it started waits: the note says the user answers, and the tool refuses.
+  answers.length = wakes.length = 0;
+  const again = ask({ id: "p2", title: "Allow push?", options: ["Allow once", "Deny"] });
+  snapshots[0].events = [prompt, { t: "asked", id: "p1", answer: "Allow once" }, again];
+  runs.get(stream.id)!.push(again);
+  grant({ enabled: false });
+  await settle();
+  const off = wakes.find((w) => w.text.includes("Allow push"));
+  expect(off.text).toContain("only the user");
+  expect(off.text).not.toContain("question p2");
+  await expect(call("answer", { thread: threadId, question: "p2", answer: "Allow once" })).rejects.toThrow(/hasn't given you access/);
+  expect(answers).toEqual([]);
 });
 
-test("secrets are only ever the user's", () => {
-  expect(answerRefusal({ secret: true, question: true }, { approve: true })).toContain("secret");
-  expect(answerRefusal({ question: true }, {})).toBeUndefined();
-  expect(answerRefusal({}, {})).toContain("permission prompt");
-  expect(answerRefusal({}, { approve: true })).toBeUndefined();
+test("secrets are only ever the user's, and nothing is a bot's to answer without access", () => {
+  expect(answerRefusal({ secret: true }, { enabled: true })).toContain("secret");
+  expect(answerRefusal({}, { enabled: true })).toBeUndefined();
+  expect(answerRefusal({}, { enabled: false })).toContain("only the user");
+  expect(answerRefusal({}, undefined)).toContain("only the user");
 });
 
 test("answers are checked against what the question takes", () => {
@@ -409,7 +420,7 @@ test("the bot's own answer isn't told back to it; another bot's is", async () =>
   await Bun.sleep(60);
   expect(answered()).toEqual([]);
   const { bot: tracer } = svc.createBot({ name: "Tracer Bot" });
-  svc.updateBot(tracer.id, { threads: { enabled: true, projects: [project.id], others: true } });
+  svc.updateBot(tracer.id, { threads: { enabled: true, projects: [project.id] } });
   await handle(tracer.id, { action: "answer", thread: threadId, question: "a2", answer: "L" });
   asked("a2", "L");
   await Bun.sleep(60);
@@ -574,16 +585,6 @@ test("a message to a working thread is steered in", async () => {
   expect(reply.steerSenders[steers[0][1]]).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
 });
 
-test("a bot held to the defaults can't write into a thread with more power", async () => {
-  grant({ others: true });
-  const chat = { id: crypto.randomUUID(), title: "Mine", runtime: "claude", permission: "yolo", workspace: { projectId: project.id, projectName: project.name, cwd: repo }, createdAt: 1, updatedAt: 1, messages: [] };
-  storage.putChat(chat as never);
-  await expect(call("send", { thread: chat.id, text: "Do it" })).rejects.toThrow(/permissions you can't choose/);
-  expect(() => assertWithinDefaults({ runtime: "claude", permission: "yolo" }, { enabled: true, projects: [] }, { claude: "yolo" })).not.toThrow();
-  expect(() => assertWithinDefaults({ runtime: "cursor", cursorAllowAllTools: true }, { enabled: true, projects: [] }, undefined)).toThrow();
-  expect(() => assertWithinDefaults({ runtime: "claude", permission: "yolo" }, { enabled: true, projects: [], choosePermission: true }, undefined)).not.toThrow();
-});
-
 test("threads outside its projects are out of reach", async () => {
   const other = { id: crypto.randomUUID(), title: "Other", workspace: { projectId: "elsewhere", projectName: "Elsewhere", cwd: repo }, createdAt: 1, updatedAt: 1, messages: [] };
   storage.putChat(other as never);
@@ -691,7 +692,7 @@ test("a bot's message queued or steered for a thread keeps it open through its p
 test("merging needs the grant and every check green", async () => {
   view = { number: 7, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "failing" }], canWrite: true, methods: ["squash", "merge"], headSha: "abc" };
   await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/aren't allowed/);
-  grant({ merge: true, others: true });
+  grant({ merge: true });
   await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/every check/);
   view.checkList = [{ name: "ci", state: "passing" }];
   view.mergeState = "BEHIND";
@@ -703,32 +704,27 @@ test("merging needs the grant and every check green", async () => {
   expect(merged[0]).toEqual([repo, 7, "squash", "abc", false]);
 });
 
-test("threads it didn't start are only its to control with the grant", async () => {
+test("Use OpenBuild controls threads it didn't start too: the user's and other bots'", async () => {
   const theirs = { id: crypto.randomUUID(), title: "Theirs", workspace: { projectId: project.id, projectName: project.name, cwd: repo }, createdAt: 1, updatedAt: 1, messages: [{ id: "u", role: "user", content: "Hi", createdAt: 1 }, { id: "a", role: "assistant", content: "Hello", createdAt: 1, model: { plan: "pi", id: "acme/one", name: "One" } }] };
   storage.putChat(theirs as never);
   await call("start", { project: project.name, prompt: "Go" });
   const mine = admitted[0].threadId;
   snapshots[0].status = "done";
-  // It still sees them, and knows which are its own.
+  // It knows which are its own.
   const listed = (await call("list")).threads;
   expect(listed.find((t: any) => t.title === "Theirs").yours).toBe(false);
   expect(listed.find((t: any) => t.thread === mine.slice(0, 8)).yours).toBe(true);
   expect((await call("read", { thread: theirs.id })).yours).toBe(false);
-  for (const action of ["send", "stop", "close"]) await expect(call(action, { thread: theirs.id, text: "Hey" })).rejects.toThrow(/didn't start that thread/);
-  await expect(call("answer", { thread: theirs.id, question: "a1", answer: "Red" })).rejects.toThrow(/didn't start that thread/);
-  expect(guide(svc.fullBot(bot.id)!)).toContain("only control the ones you started");
   await call("send", { thread: mine, text: "More" });
 
   view = { number: 9, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "passing" }], canWrite: true, methods: ["squash"], headSha: "def" };
   storage.putChat({ ...(storage.getChat(theirs.id) as any), workspace: { ...theirs.workspace, worktree: true }, pullRequest: { number: 9 } } as never);
+  // Merging is still its own grant, even for its own threads.
+  await expect(call("merge", { thread: theirs.id })).rejects.toThrow(/aren't allowed/);
   grant({ merge: true });
-  await expect(call("merge", { thread: theirs.id })).rejects.toThrow(/didn't start that thread/);
-  await expect(call("merge", { project: project.name, number: 9 })).rejects.toThrow(/didn't open #9/);
-  expect(merged).toEqual([]);
-
-  grant({ merge: true, others: true });
-  expect((await call("options")).you_may.control_threads_you_didnt_start).toBe(true);
+  expect((await call("options")).you_may).toEqual({ control_any_thread_in_your_projects: true, choose_permissions: true, answer_permission_prompts: true, merge_pull_requests: true });
   expect(guide(svc.fullBot(bot.id)!)).toContain("including ones the user or other bots started");
+  expect(guide(svc.fullBot(bot.id)!)).not.toContain("only control the ones you started");
   // The full guidance comes with options; the context keeps only the essentials and the pointer.
   expect((await call("options")).guide).toBe(guide(svc.fullBot(bot.id)!));
   expect(brief(svc.fullBot(bot.id)!)).toContain("Start with action options");
@@ -791,7 +787,7 @@ for (const runtime of ["codex", "cursor"]) {
   test(`${runtime} models and permissions use the selected login`, async () => {
     const account = { id: `${runtime}-extra`, name: `${runtime}2`, runtime, configDir: `/tmp/bot-${runtime}2` };
     storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account] } } }));
-    grant({ choosePermission: true });
+    grant();
     const options = await call("options", { harness: account.name });
     expect(options.models[0].name).toBe(account.configDir);
     expect(options.permissions.modes[0].id).toBe(account.configDir);
@@ -849,7 +845,7 @@ const finish = () => {
 };
 
 test("send changes model, effort and permission for the next turn, and keeps the thread", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
   const { threadId, cwd } = admitted[0];
   finish();
@@ -869,7 +865,7 @@ test("send changes model, effort and permission for the next turn, and keeps the
 });
 
 test("what send leaves out stays as the thread had it", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", model: "claude/two", effort: "low", speed: "fast", permission: "safe" });
   finish();
   const effortOnly = await call("send", { thread: started.thread, text: "More", effort: "high" });
@@ -892,7 +888,7 @@ test("what send leaves out stays as the thread had it", async () => {
 });
 
 test("send refuses another harness's model or harness, and saves nothing", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go" });
   const { threadId } = admitted[0];
   finish();
@@ -909,7 +905,7 @@ test("send refuses another harness's model or harness, and saves nothing", async
 });
 
 test("an invalid combination writes nothing, even with valid parts", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
   const { threadId } = admitted[0];
   finish();
@@ -947,7 +943,7 @@ async function endTurn(threadId: string, how: "done" | "aborted" | "error" = "do
 }
 
 test("settings under a running turn are queued for its next one, and checked at once", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
   const { threadId } = admitted[0];
   const before = JSON.stringify(storage.getChat(threadId));
@@ -1185,22 +1181,21 @@ test("a queued message waits for a turn someone else started first", async () =>
   expect(admitted[1].message).toContain("Mine");
 });
 
-test("a bot held to the defaults can't change a thread's permission mode", async () => {
+test("a bot changes a thread's permission mode for its next turn, only to one the harness offers", async () => {
   svc.updateSettings({ harnesses: { permissions: { claude: "safe" } } });
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude" });
   const { threadId } = admitted[0];
   finish();
   const before = JSON.stringify(storage.getChat(threadId));
-  await expect(call("send", { thread: started.thread, text: "x", permission: "yolo", model: "claude/two" })).rejects.toThrow(/can't choose permissions/);
+  await expect(call("send", { thread: started.thread, text: "x", permission: "banned", model: "claude/two" })).rejects.toThrow(/doesn't offer/);
   expect(admitted.length).toBe(1);
   expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
-  // Its current mode, or other settings, are fine.
-  const sent = await call("send", { thread: started.thread, text: "x", permission: "safe", model: "claude/two" });
-  expect(sent).toMatchObject({ model: "claude/two", permission: "safe" });
+  const sent = await call("send", { thread: started.thread, text: "x", permission: "yolo", model: "claude/two" });
+  expect(sent).toMatchObject({ model: "claude/two", permission: "yolo" });
   // Claude Two doesn't take the medium effort it ran at, so it says what it uses instead.
-  expect(sent.changed).toEqual(["model", "effort"]);
+  expect(sent.changed).toEqual(["model", "effort", "permission"]);
   expect(sent.note).toContain("doesn't take effort medium");
-  expect(admitted[1].permission).toBe("safe");
+  expect(admitted[1].permission).toBe("yolo");
 });
 
 test("account threads take their models by either id, and keep the account", async () => {
@@ -1227,7 +1222,7 @@ function holdListing() {
 }
 
 test("a turn started while send checks its settings is refused without touching the thread", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
   const { threadId } = admitted[0];
   finish();
@@ -1252,7 +1247,7 @@ test("a turn started while send checks its settings is refused without touching 
 });
 
 test("a turn the worker started elsewhere during the check is refused too", async () => {
-  grant({ choosePermission: true });
+  grant();
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude" });
   const { threadId } = admitted[0];
   finish();

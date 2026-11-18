@@ -5,7 +5,7 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { MEMORY_TEXT_MAX, PROFILE_MAX_BYTES, type Bot, type BotMessage, type Conversation, type MemoryItem, type MemoryKind, type Routine, type TodoItem } from "../../shared/bots";
+import { DEFAULT_THREAD_ACCESS, FOLDED_THREAD_FLAGS, MEMORY_TEXT_MAX, PROFILE_MAX_BYTES, type Bot, type BotMessage, type Conversation, type MemoryItem, type MemoryKind, type Routine, type TodoItem } from "../../shared/bots";
 import { dataDir } from "../paths";
 import { memoryKey, profileBytes } from "./sessionPolicy";
 
@@ -44,7 +44,29 @@ function migrate(db: Database): Database {
   // Bots from before roles have none: an empty one, so the first sentence of their instructions stands in.
   db.exec("UPDATE bots SET data = json_set(data, '$.role', '') WHERE json_valid(data) AND json_type(data, '$.role') IS NULL;");
   migrateMemories(db);
+  migrateThreadAccess(db);
   return db;
+}
+
+const THREAD_ACCESS_MIGRATED = "migrated:thread-access";
+
+/**
+ * "Use OpenBuild" became the one switch for what "Control others' threads", "Choose permissions" and
+ * "Answer permission prompts" used to grant apart, and it's on by default. Once: a bot that never had a
+ * grant (the old default, off without anyone choosing it) gets the new default; one the user had
+ * turned off stays off, since turning it on now gives more than they said no to. Every grant drops the
+ * folded switches: one that was on already has what they gave. Merge pull requests stays its own.
+ * After this, a bot without a grant has no access (readers fail closed), and new bots get one.
+ */
+export function migrateThreadAccess(db: Database) {
+  db.transaction(() => {
+    if (!db.query("SELECT 1 FROM kv WHERE key = ?").get(THREAD_ACCESS_MIGRATED)) {
+      db.query("UPDATE bots SET data = json_set(data, '$.threads', json(?)) WHERE json_valid(data) AND json_type(data, '$.threads') IS NULL").run(JSON.stringify(DEFAULT_THREAD_ACCESS));
+      db.query("INSERT INTO kv (key, value) VALUES (?, ?)").run(THREAD_ACCESS_MIGRATED, String(Date.now()));
+    }
+    const paths = FOLDED_THREAD_FLAGS.map((flag) => `'$.threads.${flag}'`);
+    db.exec(`UPDATE bots SET data = json_remove(data, ${paths.join(", ")}) WHERE json_valid(data) AND (${paths.map((path) => `json_type(data, ${path}) IS NOT NULL`).join(" OR ")})`);
+  })();
 }
 
 /** A bot owed its one look through the memory it had before the split (kv key prefix). */

@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { ArrangeRequest, Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -554,6 +554,18 @@ export async function resetAll() {
 
 // ------------------------------------------------------------------ bots and conversations
 
+/**
+ * A new bot's OpenBuild access: on, in every project, for one the user makes. One a bot makes gets no
+ * more than its maker has (its projects, never merging), so a bot can't widen its reach by making
+ * another: a maker without access makes a bot without it.
+ */
+function newBotAccess(by: string | undefined): BotThreadAccess {
+  if (!by || by === "me" || !isBotId(by)) return { ...DEFAULT_THREAD_ACCESS };
+  const maker = db.getBot(by)?.threads;
+  if (!maker?.enabled) return { ...DEFAULT_THREAD_ACCESS, enabled: false };
+  return { enabled: true, scope: maker.scope ?? "choose", projects: [...maker.projects], ...(maker.excluded?.length ? { excluded: [...maker.excluded] } : {}) };
+}
+
 export function createBot(input: { id?: string; conversationId?: string; name: string; look?: Bot["look"]; instructions?: string; role?: string; by?: string }): { bot: Bot; conversationId: string } {
   const name = clip(input.name, 80);
   if (!name) throw new BotsError("A bot needs a name.");
@@ -573,6 +585,7 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
     createdAt: now,
     proactivity: "normal",
     by: input.by === "me" || (input.by && isBotId(input.by)) ? input.by : "me",
+    threads: newBotAccess(input.by),
   };
   db.putBot(bot);
   db.putConversation({ id: conversationId, kind: "direct", botIds: [id], createdAt: now, updatedAt: now });
@@ -621,7 +634,7 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
     if (!isBotEffort(patch.effort)) throw new BotsError(`Effort is ${BOT_EFFORTS.join(", ")}, or empty for the default.`);
     bot.effort = patch.effort;
   }
-  if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, scope: patch.threads.scope === "all" || patch.threads.scope === "exclude" ? patch.threads.scope : "choose", projects: strings(patch.threads.projects, 200), excluded: strings(patch.threads.excluded, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true, others: patch.threads.others === true };
+  if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, scope: patch.threads.scope === "all" || patch.threads.scope === "exclude" ? patch.threads.scope : "choose", projects: strings(patch.threads.projects, 200), excluded: strings(patch.threads.excluded, 200), merge: patch.threads.merge === true };
   if ("target" in patch) {
     setTarget(id, typeof patch.target === "string" && patch.target ? patch.target : undefined, { by: opts.by });
     Object.assign(bot, { target: db.getBot(id)?.target });
@@ -656,12 +669,7 @@ export function rememberModelNames(models: { provider: string; id: string; name?
 const HANDLED = new Set(["model", "effort", "fallbackModels", "noFallbacks", "proactivity", "computer", "threads", "name", "primary", "role"]);
 const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look", "formerNames", "target"]);
 const CHECK_INS: Record<string, string> = { off: "off", low: "every 8 hours", normal: "every 3 hours", high: "every hour" };
-const THREAD_FLAGS = [
-  ["others", "control others' threads"],
-  ["choosePermission", "choose permissions"],
-  ["approve", "answer permission prompts"],
-  ["merge", "merge pull requests"],
-] as const;
+const THREAD_FLAGS = [["merge", "merge pull requests"]] as const;
 
 /**
  * What changed between two saves of a bot, as "model: Grok 4.7 → GPT 6.1 Sol", one per setting that
