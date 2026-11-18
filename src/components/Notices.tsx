@@ -9,12 +9,13 @@ import { useReleaseUpdate } from "../lib/releaseUpdate";
 import { providerList, providerUpdateText, useRuntimeUpdates, useUpdateAvailable } from "../lib/update";
 import { IconButton, Spinner } from "./primitives";
 
-const NOTICE_MS = 4000;
+/** How long a notice stays, in ms: 4 s. Only a test fixture changes it (tests/fixtures/releaseUpdate). */
+export const noticeTiming = { ms: 4000 };
 /** The longest .notice-leaving animation (styles.css): the corner's slide out. */
 const NOTICE_LEAVE_MS = 220;
 
 /**
- * One notice. It leaves on its own after NOTICE_MS unless `sticky` (work in progress) or
+ * One notice. It leaves on its own after noticeTiming.ms unless `sticky` (work in progress) or
  * `persistent` (waiting on the user). The clock stops while it's hovered, focused from the keyboard
  * or showing its details, and goes on from where it was; new text starts it again. `onExpire` hides
  * it for now, the close button's `onDismiss` for good.
@@ -34,10 +35,10 @@ function Notice({ text, role = "status", action, details, sticky = false, persis
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   const [open, setOpen] = useState(false);
-  const left = useRef(NOTICE_MS);
+  const left = useRef(noticeTiming.ms);
   useEffect(() => { if (!details) setOpen(false); }, [details]);
   // Before the clock's effect, so a change of text or the end of some work gets the whole time.
-  useEffect(() => { left.current = NOTICE_MS; }, [text, sticky]);
+  useEffect(() => { left.current = noticeTiming.ms; }, [text, sticky]);
   const paused = hovered || focused || open;
   useEffect(() => {
     if (sticky || persistent || paused || leaving) return;
@@ -87,8 +88,8 @@ function Notice({ text, role = "status", action, details, sticky = false, persis
 /**
  * Notices over the window; Settings → Notifications turns each kind off. Reconnecting shows at the
  * top in the middle; updates (a newer build to reload, newer harnesses) slide in at the top right
- * and leave after NOTICE_MS. A newer OpenBuild release has none: the button beside the version in
- * the sidebar's footer offers it, installs it and restarts the server (ReleaseUpdate.tsx).
+ * and leave after noticeTiming.ms (4 s). A newer OpenBuild release has none: the button beside the
+ * version in the sidebar's footer offers it, installs it and restarts the server (ReleaseUpdate.tsx).
  */
 export function Notices() {
   const prefs = useStore((s) => s.settings.notifications);
