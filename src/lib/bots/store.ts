@@ -18,8 +18,9 @@ import { botModels } from "../pi";
 import { useStore } from "../store";
 import { trackShown, type Shown } from "./activity";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { answerText, castVote, cleanRole, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
+import { answerText, castVote, cleanRole, marksUnread, toggleReactionIn, type ArrangeRequest, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
+import type { Arrangement } from "./sidebarOrder";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
 export interface Draft {
@@ -89,6 +90,8 @@ interface BotsState {
   loadOlder: (conversationId: string) => Promise<void>;
   /** Sections the user made, in order. */
   sections: string[];
+  /** The sidebar's order where the user put chats by hand, by id (BotsSettings.order, sidebarOrder.ts). */
+  order: string[];
   /** Sidebar sections folded shut, by name (custom ones, "hidden", "side"). */
   folded: string[];
   activeId?: string;
@@ -152,6 +155,10 @@ interface BotsState {
   updateConversation: (id: string, patch: Partial<Omit<Conversation, "id" | "messages">>) => void;
   deleteConversation: (id: string) => void;
   togglePin: (id: string) => void;
+  /** A drag (or a keyboard move) in the sidebar: chats that changed list, and the new order. */
+  arrange: (arrangement: Arrangement) => void;
+  /** Back to the usual order: pins as they were pinned, rows by their latest message. */
+  resetOrder: () => void;
   addSection: (name: string) => void;
   toggleFolded: (name: string) => void;
 
@@ -187,6 +194,20 @@ interface BotsState {
 }
 
 const mapBot = (bots: Bot[], id: string, fn: (b: Bot) => Bot) => bots.map((b) => (b.id === id ? fn(b) : b));
+const NO_ORDER: string[] = [];
+
+/** A conversation patch as the server takes it: a cleared section or pin is sent as null, which JSON keeps. */
+const wirePatch = (patch: object) => Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, value === undefined && (key === "section" || key === "pinnedAt") ? null : value]));
+
+/** Take a chat out of the user's order, so it sits where a chat new to its list goes. */
+function unrank(id: string) {
+  const { order } = useBots.getState();
+  if (!order.includes(id)) return;
+  const next = order.filter((o) => o !== id);
+  useBots.setState({ order: next });
+  void send("PATCH", "/api/bots/settings", { order: next });
+}
+
 /** The sections still holding a chat, plus `keep` (the one a chat is moving into); the server prunes the same way. */
 const filedSections = (sections: string[], conversations: Conversation[], keep?: string) => {
   const used = new Set(conversations.map((c) => c.section));
@@ -243,6 +264,7 @@ export const useBots = create<BotsState>()(
       }
     },
     sections: [],
+    order: NO_ORDER,
     folded: ["hidden"],
     detailsOpen: false,
     seeded: false,
@@ -257,7 +279,7 @@ export const useBots = create<BotsState>()(
 
     ensureSeeded: () => connect(),
     reset: () => {
-      set({ bots: [], conversations: [], sections: [], folded: ["hidden"], typing: {}, drafts: [], pulses: {}, focus: undefined, seeded: true });
+      set({ bots: [], conversations: [], sections: [], order: NO_ORDER, folded: ["hidden"], typing: {}, drafts: [], pulses: {}, focus: undefined, seeded: true });
       void send("POST", "/api/bots/reset");
     },
     setDefaultModel: (model) => {
@@ -366,8 +388,9 @@ export const useBots = create<BotsState>()(
         const conversations = mapConversation(s.conversations, id, (c) => ({ ...c, ...patch }));
         return "section" in patch ? { conversations, ...withSections(s, filedSections(s.sections, conversations, patch.section)) } : { conversations };
       });
-      const wire = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, value === undefined && (key === "section" || key === "pinnedAt") ? null : value]));
-      void send("PATCH", `/api/bots/conversations/${id}`, wire);
+      void send("PATCH", `/api/bots/conversations/${id}`, wirePatch(patch));
+      // Moved to another list from its menu: it goes where a chat new to that list goes, not where it was put by hand in the old one.
+      if ("section" in patch || "pinnedAt" in patch || "hidden" in patch) unrank(id);
     },
     deleteConversation: (id) => {
       const c = get().conversations.find((x) => x.id === id);
@@ -382,6 +405,24 @@ export const useBots = create<BotsState>()(
       const pinned = !get().conversations.find((c) => c.id === id)?.pinnedAt;
       set((s) => ({ conversations: mapConversation(s.conversations, id, (c) => ({ ...c, pinnedAt: c.pinnedAt ? undefined : Date.now(), hidden: false })) }));
       void send("PATCH", `/api/bots/conversations/${id}`, { pinnedAt: pinned ? Date.now() : null, hidden: false });
+      unrank(id);
+    },
+    arrange: ({ order, patches }) => {
+      const known = new Set(get().conversations.map((c) => c.id));
+      const next = order.filter((id) => known.has(id));
+      set((s) => {
+        let conversations = s.conversations;
+        for (const [id, patch] of patches) conversations = mapConversation(conversations, id, (c) => ({ ...c, ...patch }));
+        const into = patches.find(([, p]) => p.section)?.[1].section;
+        return { conversations, order: next, ...(patches.some(([, p]) => "section" in p) ? withSections(s, filedSections(s.sections, conversations, into)) : {}) };
+      });
+      // One write: sent as separate ones, a swap's first half would empty a section the second half fills, and the server would drop it in between.
+      const body: ArrangeRequest = { patches: patches.map(([id, patch]) => [id, wirePatch(patch)]), order: next };
+      void send("POST", "/api/bots/arrange", body);
+    },
+    resetOrder: () => {
+      set({ order: NO_ORDER });
+      void send("PATCH", "/api/bots/settings", { order: [] });
     },
     addSection: (name) => {
       if (get().sections.includes(name)) return;
@@ -500,7 +541,7 @@ const openable = (conversations: Conversation[], activeId?: string) =>
 
 type StoreGet = () => BotsState;
 type StoreSet = (partial: Partial<BotsState> | ((s: BotsState) => Partial<BotsState>)) => void;
-type Cached = Pick<BotsState, "bots" | "conversations" | "sections">;
+type Cached = Pick<BotsState, "bots" | "conversations" | "sections" | "order">;
 
 const messagePath = (conversationId: string, messageId: string) => `/api/bots/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`;
 const hasReaction = (conversations: Conversation[], conversationId: string, messageId: string, emoji: string, to?: string) =>
@@ -546,7 +587,7 @@ function queueChanged(id: string) {
 /** How many of a workspace's changes are still on their way. */
 export const pendingWrites = (id: string) => queues.get(id)?.pending ?? 0;
 
-const EMPTY: Cached = { bots: [], conversations: [], sections: [] };
+const EMPTY: Cached = { bots: [], conversations: [], sections: [], order: NO_ORDER };
 
 // ------------------------------------------------------------------ layout, per workspace
 
@@ -820,7 +861,7 @@ const CACHE_MESSAGES = 50;
 
 let saving: ReturnType<typeof setTimeout> | undefined;
 useBots.subscribe((s, prev) => {
-  if (!s.loaded || !session || (s.bots === prev.bots && s.conversations === prev.conversations && s.sections === prev.sections)) return;
+  if (!s.loaded || !session || (s.bots === prev.bots && s.conversations === prev.conversations && s.sections === prev.sections && s.order === prev.order)) return;
   const visit = session;
   clearTimeout(saving);
   saving = setTimeout(() => {
@@ -886,8 +927,9 @@ function load(visit: Visit): Promise<void> {
     .catch(() => { /* The stream retries once OpenBots is open. */ });
   return cacheGet<Cached>(cacheKey(visit.id), cache).then((cached) => {
     if (!cached || !live(visit) || useBots.getState().loaded) return;
-    visit.confirmed = cached;
-    useBots.setState((s) => ({ ...cached, activeId: openable(cached.conversations, s.activeId) }));
+    // A copy saved before the order was kept has none.
+    visit.confirmed = { ...cached, order: cached.order ?? NO_ORDER };
+    useBots.setState((s) => ({ ...visit.confirmed, activeId: openable(cached.conversations, s.activeId) }));
   }, () => {});
 }
 
@@ -1072,7 +1114,7 @@ function apply(visit: Visit, e: BotsEvent) {
   applyEvent(e, () => authoritative, (patch) => {
     authoritative = { ...authoritative, ...(typeof patch === "function" ? patch(authoritative) : patch) };
   }, true);
-  visit.confirmed = { bots: authoritative.bots, conversations: authoritative.conversations, sections: authoritative.sections };
+  visit.confirmed = { bots: authoritative.bots, conversations: authoritative.conversations, sections: authoritative.sections, order: authoritative.order };
   applyEvent(e, get, set);
   if (e.t === "snapshot") reconcile(visit.id, e.conversations);
 }
@@ -1084,6 +1126,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       bots: e.bots,
       conversations: e.conversations,
       sections: e.settings.sections,
+      order: e.settings.order ?? NO_ORDER,
       typing: e.typing,
       drafts: e.drafts,
       status: e.status,
@@ -1203,7 +1246,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     // here is already in the store by now, and BotExtensions asks for the fresh listing itself.
     const extensions = e.settings.customExtensions ?? NO_EXTENSIONS;
     if (!authoritativeOnly && JSON.stringify(extensions) !== JSON.stringify(get().customExtensions)) void botModels(true).catch(() => {});
-    set((s) => ({ ...withSections(s, e.settings.sections), defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} }));
+    set((s) => ({ ...withSections(s, e.settings.sections), order: e.settings.order ?? NO_ORDER, defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} }));
   }
 }
 

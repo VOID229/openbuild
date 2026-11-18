@@ -727,6 +727,16 @@ export interface SideHuddle {
 /** A huddle's message cap: three each, at most twelve. */
 export const huddleLimit = (members: number) => Math.min(12, 3 * members);
 
+/**
+ * A move in the sidebar, sent as one write (POST /api/bots/arrange): the chats that changed list,
+ * pinned or not and their section (null clears either), and the new order. One write, so a swap
+ * that empties a section only for the other chat to fill it never loses the section on the way.
+ */
+export interface ArrangeRequest {
+  patches: [string, { pinnedAt?: number | null; section?: string | null }][];
+  order: string[];
+}
+
 export interface BotsSettings {
   /** "provider/model" for bots without their own. Pi's default when unset. */
   defaultModel?: string;
@@ -738,6 +748,13 @@ export interface BotsSettings {
   user?: { name?: string; context?: string };
   /** Sections the user made in the sidebar, in order. */
   sections: string[];
+  /**
+   * The sidebar's order where the user dragged chats into place, by conversation id: each list (the
+   * pinned tiles, the rows, each section) sorts the chats it holds by where they are in this. Chats
+   * not in it sit where they would anyway: new pins after the rest, rows by their latest message
+   * above the ones placed by hand.
+   */
+  order?: string[];
   /** The primary bot is still welcoming the user (naming itself, setting up bots). */
   onboarding?: "active" | "done";
   /** SearXNG instances for bot_web_search, in priority order. Other providers' keys live in the vault. */

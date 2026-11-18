@@ -40,6 +40,9 @@ export type TerminalPosition = "bottom" | "side";
 /** How a new Claude Code thread's Remote Control switch starts: on, off, or as the last thread started. */
 export type RemoteControlDefault = "on" | "off" | "last-used";
 
+/** Settings → Bots → Dropping a bot on a group. */
+export type BotGroupDrop = "ask" | "add" | "swap";
+
 export interface Settings {
   /** Settings → General → Remote control: the new-thread default for Claude Code. Absent = off. */
   remoteControlDefault?: RemoteControlDefault;
@@ -56,6 +59,11 @@ export interface Settings {
   autoDeleteWorktrees?: boolean;
   /** OpenBots uses OpenBuild's stash instead of its own. */
   crossStash?: boolean;
+  /**
+   * What dropping a bot onto a group in the OpenBots sidebar does: add the bot to the group, swap the
+   * two's places, or ask each time (the default, also when unset).
+   */
+  botGroupDrop?: BotGroupDrop;
   /**
    * Notices at the top of the window. `updateRuntimes` lists the runtimes whose releases are
    * announced (undefined = every runtime that can be checked), and `dismissedUpdates` is, per

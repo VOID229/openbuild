@@ -2,7 +2,7 @@
 // with its latest message, filed under the user's own sections. Closed on a desktop, it narrows to
 // a rail of avatars instead of going away; the chats between bots sit at its end, as in the list,
 // each marked as a DM between them.
-import { Archive, ArchiveRestore, Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UserPlus, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
@@ -23,6 +23,8 @@ import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
 import { betweenNames, ConversationAvatar, DmMark, FitText, previewOf, shortTime, useAwayLines, useBusyBots } from "./common";
 import { SwitchKeyBadge, useBotSwitchKeys } from "./switchKeys";
+import { canJoin, movableLists, planMove, planStep, sidebarLists, type ListKey } from "../../lib/bots/sidebarOrder";
+import { DragGhost, GroupDropMenu, isDragging, useSidebarDrag, type GroupDropState, type Hit } from "./SidebarDrag";
 
 type Dialog =
   | { kind: "bot" }
@@ -80,7 +82,8 @@ function usePeek() {
   const bind = useCallback<Peek>(
     (id, side) => ({
       onPointerEnter: (e) => {
-        if (e.pointerType === "touch") return;
+        // Nothing pops up over the list while a chat is dragged across it.
+        if (e.pointerType === "touch" || isDragging()) return;
         const el = e.currentTarget;
         clearTimeout(timer.current);
         timer.current = setTimeout(() => el.isConnected && setPeek({ id, side, rect: el.getBoundingClientRect() }), PEEK_DELAY);
@@ -202,6 +205,8 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
   return (
     <div
       className={cx("bots-row", active && "bots-row-active", conversation.unread && "bots-row-unread", retired && "bots-row-retired")}
+      data-drag-id={conversation.id}
+      data-drag-kind="row"
       {...longPress.handlers}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -244,6 +249,8 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       data-bot-slot={conversation.id}
       data-pinned
       aria-current={active ? "page" : undefined}
+      data-drag-id={conversation.id}
+      data-drag-kind="tile"
       onClick={() => select(conversation.id)}
       {...longPress.handlers}
       onContextMenu={(e) => {
@@ -280,12 +287,13 @@ function FriendsLine({ friends }: { friends: FriendSummary[] }) {
 }
 
 /** `closed`: folded until the user opens it, where the others are open until folded (the same list remembers both). */
-function Section({ name, label, count, closed, children }: { name: string; label: string; count?: number; closed?: boolean; children: React.ReactNode }) {
+/** `drop`: the list a chat dragged onto its heading goes into. */
+function Section({ name, label, count, closed, drop, children }: { name: string; label: string; count?: number; closed?: boolean; drop?: ListKey; children: React.ReactNode }) {
   const key = closed ? `${name}:open` : name;
   const marked = useBots((s) => s.folded.includes(key));
   const open = closed ? marked : !marked;
   return (
-    <section className="history-group bots-section" data-section={name}>
+    <section className="history-group bots-section" data-section={name} data-drop-list={drop}>
       <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={() => useBots.getState().toggleFolded(key)}>
         {label}
         {count !== undefined && <span className="bots-section-count">{count}</span>}
@@ -298,7 +306,17 @@ function Section({ name, label, count, closed, children }: { name: string; label
   );
 }
 
-function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onClose: () => void; onDialog: (d: Dialog) => void }) {
+/** Where a chat can move one step in its own list, from its menu: the touch and keyboard way to drag it. */
+interface Moves {
+  back: boolean;
+  on: boolean;
+  /** A pinned tile, which moves left and right. */
+  tile: boolean;
+}
+
+const alt = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌥" : "Alt+";
+
+function ConversationMenu({ state, moves, onMove, onClose, onDialog }: { state?: MenuState; moves?: Moves; onMove: (id: string, step: -1 | 1) => void; onClose: () => void; onDialog: (d: Dialog) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const last = useRef(state);
   if (state) last.current = state;
@@ -306,15 +324,19 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
   const conversation = useBots((s) => s.conversations.find((c) => c.id === current?.id));
   const bot = useBots((s) => (conversation?.kind === "direct" ? s.bots.find((b) => b.id === conversation.botIds[0]) : undefined));
   const sections = useBots((s) => s.sections);
+  const bots = useBots((s) => s.bots);
+  const all = useBots((s) => s.conversations);
+  // The groups this bot could join, as dropping it on one does.
+  const groups = useMemo(() => all.filter((g) => canJoin(conversation, g, bots) && !g.hidden), [all, conversation, bots]);
   const open = !!state;
   const { mounted, visible } = usePresence(open, 180);
   const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
-  const [sub, setSub] = useState(false);
+  const [sub, setSub] = useState<"section" | "group">();
   useDismiss(open, onClose, [ref]);
 
   useLayoutEffect(() => {
     if (!open || !mounted || !state) return;
-    setSub(false);
+    setSub(undefined);
     const el = ref.current;
     const w = el?.offsetWidth ?? 220;
     const h = el?.offsetHeight ?? 300;
@@ -343,7 +365,7 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
       onContextMenu={(e) => e.preventDefault()}
       onMouseOver={(e) => {
         const item = (e.target as Element).closest(".menu-item");
-        if (canHover() && item && !item.closest(".filter-row")) setSub(false);
+        if (canHover() && item && !item.closest(".filter-row")) setSub(undefined);
       }}
     >
       {/* A retired bot's chat is filed under Retired until it's rehired: what's left is bringing it back, or deleting it. */}
@@ -355,13 +377,27 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
       {!retired && <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.togglePin(conversation.id))}>
         {conversation.pinnedAt ? <PinOff size={15} /> : <Pin size={15} />} {conversation.pinnedAt ? "Unpin" : "Pin"}
       </button>}
-      {!retired && <div className="filter-row" onMouseEnter={() => canHover() && setSub(true)}>
-        <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={sub} className={cx("menu-item", sub && "menu-item-active")} onClick={() => setSub(!sub)}>
+      {moves?.back && (
+        <button type="button" role="menuitem" className="menu-item" onClick={act(() => onMove(conversation.id, -1))}>
+          {moves.tile ? <ArrowLeft size={15} /> : <ArrowUp size={15} />}
+          <span className="menu-item-label">{moves.tile ? "Move left" : "Move up"}</span>
+          <span className="menu-item-hint">{alt}{moves.tile ? "←" : "↑"}</span>
+        </button>
+      )}
+      {moves?.on && (
+        <button type="button" role="menuitem" className="menu-item" onClick={act(() => onMove(conversation.id, 1))}>
+          {moves.tile ? <ArrowRight size={15} /> : <ArrowDown size={15} />}
+          <span className="menu-item-label">{moves.tile ? "Move right" : "Move down"}</span>
+          <span className="menu-item-hint">{alt}{moves.tile ? "→" : "↓"}</span>
+        </button>
+      )}
+      {!retired && <div className="filter-row" onMouseEnter={() => canHover() && setSub("section")}>
+        <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={sub === "section"} className={cx("menu-item", sub === "section" && "menu-item-active")} onClick={() => setSub(sub === "section" ? undefined : "section")}>
           <FolderInput size={15} />
           <span className="menu-item-label">Move to section</span>
           <ChevronRight size={14} className="filter-chevron" />
         </button>
-        {sub && (
+        {sub === "section" && (
           <div className="popover menu filter-flyout" data-state="open" role="menu" aria-label="Move to section" onKeyDown={(e) => { e.stopPropagation(); arrowNav(e); }}>
             {sections.map((name) => (
               <button key={name} type="button" role="menuitemradio" aria-checked={conversation.section === name} className="menu-item" onClick={act(() => st.updateConversation(conversation.id, { section: name }))}>
@@ -381,6 +417,25 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
           </div>
         )}
       </div>}
+      {/* What dropping a bot on a group does, for touch and the keyboard. */}
+      {groups.length > 0 && (
+        <div className="filter-row" onMouseEnter={() => canHover() && setSub("group")}>
+          <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={sub === "group"} className={cx("menu-item", sub === "group" && "menu-item-active")} onClick={() => setSub(sub === "group" ? undefined : "group")}>
+            <UserPlus size={15} />
+            <span className="menu-item-label">Add to group</span>
+            <ChevronRight size={14} className="filter-chevron" />
+          </button>
+          {sub === "group" && (
+            <div className="popover menu filter-flyout" data-state="open" role="menu" aria-label="Add to group" onKeyDown={(e) => { e.stopPropagation(); arrowNav(e); }}>
+              {groups.map((g) => (
+                <button key={g.id} type="button" role="menuitem" className="menu-item" onClick={act(() => st.updateConversation(g.id, { botIds: [...g.botIds, conversation.botIds[0]!] }))}>
+                  <span className="menu-item-label">{conversationName(g, bots)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.updateConversation(conversation.id, { unread: !conversation.unread }))}>
         {conversation.unread ? <Bell size={15} /> : <BellDot size={15} />} {conversation.unread ? "Mark as read" : "Mark as unread"}
       </button>
@@ -664,27 +719,79 @@ export function BotsSidebar() {
   }, []);
 
   const friends = useBots((s) => s.friends);
-  const { pinned, rest, filed, side, hidden, shared, retired } = useMemo(() => {
-    const byRecent = (a: Conversation, b: Conversation) => b.updatedAt - a.updatedAt;
-    // A retired bot's chat is under Retired and nowhere else, pinned, filed or hidden as it may be: it's back where it was when it's rehired.
-    const away = new Set(bots.filter((b) => b.retiredAt).map((b) => b.id));
-    const isRetired = (c: Conversation) => c.kind === "direct" && away.has(c.botIds[0]!);
-    const current = conversations.filter((c) => !isRetired(c));
-    const shown = current.filter((c) => !c.hidden);
-    const listed = shown.filter((c) => !c.pinnedAt && c.kind !== "side").sort(byRecent);
-    return {
-      pinned: shown.filter((c) => c.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!),
-      // Chats shared with friends get a section of their own, unless the user filed one elsewhere.
-      shared: listed.filter((c) => c.friend && (!c.section || !sections.includes(c.section))),
-      rest: listed.filter((c) => !c.friend && (!c.section || !sections.includes(c.section))),
-      filed: sections.map((name) => [name, listed.filter((c) => c.section === name)] as const),
-      side: shown.filter((c) => !c.pinnedAt && c.kind === "side").sort(byRecent),
-      hidden: current.filter((c) => c.hidden).sort(byRecent),
-      retired: conversations.filter(isRetired).sort(byRecent),
-    };
-  }, [conversations, sections, bots]);
+  const order = useBots((s) => s.order);
+  const lists = useMemo(() => sidebarLists(conversations, bots, sections, order), [conversations, sections, bots, order]);
+  const { pinned, rest, filed, side, hidden, shared, retired } = lists;
+  // The rail runs the chats together by their latest message; once some were put in place by hand, as the list has them.
+  const railRest = useMemo(() => (order.length ? [...rest, ...filed.flatMap(([, list]) => list), ...shared] : [...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)), [order, rest, filed, shared]);
+  // The lists chats are dragged in and out of, and moved in from the keyboard or their menu.
+  const movable = useMemo(() => movableLists(lists), [lists]);
 
   const q = query.trim().toLowerCase();
+  // Moving chats is managing the workspace, which another device's isn't from here; search results aren't the sidebar's lists.
+  const arranging = !remote && !q && !rail && !closing;
+  const groupDrop = useStore((s) => s.settings.botGroupDrop ?? "ask");
+  const [asking, setAsking] = useState<GroupDropState>();
+  const find = (id: string) => conversations.find((c) => c.id === id);
+  const swapPlan = (id: string, other: string) => planMove(movable, order, id, { id: other, place: "swap" });
+  const dropOnGroup = (id: string, groupId: string, choice: "add" | "swap") => {
+    const st = useBots.getState();
+    const drag = find(id);
+    const group = find(groupId);
+    if (choice === "add") {
+      if (drag && group && canJoin(drag, group, bots)) st.updateConversation(group.id, { botIds: [...group.botIds, drag.botIds[0]!] });
+      return;
+    }
+    const plan = swapPlan(id, groupId);
+    if (plan) st.arrange(plan);
+  };
+  const joinable = (dragId: string, id: string) => canJoin(find(dragId), find(id), bots);
+  /** A hit as the move it makes: onto a tile or a group the bot can't join, the two swap. */
+  const planOf = (dragId: string, hit: Hit) => planMove(movable, order, dragId, "list" in hit ? hit : { id: hit.id, place: hit.place === "onto" ? "swap" : hit.place });
+  const { dragging, ghost } = useSidebarDrag({
+    list: listRef,
+    enabled: arranging,
+    canDrag: (id) => [...movable.values()].some((list) => list.some((c) => c.id === id)),
+    joinable,
+    valid: (dragId, hit) => ("id" in hit && hit.place === "onto" && joinable(dragId, hit.id)) || !!planOf(dragId, hit),
+    onStart: hidePeek,
+    onDrop: (dragId, hit, at) => {
+      if ("id" in hit && hit.place === "onto" && joinable(dragId, hit.id)) {
+        if (groupDrop === "ask") return setAsking({ id: dragId, groupId: hit.id, x: at.x, y: at.y });
+        return dropOnGroup(dragId, hit.id, groupDrop);
+      }
+      const plan = planOf(dragId, hit);
+      if (plan) useBots.getState().arrange(plan);
+    },
+  });
+  /** One place along its own list, then focus back on it where it went. */
+  const step = (id: string, by: -1 | 1) => {
+    const plan = planStep(movable, order, id, by);
+    if (!plan) return;
+    const focused = listRef.current?.contains(document.activeElement);
+    useBots.getState().arrange(plan);
+    if (!focused) return;
+    requestAnimationFrame(() => {
+      const el = listRef.current?.querySelector<HTMLElement>(`[data-drag-id="${CSS.escape(id)}"]`);
+      (el?.matches("button") ? el : el?.querySelector<HTMLElement>("button"))?.focus();
+    });
+  };
+  const movesOf = (id?: string): Moves | undefined => {
+    if (!id || !arranging) return;
+    for (const [key, list] of movable) {
+      const i = list.findIndex((c) => c.id === id);
+      if (i >= 0) return { back: i > 0, on: i < list.length - 1, tile: key === "pinned" };
+    }
+  };
+  // Alt+arrows move the focused chat along its list: up and down, or left and right for a pinned tile.
+  const onListKey = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (!arranging || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const by = e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : 0;
+    const el = (e.target as Element).closest<HTMLElement>("[data-drag-id]");
+    if (!by || !el) return;
+    e.preventDefault();
+    step(el.dataset.dragId!, by);
+  };
   // A reload keeps the list where it was (search results start at the top).
   useScrollRestore(listRef, rail || q ? undefined : "bots:list");
   const results = useMemo(
@@ -702,7 +809,7 @@ export function BotsSidebar() {
         {/* Closing, the rail is there from the start and the list fades away over it as the sidebar
             narrows: one sheet collapsing, not a list leaving and a rail arriving after. */}
         {(rail || closing) && (
-          <Rail pinned={pinned} rest={[...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} side={side} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
+          <Rail pinned={pinned} rest={railRest} side={side} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
         )}
         {!rail && (
           <div className="sidebar-inner bots-sidebar-inner">
@@ -748,7 +855,7 @@ export function BotsSidebar() {
             )}
             <div className="history-wrap">
               <ScrollThumb target={listRef} />
-              <nav ref={listRef} className="history bots-list" aria-label="Bots and groups">
+              <nav ref={listRef} className={cx("history bots-list", dragging && "bots-list-dragging")} aria-label="Bots and groups" onKeyDown={onListKey}>
                 {q ? (
                   <section className="history-group">
                     <h3 className="history-heading">{results.length ? `${results.length} result${results.length === 1 ? "" : "s"}` : "Results"}</h3>
@@ -766,13 +873,13 @@ export function BotsSidebar() {
                     )}
                     <div className="bots-rows">{rest.map(row)}</div>
                     {filed.map(([name, list]) => (
-                      <Section key={name} name={name} label={name} count={list.length}>
+                      <Section key={name} name={name} label={name} count={list.length} drop={`section:${name}`}>
                         {list.map(row)}
-                        {!list.length && <p className="history-empty">{touch ? "Press and hold" : "Right-click"} a bot and pick Move to section.</p>}
+                        {!list.length && <p className="history-empty">{touch ? "Press and hold a bot and pick Move to section." : "Drag a bot here, or right-click one and pick Move to section."}</p>}
                       </Section>
                     ))}
                     {(shared.length > 0 || friends.length > 0) && (
-                      <Section name="friends" label="With friends" count={shared.length}>
+                      <Section name="friends" label="With friends" count={shared.length} drop="friends">
                         {shared.map(row)}
                         <FriendsLine friends={friends} />
                       </Section>
@@ -824,7 +931,18 @@ export function BotsSidebar() {
         )}
       </aside>
       <PeekCard peek={peek} />
-      <ConversationMenu state={remote ? undefined : menu} onClose={closeMenu} onDialog={setDialog} />
+      <ConversationMenu state={remote ? undefined : menu} moves={movesOf(menu?.id)} onMove={step} onClose={closeMenu} onDialog={setDialog} />
+      <DragGhost ref={ghost} id={dragging} />
+      <GroupDropMenu
+        state={asking}
+        canSwap={!!asking && !!swapPlan(asking.id, asking.groupId)}
+        onClose={() => setAsking(undefined)}
+        onPick={(choice, remember) => {
+          if (remember) useStore.getState().updateSettings({ botGroupDrop: choice });
+          if (asking) dropOnGroup(asking.id, asking.groupId, choice);
+          setAsking(undefined);
+        }}
+      />
       <Dialogs dialog={dialog} onClose={() => setDialog(undefined)} />
     </>
   );

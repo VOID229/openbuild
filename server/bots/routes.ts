@@ -359,6 +359,16 @@ export function botRoutes(api: Api) {
         }
       }),
     },
+    // A drag in the sidebar: the chats that changed list and the order, in one write (ArrangeRequest).
+    "/api/bots/arrange": {
+      POST: api(async (req) => {
+        try {
+          return json(svc.arrange(await readJson(req)));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/bots/conversations/:id": {
       PATCH: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id">) => {
         try {
