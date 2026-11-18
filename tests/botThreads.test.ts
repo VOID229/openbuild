@@ -345,6 +345,10 @@ async function asking(...asks: ReturnType<typeof ask>[]) {
 }
 const answered = () => wakes.filter((w) => w.text.includes("isn't waiting on"));
 const batch = (quiet: number, max = 1000) => Object.assign(threads.answerBatch, { quiet, max });
+/** Until the bot has heard this many notes of answers, for up to two seconds: a slow runner takes a while to send one. */
+const hear = async (count: number) => {
+  for (const until = Date.now() + 2000; answered().length < count && Date.now() < until; ) await Bun.sleep(10);
+};
 
 test("the bot hears what the user answered in the thread: the option, the words, or yes and no", async () => {
   batch(10);
@@ -425,7 +429,8 @@ test("a secret answer isn't repeated to the bot", async () => {
 });
 
 test("a question card passing a thread's question on closes with the answer given in the thread", async () => {
-  batch(10);
+  // Wide enough that two answers given together are one note even on a slow runner.
+  batch(200);
   const agent = await import("../server/bots/agent");
   const conversation = svc.directId(bot.id)!;
   const { threadId, asked } = await asking(ask({ question: true, other: true }), ask({ id: "a2", title: "Size?", options: ["S", "L"], other: true, question: true }), ask({ id: "a3", title: "Ok?", question: true }), ask({ id: "a4", title: "Mine?", question: true }));
@@ -440,7 +445,7 @@ test("a question card passing a thread's question on closes with the answer give
   // An option the card offers shows picked; anything else shows as the words.
   asked("a1", "Blue");
   asked("a2", "Medium");
-  await Bun.sleep(60);
+  await hear(1);
   expect(cardOf(one.id)).toMatchObject({ answer: "B", closed: "answered" });
   expect(cardOf(two.id)).toMatchObject({ answer: "Medium", closed: "answered" });
   expect(answered()).toHaveLength(1);
@@ -450,14 +455,16 @@ test("a question card passing a thread's question on closes with the answer give
   expect(() => svc.answerQuestion(conversation, one.id, "A")).toThrow(/settled in its thread/);
   // One the thread stops waiting on unanswered closes without an answer.
   asked("a3");
-  await Bun.sleep(60);
+  await hear(2);
   expect(cardOf(three.id).answer).toBeUndefined();
   expect(cardOf(three.id).closed).toBe("gone");
   expect(answered()[1].text).toContain(`it stopped waiting on it without an answer. Your question card [${three.id.slice(0, 8)}] for it is closed.`);
   // The bot answering itself closes its card too, but isn't told.
   await call("answer", { thread: threadId, question: "a4", answer: "Red" });
   asked("a4", "Red");
-  await Bun.sleep(60);
+  for (const until = Date.now() + 2000; !cardOf(four.id).closed && Date.now() < until; ) await Bun.sleep(10);
+  // Past the quiet window: a note about it would have been sent by now.
+  await Bun.sleep(300);
   expect(cardOf(four.id)).toMatchObject({ answer: "A", closed: "answered" });
   expect(answered()).toHaveLength(2);
   // No card is posted for a question that's already settled.
@@ -465,7 +472,7 @@ test("a question card passing a thread's question on closes with the answer give
 });
 
 test("following a run again after a restart doesn't repeat answers the bot has heard about", async () => {
-  batch(10);
+  batch(200);
   const db = await import("../server/bots/db");
   const { threadId } = await asking();
   // Read again from the start: a1 was told and settled before the restart, a2 only told.
@@ -474,7 +481,7 @@ test("following a run again after a restart doesn't repeat answers the bot has h
   for (const event of [ask({ question: true }), { t: "asked" as const, id: "a1", answer: "Blue" }, ask({ id: "a2", title: "Size?", options: ["S", "L"], question: true }), { t: "asked" as const, id: "a2", answer: "L" }]) run.push(event);
   db.setValue("thread-watches", [{ runId: "replayed", threadId, botId: bot.id, conversationId: svc.directId(bot.id), told: ["a1", "a2"], settled: ["a1"] }]);
   threads.resumeWatches();
-  await Bun.sleep(60);
+  await hear(1);
   expect(answered()).toHaveLength(1);
   expect(answered()[0].text).toContain("“Size?” (question a2): the user answered it in the thread, choosing “L”.");
   expect(answered()[0].text).not.toContain("Which?");

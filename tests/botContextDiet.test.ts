@@ -235,7 +235,10 @@ test("asking a paired device has a deadline at every step, and stopping a round 
     a.match(await m.machinesNote(), /- Laptop \\(machine id lap\\): unreachable right now/);
     mode = 'answer';
     globalThis.openbotsMachines.at = 0;
-    a.match(await m.machinesNote(), READY);
+    // A stale note gets only a short grace to refresh, so the fresh round may land a note or two later.
+    let note = await m.machinesNote();
+    for (const until = Date.now() + 2000; !READY.test(note) && Date.now() < until; ) note = await Bun.sleep(25).then(() => m.machinesNote());
+    a.match(note, READY);
     await Bun.sleep(400);
     a.match(await m.machinesNote(), READY);
     a.equal(open, 0);
