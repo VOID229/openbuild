@@ -407,6 +407,14 @@ type Block = { kind: "divider"; at: number; key: string } | { kind: "events"; me
 /** An activity line that stands on its own rather than folding into a run: an error is news. */
 const standsAlone = (m: BotMessage) => m.event?.kind === "error";
 
+/** Answers a bot gave a thread: their detail is the whole question and the answer, too long for a quiet line. */
+const ANSWERS = new Set(["Answered a thread's question", "Answered a permission prompt"]);
+/**
+ * An activity line whose detail only shows once it's opened: a bot's answer to a thread. On its own it
+ * folds as a run of one ("Answered 1 question"); in a run, its line says who answered, and opened, what.
+ */
+const foldsDetail = (m: BotMessage) => !!m.event?.detail && ANSWERS.has(eventText(m.event));
+
 function blocksOf(all: BotMessage[]): Block[] {
   // Memory happens in the background; older chats can still hold these.
   const messages = all.filter((m) => m.event?.kind !== "memory");
@@ -1923,7 +1931,7 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
             );
           if (b.kind === "events") {
             const key = b.messages[0]!.id;
-            if (b.messages.length === 1) return <EventLine key={key} message={b.messages[0]!} bots={bots} fresh={b.messages[0]!.at > since} />;
+            if (b.messages.length === 1 && !foldsDetail(b.messages[0]!)) return <EventLine key={key} message={b.messages[0]!} bots={bots} fresh={b.messages[0]!.at > since} />;
             return <EventRun key={key} messages={b.messages} bots={bots} since={since} />;
           }
           const mine = b.author === "me";
@@ -2033,8 +2041,10 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
 const lowerFirst = (text: string) => (/^\p{Lu}\p{Ll}/u.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text);
 
 /** One activity line: who did what, and what it was about. */
-const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number }) {
+const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, index, times = 1, folded }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number; folded?: boolean }) {
   const event = m.event!;
+  // A folded line (foldsDetail) shows its detail only once it's opened, by a click on it or its chevron.
+  const [open, setOpen] = useState(false);
   // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
   // PR or thread title, not a mention, so a bot name inside it stays plain text.
   const eventBot = event.bot ? bots.find((x) => x.id === event.bot) : undefined;
@@ -2054,12 +2064,27 @@ const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, ind
   const changed = event.kind === "changed" && eventBot ? settingsChange(event.text) : undefined;
   // A routine being set says when it was, what it's called and when it runs, all in its words.
   const set = authored ? routineSet(event) : undefined;
+  // An answer's detail, the question and what was answered, is a paragraph: it goes on a line of its own.
+  const answer = ANSWERS.has(eventText(event)) && !!detail;
+  const folds = folded && answer;
   return (
     // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
-    <div className={cx("bm-event", fresh && "bm-recv")} data-id={m.id} hidden={hidden} style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
+    <div
+      className={cx("bm-event", fresh && "bm-recv", answer && "bm-event-answer", folds && "bm-event-folds", folds && open && "bm-event-open")}
+      data-id={m.id}
+      hidden={hidden}
+      style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)}
+      onClick={(e) => (folds ? setOpen(!open) : e.currentTarget.classList.toggle("bm-event-open"))}
+    >
       <span className="bm-event-text">
         {set ? <>At {clock(m.at)}, <BotLink bot={author!} /> <RoutinesLink bot={author!}>{set.followUp ? "set a follow-up" : "set routine"}</RoutinesLink> “<WithBotLinks text={set.title} bots={bots} />” for {lowerFirst(set.schedule)}</> : authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
       </span>
+      {/* The chevron is what a keyboard opens it with; a click anywhere on the line bubbles to the same toggle. */}
+      {folds && (
+        <button type="button" className="bm-event-fold" aria-expanded={open} aria-label={open ? "Hide what was asked" : "Show what was asked"}>
+          <ChevronRight size={13} strokeWidth={2} aria-hidden />
+        </button>
+      )}
       {event.kind !== "model" && !set && detail && (
         <span className="bm-event-detail">
           {event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
@@ -2120,6 +2145,9 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
   const who = [...new Set(messages.map((m) => m.author))].flatMap((id) => bots.find((b) => b.id === id) ?? []);
   const fresh = messages.every((m) => m.at > since);
   const label = runLabel(messages.flatMap((m) => m.event ?? []));
+  // A run of one is an answer folded on its own: opening the run is what shows its question. In a longer
+  // run, an answer's line folds again, so an opened run is still one line for each thing done.
+  const folded = (m: BotMessage) => messages.length > 1 && foldsDetail(m);
   const labelEl = useRef<HTMLSpanElement>(null);
   // A label the line cuts off shows whole in a tooltip, on hover or keyboard focus. It's set as the pointer
   // or focus arrives, just before the tooltip layer (on the document) looks for it, so nothing measures
@@ -2157,9 +2185,9 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
         <div>
           {repeats(messages).map(({ m, times }, i) =>
             times === 0 ? (
-              <EventLine key={m.id} message={m} bots={bots} fresh={false} hidden />
+              <EventLine key={m.id} message={m} bots={bots} fresh={false} hidden folded={folded(m)} />
             ) : (
-              <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open && !folding} index={i} times={times} />
+              <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open && !folding} index={i} times={times} folded={folded(m)} />
             ),
           )}
         </div>

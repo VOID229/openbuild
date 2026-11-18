@@ -2698,6 +2698,53 @@
   }
 }
 
+/* An answer to a thread (BotChat's foldsDetail) is one line: who answered, with a chevron. Its detail,
+   the whole question and the answer, shows under it only once the line is opened. On its own, the run
+   of one it folds into is what opens it, so its line shows the detail under it straight away. */
+.bm-event-folds {
+  cursor: pointer;
+}
+
+.bm-event-folds:not(.bm-event-open) > .bm-event-detail {
+  display: none;
+}
+
+.bm-event-answer > .bm-event-detail {
+  flex-basis: 100%;
+  justify-content: center;
+}
+
+/* On a line of its own, the detail needs no dot to set it apart. */
+.bm-event.bm-event-answer > .bm-event-detail::before {
+  content: none;
+}
+
+.bm-event-fold {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: -4px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+}
+
+.bm-event-fold svg {
+  transition: transform var(--fast) var(--ease);
+}
+
+.bm-event-open > .bm-event-fold svg {
+  transform: rotate(90deg);
+}
+
+@media (hover: hover) {
+  .bm-event-folds:hover {
+    color: var(--text-2);
+  }
+}
+
 /* A run of activity lines folds into one: the bots behind it, how many things they did, and a
    chevron. Opened, the lines show under it as they would on their own. */
 .bm-events {

@@ -334,6 +334,65 @@ test("activity lines in a row fold into one quiet toggle, opened on a click; an 
   for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(true);
 });
 
+test("a bot's answer to a thread is one line, its question shown only once opened, alone or in a run", async () => {
+  const question = "Templates: the bot templates have a “Runs coding agents” switch. With every new bot getting access by default, what should it do? → Rename it";
+  await show([
+    { id: "m1", author: "scout", at: 1, text: "On it." },
+    event("e2", "scout", { kind: "thread", text: "Answered a thread's question", detail: question, threadId: "t1" }),
+    { id: "m3", author: "scout", at: 3, text: "Next." },
+    event("e4", "scout", { kind: "thread", text: "Answered a thread's question", detail: "Label: which one? → Run coding agents", threadId: "t1" }),
+    event("e5", "scout", { kind: "thread", text: "Started a thread", detail: "Rename the permission · Claude", threadId: "t1" }),
+    event("e6", "scout", { kind: "thread", text: "Answered a permission prompt", detail: "Run bun test → Allow", threadId: "t1" }),
+    { id: "m7", author: "scout", at: 7, text: "Done." },
+    // One with nothing to fold stays a line of its own.
+    event("e8", "scout", { kind: "thread", text: "Answered a permission prompt" }),
+  ]);
+  const runs = [...document.querySelectorAll(".bm-events")];
+  const toggles = runs.map((r) => r.querySelector<HTMLButtonElement>(".bm-events-toggle")!);
+  // Alone, it folds as a run of one: who answered, and how many, with the question out of sight.
+  expect(toggles.map((t) => t.textContent)).toEqual(["Answered 1 question", "Answered 1 question, started 1 thread, answered 1 permission prompt"]);
+  expect(toggles[0]!.querySelectorAll(".bot")).toHaveLength(1);
+  expect(line("e2").hidden).toBe(true);
+  expect(line("e8").closest(".bm-events")).toBeNull();
+  expect(line("e8").classList.contains("bm-event-folds")).toBe(false);
+  // Opened, the run of one is the line with its question: there's nothing more to unfold.
+  await act(async () => toggles[0]!.click());
+  expect(line("e2").hidden).toBe(false);
+  expect(lead("e2").textContent).toBe("Scout answered a thread's question");
+  expect(line("e2").classList.contains("bm-event-folds")).toBe(false);
+  expect(line("e2").querySelector(".bm-event-fold")).toBeNull();
+  // Laid out as an opened answer is: the question on a line of its own, under who answered.
+  expect(line("e2").classList.contains("bm-event-answer")).toBe(true);
+  expect(line("e2").querySelector(".bm-event-detail")!.textContent).toBe(question);
+
+  // In a run, opening it shows each answer as one line, and a click on one shows what was asked.
+  await act(async () => toggles[1]!.click());
+  const chevron = (id: string) => line(id).querySelector<HTMLButtonElement>(".bm-event-fold");
+  for (const id of ["e4", "e6"]) {
+    expect(line(id).hidden).toBe(false);
+    expect(line(id).classList.contains("bm-event-folds")).toBe(true);
+    expect(line(id).classList.contains("bm-event-open")).toBe(false);
+    expect(chevron(id)!.getAttribute("aria-expanded")).toBe("false");
+  }
+  expect(lead("e4").textContent).toBe("Scout answered a thread's question");
+  expect(lead("e6").textContent).toBe("Scout answered a permission prompt");
+  // The thread a bot started keeps its detail in view, as any other line does.
+  expect(line("e5").classList.contains("bm-event-folds")).toBe(false);
+  expect(chevron("e5")).toBeNull();
+  await act(async () => line("e4").click());
+  expect(line("e4").classList.contains("bm-event-open")).toBe(true);
+  expect(chevron("e4")!.getAttribute("aria-expanded")).toBe("true");
+  expect(chevron("e4")!.getAttribute("aria-label")).toBe("Hide what was asked");
+  expect(line("e4").querySelector(".bm-event-detail")!.textContent).toBe("Label: which one? → Run coding agents");
+  // Its chevron, which a keyboard reaches, folds it again; the other answer stayed folded throughout.
+  await act(async () => chevron("e4")!.click());
+  expect(line("e4").classList.contains("bm-event-open")).toBe(false);
+  expect(line("e6").classList.contains("bm-event-open")).toBe(false);
+  // Following its thread link doesn't unfold it as well.
+  await act(async () => line("e6").querySelector<HTMLElement>(".bm-event-detail a")!.click());
+  expect(line("e6").classList.contains("bm-event-open")).toBe(false);
+});
+
 test("a bot that couldn't reply, mid-run, splits the run and shows on its own, with why; a minute on, the run joins up", async () => {
   const { shownReplyError } = await import("../shared/bots");
   // The line as the runner posts it (runner.ts, when a reply fails): a random id, the bot as author, no text.
