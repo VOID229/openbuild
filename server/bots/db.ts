@@ -207,7 +207,9 @@ export function takeMemoryReview(botId: string): number | undefined {
 /**
  * Recall: a bot's memory of either kind, best matches first (full-text rank, newer first on a tie).
  * Then what the index can't find, newest first: text that only contains the query (part of a word or
- * a number, as in "230" for "#1230"), and entries whose id starts with it. No query: the newest.
+ * a number, as in "230" for "#1230"), and entries whose id starts with it. Only from 4 characters on: ids are
+ * random, so a shorter query (a number, say) would also find whichever entry's id happens to start
+ * with it. No query: the newest.
  */
 export function searchMemory(botId: string, query: string, limit = 12): MemoryItem[] {
   const text = query.trim();
@@ -223,7 +225,7 @@ export function searchMemory(botId: string, query: string, limit = 12): MemoryIt
   }
   if (out.size < limit && text.length >= 2 && text.length <= 64) {
     const part = db
-      .query<MemoryRow, [string, string, number]>(`SELECT ${MEMORY_COLUMNS} FROM memories m WHERE m.bot_id = ?1 AND (instr(lower(m.text), lower(?2)) > 0 OR instr(m.id, lower(?2)) = 1) ORDER BY m.at DESC, m.rowid DESC LIMIT ?3`)
+      .query<MemoryRow, [string, string, number]>(`SELECT ${MEMORY_COLUMNS} FROM memories m WHERE m.bot_id = ?1 AND (instr(lower(m.text), lower(?2)) > 0 OR (length(?2) >= 4 AND instr(m.id, lower(?2)) = 1)) ORDER BY m.at DESC, m.rowid DESC LIMIT ?3`)
       .all(botId, text, limit);
     for (const r of part) if (out.size < limit && !out.has(r.id)) out.set(r.id, memoryItem(r));
   }
