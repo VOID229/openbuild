@@ -275,6 +275,26 @@ test("search recalls either kind with its date and kind: best match first, then 
   `);
 }, 30_000);
 
+test("a short query never finds an entry by the start of its random id, a short id of 4 or more characters does", async () => {
+  await run(`
+    ${SETUP}
+    // Ids are random UUIDs: one that starts with digits a bot might search for, and a text without them.
+    const at = Date.now();
+    db.addMemory(boss.id, { id: '230e4f1a-0000-4000-8000-000000000000', kind: 'journal', text: 'Watered the plants.', at });
+    db.addMemory(boss.id, { id: '7b1c9d2e-0000-4000-8000-000000000000', kind: 'profile', text: 'Merged pull request #1230.', at: at + 1 });
+    const ids = (q) => db.searchMemory(boss.id, q).map((m) => m.id.slice(0, 8));
+    // A number finds the text that contains it, not the entry whose id starts with it.
+    a.deepEqual(ids('230'), ['7b1c9d2e']);
+    a.deepEqual(ids('23'), ['7b1c9d2e']);
+    a.deepEqual(ids('7b1'), []);
+    // From 4 characters on, the start of an id is a short id, and finds its entry.
+    a.deepEqual(ids('230e'), ['230e4f1a']);
+    a.deepEqual(ids('230E4F1A'), ['230e4f1a']);
+    a.deepEqual(ids('7b1c'), ['7b1c9d2e']);
+    process.exit(0);
+  `);
+}, 30_000);
+
 test("memory from before the split fills the profile newest first up to its cap, the rest becomes journal: nothing lost, and migrating again changes nothing", async () => {
   await run(`
     import { strict as a } from 'node:assert';
