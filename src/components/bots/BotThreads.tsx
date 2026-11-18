@@ -1,8 +1,8 @@
 // Settings → Bots: what a bot may do in OpenBuild (server/bots/threads.ts), and how bots use each
-// harness there. Off until the user says otherwise.
-import { Check, ChevronDown } from "lucide-react";
+// harness there. One switch, on for a new bot, covers all of it but merging pull requests.
+import { Check, ChevronDown, Power } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { PERMISSION_HARNESSES, type BotProjectScope, type BotThreadAccess, type PermissionHarness } from "../../../shared/bots";
+import { DEFAULT_THREAD_ACCESS, PERMISSION_HARNESSES, type BotProjectScope, type BotThreadAccess, type PermissionHarness } from "../../../shared/bots";
 import type { PermissionMode, ThreadRuntime } from "../../../shared/types";
 import { useBots } from "../../lib/bots/store";
 import type { Bot } from "../../lib/bots/types";
@@ -13,9 +13,18 @@ import { useStore } from "../../lib/store";
 import { arrowNav, cx } from "../../lib/ui";
 import { OptionSelect, useSelectKeys } from "../ModelSelect";
 import { Popover, Toggle } from "../primitives";
+import { ConfirmDeleteDialog } from "./BotDialogs";
 
-/** What turning access on starts from. A grant the bot already has keeps what's saved in it. */
-const NO_ACCESS: BotThreadAccess = { enabled: false, scope: "all", projects: [], choosePermission: true, approve: true };
+/** A bot without a grant has no access (the server fails closed too). Turning it on starts from the default. */
+const NO_ACCESS: BotThreadAccess = { ...DEFAULT_THREAD_ACCESS, enabled: false };
+/** What "Use OpenBuild" gives, as the dialog for turning it off lists it. Merging is its own switch. */
+export const OPENBUILD_ABILITIES = [
+  "Start threads in its projects, and read them",
+  "Send to, stop and close threads, including yours and other bots'",
+  "Choose each thread's permission mode",
+  "Answer the questions and permission prompts threads ask",
+];
+const MERGE_ABILITY = "Merge pull requests";
 const SCOPES: { value: BotProjectScope; label: string }[] = [
   { value: "all", label: "All projects" },
   { value: "choose", label: "Choose projects" },
@@ -100,27 +109,37 @@ function BotProjects({ access, save, compact }: { access: BotThreadAccess; save:
 export function BotThreads({ bot, compact }: { bot: Bot; compact?: boolean }) {
   const access = bot.threads ?? NO_ACCESS;
   const save = (patch: Partial<BotThreadAccess>) => useBots.getState().updateBot(bot.id, { threads: { ...access, ...patch } });
+  const [confirmOff, setConfirmOff] = useState(false);
   return (
     <>
       <BotProjects access={access} save={save} compact={compact} />
-      <Row compact={compact} label="Use OpenBuild" desc="Start and follow threads, send them messages, and answer the questions they ask. Threads run on this server as you, with your subscriptions and keys.">
-        <Toggle checked={access.enabled} onChange={(enabled) => save({ enabled })} label="Use OpenBuild" />
+      <Row compact={compact} label="Use OpenBuild" desc="Start, follow and control threads in its projects, yours and other bots' too: send them messages, choose their permission modes, and answer what they ask, permission prompts included. Threads run on this server as you, with your subscriptions and keys.">
+        <Toggle checked={access.enabled} onChange={(enabled) => (enabled ? save({ enabled }) : setConfirmOff(true))} label="Use OpenBuild" />
       </Row>
       {access.enabled && (
-        <>
-          <Row compact={compact} label="Control others' threads" desc="Write to, answer, stop, close and merge threads it didn't start: yours and other bots'. Off, it can still see them but only controls its own.">
-            <Toggle checked={!!access.others} onChange={(others) => save({ others })} label="Control others' threads" />
-          </Row>
-          <Row compact={compact} label="Choose permissions" desc="Pick each thread's permission mode itself, including the unrestricted ones. Off, its threads use the defaults under Harnesses in OpenBuild.">
-            <Toggle checked={!!access.choosePermission} onChange={(choosePermission) => save({ choosePermission })} label="Choose permissions" />
-          </Row>
-          <Row compact={compact} label="Answer permission prompts" desc="Allow or deny what a thread's agent asks to do. Off, those prompts wait for you, and the bot tells you about them.">
-            <Toggle checked={!!access.approve} onChange={(approve) => save({ approve })} label="Answer permission prompts" />
-          </Row>
-          <Row compact={compact} label="Merge pull requests" desc="Merge once every check passes.">
-            <Toggle checked={!!access.merge} onChange={(merge) => save({ merge })} label="Merge pull requests" />
-          </Row>
-        </>
+        <Row compact={compact} label="Merge pull requests" desc="Merge once every check passes.">
+          <Toggle checked={!!access.merge} onChange={(merge) => save({ merge })} label="Merge pull requests" />
+        </Row>
+      )}
+      {confirmOff && (
+        <ConfirmDeleteDialog
+          title={`Turn off OpenBuild for “${bot.name}”?`}
+          body={
+            <>
+              <p className="confirm-lead">{bot.name} won't be able to:</p>
+              <ul className="confirm-list">
+                {[...OPENBUILD_ABILITIES, ...(access.merge ? [MERGE_ABILITY] : [])].map((ability) => (
+                  <li key={ability}>{ability}</li>
+                ))}
+              </ul>
+              <p>Threads it started keep running, and their questions wait for you. Its projects are kept for when you turn it back on.</p>
+            </>
+          }
+          action={<><Power size={14} /> Turn off</>}
+          tone="calm"
+          onClose={() => setConfirmOff(false)}
+          onConfirm={() => save({ enabled: false })}
+        />
       )}
     </>
   );
@@ -155,7 +174,7 @@ function HarnessRow({ runtime, missing }: { runtime: ThreadRuntime; missing: boo
     ...(mode && !modes.some((m) => m.id === mode) ? [{ value: mode, label: `${mode} (not listed)` }] : []),
   ];
   return (
-    <Row label={runtimeName(runtime)} desc={missing ? "Not installed here. Set it up in Settings → Harnesses." : hasModes(runtime) ? "The permission mode for threads whose bot can't choose." : "OpenBuild can't set permissions here: it follows this harness's own configuration, so a bot using it gets whatever that allows."}>
+    <Row label={runtimeName(runtime)} desc={missing ? "Not installed here. Set it up in Settings → Harnesses." : hasModes(runtime) ? "The permission mode for a bot's thread when the bot doesn't choose one." : "OpenBuild can't set permissions here: it follows this harness's own configuration, so a bot using it gets whatever that allows."}>
       {hasModes(runtime) && !missing && <OptionSelect label={`${runtimeName(runtime)} permission`} value={mode ?? ""} options={options} onChange={setMode} />}
       <Toggle checked={!blocked} disabled={missing} onChange={(on) => useBots.getState().setHarnesses({ ...harnesses, blocked: on ? harnesses.blocked?.filter((r) => r !== runtime) : [...(harnesses.blocked ?? []), runtime] })} label={`Let bots use ${runtimeName(runtime)}`} />
     </Row>

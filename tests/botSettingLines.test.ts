@@ -84,15 +84,21 @@ test("OpenBuild access names its projects and the switches that changed", async 
     const { join } = await import('node:path');
     const site = await addProject(mkdtempSync(join(process.env.OPENCHAT_DATA_DIR, 'site-')));
     const base = { enabled: true, scope: 'choose', projects: [site.id] };
+    // A new bot starts with OpenBuild on, in every project.
+    a.deepEqual(db.getBot(helper.id).threads, { enabled: true, scope: 'all', projects: [] });
     await patch(helper.id, { threads: base });
-    await patch(helper.id, { threads: { ...base, merge: true, approve: true } });
-    await patch(helper.id, { threads: { ...base, merge: true, approve: true, scope: 'all' } });
-    await patch(helper.id, { threads: { ...base, enabled: false, merge: true, approve: true, scope: 'all' } });
+    // The switches folded into Use OpenBuild are neither saved nor announced.
+    await patch(helper.id, { threads: { ...base, merge: true, approve: true, others: true, choosePermission: true } });
+    await patch(helper.id, { threads: { ...base, merge: true, scope: 'all' } });
+    await patch(helper.id, { threads: { ...base, enabled: false, merge: true, scope: 'all' } });
+    await patch(helper.id, { threads: { ...base, merge: true, scope: 'all' } });
+    a.deepEqual(db.getBot(helper.id).threads, { enabled: true, scope: 'all', projects: [site.id], excluded: [], merge: true });
     a.deepEqual(texts(helper), [
-      \`Juniper's OpenBuild: off → on; OpenBuild projects: none → \${site.name}\`,
-      "Juniper's answer permission prompts: off → on; merge pull requests: off → on",
+      \`Juniper's OpenBuild projects: all → \${site.name}\`,
+      "Juniper's merge pull requests: off → on",
       \`Juniper's OpenBuild projects: \${site.name} → all\`,
       "Juniper's OpenBuild: on → off",
+      "Juniper's OpenBuild: off → on",
     ]);
     process.exit(0);
   `);

@@ -209,7 +209,12 @@ export function statusLine(status: Pick<BotStatus, "activity"> | undefined): str
 
 export type BotProjectScope = "all" | "choose" | "exclude";
 
-/** What a bot may do with the user's OpenBuild threads. Only the user can change this. */
+/**
+ * What a bot may do with the user's OpenBuild threads. Only the user can change this. `enabled` is the
+ * one "Use OpenBuild" switch: in the projects it covers, the bot starts, reads, writes to, answers,
+ * stops and closes any thread (its own, the user's and other bots'), picks each thread's permission
+ * mode, and answers permission prompts. Merging pull requests is the only thing granted apart.
+ */
 export interface BotThreadAccess {
   enabled: boolean;
   /** Which projects it can work in. Grants from before this existed have none, and mean "choose". */
@@ -218,15 +223,15 @@ export interface BotThreadAccess {
   projects: string[];
   /** "exclude": the projects it can't work in, by id. */
   excluded?: string[];
-  /** It picks each thread's permission mode. Otherwise threads get the harness's default from BotsSettings. */
-  choosePermission?: boolean;
-  /** It can answer permission prompts, not just the questions threads ask. */
-  approve?: boolean;
   /** It can merge pull requests. */
   merge?: boolean;
-  /** It can control threads it didn't start: the user's and other bots'. Otherwise it can only see them. */
-  others?: boolean;
 }
+
+/** What a new bot gets, and a bot that never had a grant: OpenBuild on, in every project, merging off. */
+export const DEFAULT_THREAD_ACCESS: BotThreadAccess = { enabled: true, scope: "all", projects: [] };
+
+/** The switches folded into `enabled`. Stored grants from before still have them: they mean nothing now. */
+export const FOLDED_THREAD_FLAGS = ["others", "choosePermission", "approve"] as const;
 
 /** Whether a grant covers a project. Something that isn't in a project is never covered. */
 export function coversProject(access: Pick<BotThreadAccess, "scope" | "projects" | "excluded">, projectId: string | undefined): boolean {
@@ -277,7 +282,7 @@ export interface Bot {
   proactivity?: Proactivity;
   /** @deprecated Kept from before bots reached every machine; not used. */
   computer?: ComputerConfig;
-  /** Off when unset. */
+  /** Off when unset. Every bot has one: new ones get DEFAULT_THREAD_ACCESS, and so did older ones without one (server/bots/db.ts). */
   threads?: BotThreadAccess;
   /** Who made it: "me", or the primary bot's id. */
   by?: string;

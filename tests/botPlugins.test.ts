@@ -31,6 +31,9 @@ for (const safe of [false, true]) test(`bot plugin boundaries and truthful toggl
     const grant = (id, ids, enabled = true) => svc.updateBot(id, { threads: { enabled, scope: 'choose', projects: ids } });
     const call = (id, action, rest = {}) => handle(id, { action, ...rest });
     await runtime.loadPlugins();
+    // A new bot has OpenBuild in every project, this one included.
+    a.notEqual(guide(db.getBot(primary.id)), '');
+    grant(primary.id, [project.id], false);
     a.equal(guide(db.getBot(primary.id)), '');
     await a.rejects(call(primary.id, 'list'), /require access/);
     grant(primary.id, [unrelated.id]);

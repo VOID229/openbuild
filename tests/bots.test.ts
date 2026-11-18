@@ -1104,8 +1104,16 @@ test("the primary sets bots' models and fallbacks with manage_bot, checked again
       const made = await manage(primary.id, { action: 'create', name: 'Coach', model: 'google/gemini-4', effort: 'High', fallback: 'own', fallback_models: ['openai-codex/gpt-6', ' openai-codex-2/gpt-6', 'openai-codex/gpt-6'] });
       a.deepEqual(made, { id: made.id, name: 'Coach', model: 'google/gemini-4', effort: 'high', fallback: 'own', fallback_models: ['openai-codex/gpt-6', 'openai-codex-2/gpt-6'] });
       a.deepEqual(db.getBot(made.id).fallbackModels, ['openai-codex/gpt-6', 'openai-codex-2/gpt-6']);
-      // Nothing beyond the model came with it: no projects, no computer, not primary.
-      a.equal(db.getBot(made.id).threads, undefined);
+      // Nothing beyond the model came with it: no computer, not primary, and no more OpenBuild than
+      // its maker has (its projects, never merging).
+      a.deepEqual(db.getBot(made.id).threads, { enabled: true, scope: 'all', projects: [] });
+      svc.updateBot(primary.id, { threads: { enabled: true, scope: 'choose', projects: ['p1'], merge: true } });
+      const narrow = await manage(primary.id, { action: 'create', name: 'Narrow' });
+      a.deepEqual(db.getBot(narrow.id).threads, { enabled: true, scope: 'choose', projects: ['p1'] });
+      svc.updateBot(primary.id, { threads: { enabled: false, scope: 'all', projects: [] } });
+      const shut = await manage(primary.id, { action: 'create', name: 'Shut' });
+      a.deepEqual(db.getBot(shut.id).threads, { enabled: false, scope: 'all', projects: [] });
+      svc.updateBot(primary.id, { threads: { enabled: true, scope: 'all', projects: [] } });
       a.equal(db.getBot(made.id).computer, undefined);
       a.equal(db.getBot(made.id).primary, undefined);
 

@@ -990,7 +990,8 @@
     padding-bottom: 12px;
   }
 
-  .confirm-dialog p {
+  .confirm-dialog p,
+  .confirm-list {
     font-size: 15px;
   }
 
