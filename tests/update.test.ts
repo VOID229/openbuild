@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { buildOf, buildPath, watchBuild } from "../src/lib/update";
+import { buildOf, buildPath, providerList, providerUpdateText, watchBuild } from "../src/lib/update";
 
 const base = "http://127.0.0.1:3100/thread-abc";
 
@@ -72,5 +72,15 @@ describe("watchBuild", () => {
     const after = checks();
     await Bun.sleep(30);
     expect(checks()).toBe(after);
+  });
+});
+
+describe("provider update notices", () => {
+  test("name one or two providers, then count the rest, and never a version", () => {
+    expect(providerUpdateText(["Claude Code"])).toBe("Claude Code has an update");
+    expect(providerUpdateText(["Codex", "Cursor"])).toBe("Codex and Cursor have an update");
+    expect(providerUpdateText(["Codex", "Cursor", "Pi"])).toBe("Codex, Cursor, and 1 more provider have an update");
+    expect(providerUpdateText(["Codex", "Cursor", "Pi", "Grok"])).toBe("Codex, Cursor, and 2 more providers have an update");
+    expect(providerList(["Claude Code", "Codex", "Cursor", "Pi", "Grok"])).toBe("Claude Code, Codex, and 3 more providers");
   });
 });

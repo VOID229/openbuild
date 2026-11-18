@@ -68,7 +68,7 @@ repository's tags (`git ls-remote --tags`), without GitHub's API:
 
 - the installer: `install.sh` installs the newest plain tag, and
   `install.sh --nightly` the newest version of any kind, by its nightly tag;
-- `ob update` and the server's update notice, on the installation's track;
+- `ob update` and the sidebar's update button, on the installation's track;
 - the sidebar, which shows a promoted version as stable.
 
 Installations from before this go by GitHub's prerelease flag, which the
@@ -126,8 +126,8 @@ Beside that label is a small button that does what `ob update` and
 On a touch screen there is no hover, so a tap opens the card first (the
 changelog, then a button to install or restart).
 
-The notice at the top of the window (Settings → Notifications → builds) offers
-the same update and shares its state: started from either, it shows in both.
+OpenBots' sidebar has the same button and shares its state: started from either,
+it shows in both. No notice over the window repeats it.
 
 Only the server's own signed-in browser session can check, install or restart:
 `/api/releases`, `/api/releases/update` and `/api/releases/restart` are not

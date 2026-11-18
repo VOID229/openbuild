@@ -605,14 +605,15 @@ describe.skipIf(!browser)("updating OpenBuild from the sidebar", () => {
     await view(page, "idle");
   }, 60_000);
 
-  test("OpenBots' sidebar and the notice at the top show the same update", async () => {
+  test("OpenBots' sidebar shows the same update, and no notice over the window repeats it", async () => {
     const page = await open("available");
-    // The notice offers it too (Settings → Notifications), and its button starts the same install.
-    await page.until("[...document.querySelectorAll('.notice-text')].some((n) => n.textContent === 'OpenBuild 0.3.53-nightly is available (nightly).')");
-    await page.click(".notice .btn-primary");
+    /** Any notice saying anything about the release: the sidebars' buttons are where it's offered. */
+    const notices = () => page.eval<string[]>("[...document.querySelectorAll('.notice-text')].map((n) => n.textContent)");
+    expect(await notices()).toEqual([]);
+    await page.click(BUTTON);
     await view(page, "installing");
     expect((await calls(page)).updates).toBe(1);
-    await page.until("[...document.querySelectorAll('.notice-text')].some((n) => n.textContent === 'Updating OpenBuild…')");
+    expect(await notices()).toEqual([]);
 
     // Over in OpenBots, its footer's button is in the middle of the same install.
     await page.eval("(store.getState().setBotsOpen(true), true)");
@@ -623,7 +624,9 @@ describe.skipIf(!browser)("updating OpenBuild from the sidebar", () => {
     await page.eval("(release.finish(0), true)");
     await view(page, "ready", BOTS_BUTTON);
     expect((await halo(page, BOTS_BUTTON)).name).toBe("release-waiting");
-    await page.until("[...document.querySelectorAll('.notice-text')].some((n) => n.textContent === 'OpenBuild updated. Restart to load it.')");
+    // Installed and waiting for a restart: the footers' restart buttons say so, and nothing else does.
+    await page.settle();
+    expect(await notices()).toEqual([]);
     // One update, started once.
     expect((await calls(page)).updates).toBe(1);
   }, 40_000);

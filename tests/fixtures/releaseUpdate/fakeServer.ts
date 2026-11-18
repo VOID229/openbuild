@@ -5,7 +5,8 @@
 // What the "server" knows is kept in sessionStorage, so it's still the same server after the page
 // reloads itself at the end of a restart. `?update=available|installing|ready` starts with a release on
 // offer, one that is installing (started before this page loaded), or one installed and waiting; no
-// parameter starts up to date.
+// parameter starts up to date. `?runtimes=claude,codex` gives those harnesses a newer version
+// (tests/updateNotices.test.ts), which `/api/runtimes/update` installs as `runtimes.finish()` says.
 import "../reloadScroll/fakeServer";
 import type { ReleaseCheck } from "../../../shared/releaseUpdate";
 
@@ -59,6 +60,14 @@ const tell = () => {
 };
 let restarting = false;
 
+/** Harnesses with a newer version out; every other one is installed and current. */
+const outdated = new Set((new URLSearchParams(location.search).get("runtimes") ?? "").split(",").filter(Boolean));
+const runtimeCalls = { updates: [] as string[] };
+const RUNTIME_IDS = ["pi", "durable", "claude", "opencode", "codex", "cursor", "hermes", "grok", "fx"];
+const runtimeStatuses = () => Object.fromEntries(RUNTIME_IDS.map((id) => [id, outdated.has(id)
+  ? { installed: true, version: "1.0.0", latest: "1.2.3", updateAvailable: true, install: "test" }
+  : { installed: true, version: "1.2.3", latest: "1.2.3", updateAvailable: false, install: "test" }]));
+
 const check = (): ReleaseCheck => ({
   track: "nightly",
   current: server.pending ? server.latest : `${server.running.version}-nightly`,
@@ -87,6 +96,12 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.updates++;
     if (updateRefusal) return Response.json({ error: updateRefusal }, { status: 409 });
     job = { id: `job-${calls.updates}`, said: [], done: false };
+    return Response.json({ job: job.id });
+  }
+  if (url.pathname === "/api/runtimes/status") return Response.json({ runtimes: runtimeStatuses() });
+  if (url.pathname === "/api/runtimes/update" && method === "POST") {
+    runtimeCalls.updates.push(JSON.parse(String(init?.body ?? "{}")).runtime);
+    job = { id: `runtime-job-${runtimeCalls.updates.length}`, said: [], done: false };
     return Response.json({ job: job.id });
   }
   if (url.pathname === "/api/pi/job") {
@@ -159,4 +174,17 @@ export const release = {
     restarting = false;
   },
 };
-Object.assign(window, { release });
+
+/** The test's hands on the harnesses. */
+export const runtimes = {
+  calls: runtimeCalls,
+  /** The harness update running now ends: with 0 the harness is current. */
+  finish(code = 0) {
+    const runtime = runtimeCalls.updates.at(-1)!;
+    if (code === 0) outdated.delete(runtime);
+    job!.said.push(JSON.stringify({ done: true, code, title: "Updating" }) + "\n");
+    job!.done = true;
+    tell();
+  },
+};
+Object.assign(window, { release, runtimes });

@@ -1,6 +1,6 @@
 // The whole app on a fake server whose releases the test controls (./fakeServer.ts), for
-// tests/releaseUpdate.test.ts: the update button beside the version in either sidebar's footer, and
-// the notice at the top of the window that shares its state.
+// tests/releaseUpdate.test.ts: the update button beside the version in either sidebar's footer; and
+// for tests/updateNotices.test.ts, the harness update notices over the window.
 import "./fakeServer";
 import "@fontsource-variable/geist";
 import "../../../src/styles.css";

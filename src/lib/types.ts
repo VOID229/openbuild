@@ -65,7 +65,8 @@ export interface Settings {
    */
   botGroupDrop?: BotGroupDrop;
   /**
-   * Notices at the top of the window. `updateRuntimes` lists the runtimes whose releases are
+   * Notices over the window (components/Notices.tsx). `builds` is the one asking to reload for a
+   * newer build of the app. `updateRuntimes` lists the runtimes whose releases are
    * announced (undefined = every runtime that can be checked), and `dismissedUpdates` is, per
    * runtime, the release whose notice was closed (a newer one shows again).
    */
