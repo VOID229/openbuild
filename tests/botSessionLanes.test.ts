@@ -6,6 +6,7 @@ import { spawnScript } from "./spawnScript";
 
 // Runner-level: real ensureMind and process replacement against a fake Pi binary that keeps its
 // session the way Pi 1.5's --session-dir/--session-id does (resumed by exact id, created otherwise).
+// A bot is one mind in all its own chats: its own chat and its groups run on one Pi and one session.
 const FAKE_PI = `#!${process.execPath}
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 const args = process.argv.slice(2);
@@ -31,12 +32,14 @@ for await (const line of console) {
     if (mode.includes("ambiguous")) { send({ type: "response", id: c.id, success: false, error: "Agent is already processing. Specify streamingBehavior" }); continue; }
     appendFileSync(file, JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "noted " + c.message.length }] } }) + "\\n");
     reply(c, { disposition: "started" });
+    // What it says without a tool is the turn's reply: the runner posts it in the turn's chat.
+    if (mode.includes("reply")) send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Reply " + (c.message.match(/(ask \\w+)$/m)?.[1] ?? "?") } });
     setTimeout(() => send({ type: "agent_settled" }), 10);
   } else reply(c, c.type === "get_state" ? {} : undefined);
 }
 `;
 
-test("a bot's conversations resume their own Pi session A→B→A, and rotation waits out an ambiguous prompt", async () => {
+test("a bot's chats share one Pi session A→B→A, and rotation waits out an ambiguous prompt", async () => {
   const root = mkdtempSync(join(tmpdir(), "bot-lanes-"));
   try {
     writeFileSync(join(root, "pi"), FAKE_PI, { mode: 0o700 });
@@ -75,7 +78,7 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       const has = (message, text) => message.includes(': ' + text);
       const marked = (message, text) => message.split('\\n').find(l => l.endsWith(': ' + text));
 
-      // A, then B: each conversation gets its own session; switching retires the other Pi first.
+      // A, then B: one session for both. The same Pi carries on in the group, with A1 behind it.
       const a1 = await say(direct, 'A1');
       const [startA] = starts();
       a.equal(startA.resumed, 0);
@@ -89,28 +92,30 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       // Its own listing is kept, so the next Pi compacts where a model with a 1M-token window should.
       await until(() => runner.knownWindows().length === 1, 'the model windows were never learnt');
       const b1 = await say(group.id, '@Alpha B1');
-      a.deepEqual(settings().compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 80000, keepRecentTokens: 8000 });
-      const startB = starts().at(-1);
-      a.notEqual(startB.pid, startA.pid);
-      a.notEqual(startB.dir, startA.dir);
-      a.equal(startB.resumed, 0);
-      a.ok(!has(b1.message, 'A1'), 'A1 leaked into B');
+      a.equal(starts().length, 1, 'the group turn ran on the Pi its own chat started');
+      a.equal(b1.dir, startA.dir);
+      a.ok(alive(startA.pid));
+      // The session holds both chats' turns, one after the other.
+      const session = () => readFileSync(join(startA.dir, bot.id + '.jsonl'), 'utf8').split('\\n').filter(Boolean).map(l => JSON.parse(l).message);
+      a.deepEqual(session().map(m => m.role), ['user', 'assistant', 'user', 'assistant']);
+      a.ok(has(session()[0].content[0].text, 'A1') && has(session()[2].content[0].text, '@Alpha B1'));
+      // Each prompt says which chat its turn is in; what the session already holds isn't shown again.
+      const here = (where, kind, title) => 'Conversation ' + where.slice(0, 8) + ' (' + kind + ', “' + title + '”), ' + runner.TURN_HERE + ':\\n';
+      a.ok(a1.message.includes(here(direct, 'direct', 'Alpha')), a1.message);
+      a.ok(b1.message.includes(here(group.id, 'group', 'Team')), b1.message);
+      a.ok(!b1.message.includes(direct.slice(0, 8)) && !has(b1.message, 'A1'), 'A1 is in the session, not in the prompt of the group turn');
       a.match(marked(b1.message, '@Alpha B1'), /\\[assigned request: answer this\\]/);
-      a.ok(!alive(startA.pid), 'A was replaced, not left running');
 
-      // Back to A: Pi resumes A's own session file, and the ledger keeps A1 out of the prompt.
+      // Back to A: the same Pi again, and the ledger keeps A1 and the group's lines out of the prompt.
       const a2 = await say(direct, 'A2');
-      const resumedA = starts().at(-1);
-      a.notEqual(resumedA.pid, startB.pid);
-      a.equal(resumedA.dir, startA.dir);
-      a.equal(resumedA.resumed, 2, 'A1 and its answer');
-      a.ok(!alive(startB.pid));
+      a.equal(starts().length, 1);
+      a.equal(a2.dir, startA.dir);
       a.ok(has(a2.message, 'A2') && !has(a2.message, 'A1'), a2.message);
       a.ok(!has(a2.message, '@Alpha B1'));
+      a.equal(session().length, 6);
       const ledgerA = readDeliveries(startA.dir);
       a.ok(ledgerA.has(identity(direct, 'A1')) && ledgerA.has(identity(direct, 'A2')));
-      a.ok(!ledgerA.has(identity(group.id, '@Alpha B1')), 'ledgers are per conversation');
-      a.ok(readDeliveries(startB.dir).has(identity(group.id, '@Alpha B1')));
+      a.ok(ledgerA.has(identity(group.id, '@Alpha B1')), 'one ledger for all its chats');
       a.deepEqual(runner.pendingAssignments(bot.id), []);
 
       // Size: an ambiguous prompt grows the session past the cap. Nothing rotates until a turn settles.
@@ -124,7 +129,7 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       mode('');
       const a4 = await say(direct, 'A4');
       a.equal(a4.dir, startA.dir, 'no rotation straight after an ambiguous prompt');
-      a.equal(starts().length, 3, 'the recovered Pi carries on');
+      a.equal(starts().length, 1, 'the recovered Pi carries on');
       // Not lost: A3 is still unread and comes again, unmarked, alongside A4.
       a.ok(!/\\[(already seen|context only)/.test(marked(a4.message, 'A3')), a4.message);
       a.ok(has(a4.message, 'A4') && !has(a4.message, 'A2'));
@@ -135,7 +140,9 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       a.notEqual(rotated.dir, startA.dir);
       a.equal(dirname(rotated.dir), dirname(startA.dir));
       a.equal(rotated.resumed, 0);
-      a.ok(!alive(resumedA.pid));
+      a.ok(!alive(startA.pid));
+      // Its own listing was kept, so this Pi compacts where a model with a 1M-token window should.
+      a.deepEqual(settings().compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 80000, keepRecentTokens: 8000 });
       a.ok(sizeOf(startA.dir) >= SESSION_MAX_BYTES, 'old generation retained');
       a.match(a5.message, /Previous session retained at /);
       // A fresh session sees the history again, but only A5 is new: A3 isn't answered twice.
@@ -157,17 +164,25 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       a.match(marked(a8.message, 'A6'), /\\[already seen\\]/);
       a.ok(!marked(a8.message, 'A8').includes('[already seen]'));
 
-      // B's lane rotates on its own clock, inside B's lane, and B1 isn't asked for again.
+      // The group's next turn is on that session too, whichever generation it has reached: the Pi A8
+      // started answers it. That generation hasn't shown B1 yet, so it's there, and isn't asked for again.
+      const turns = starts().length;
       const b2 = await say(group.id, '@Alpha B2');
-      const backToB = starts().at(-1);
-      a.equal(dirname(backToB.dir), dirname(startB.dir));
-      a.notEqual(backToB.dir, startB.dir);
-      a.equal(backToB.resumed, 0);
-      a.equal(sizeOf(startB.dir) > 0, true, 'old B generation retained');
+      a.equal(starts().length, turns);
+      a.equal(b2.dir, a8.dir);
       a.match(marked(b2.message, '@Alpha B2'), /\\[assigned request: answer this\\]/);
       a.match(marked(b2.message, '@Alpha B1'), /\\[context only: do not answer\\]/);
-      a.ok(!/A\\d/.test(b2.message.split('Conversation').slice(1).join('')), 'no A context in B');
+      a.ok(!/A\\d/.test(b2.message.split('Conversation').slice(1).join('')), 'the transcript of the group holds none of the lines of A');
       a.deepEqual(runner.pendingAssignments(bot.id), []);
+      // Where the session lives doesn't follow the chat a turn is in. A chat shared with a friend keeps a session of its own, apart from it.
+      const { setFocus } = await import('./server/bots/agent.ts');
+      const home = dirname(startA.dir);
+      for (const chat of [direct, group.id]) { setFocus(bot.id, chat); a.equal(runner.sessionHome(bot.id), home); }
+      const shared = runner.sessionHome(bot.id, 'friend:f1');
+      a.notEqual(shared, home);
+      setFocus(bot.id, direct);
+      a.notEqual(runner.sessionHome(bot.id, 'friend:f1'), shared);
+      a.notEqual(runner.sessionHome(bot.id, 'friend:f1'), home);
       runner.stop(bot.id);
       process.exit(0);
     `, { OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") });
@@ -175,7 +190,7 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
   } finally { rmSync(root, { recursive: true, force: true }); }
 }, 60_000);
 
-test("a fake mind with a fixed session path is kept through an ambiguous prompt, then replaced by rotation and by A→B→A", async () => {
+test("a fake mind with a fixed session path is kept through an ambiguous prompt, replaced by rotation, and A→B→A stays on one Pi", async () => {
   const root = mkdtempSync(join(tmpdir(), "bot-fixed-"));
   try {
     writeFileSync(join(root, "pi"), FAKE_PI, { mode: 0o700 });
@@ -228,7 +243,7 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
         minds.set(bot.id, fake);
         const ids = new Map();
         // An untagged group message reaches the other bot too: only this bot's Pi is followed here.
-        const otherLane = laneDirectory(db.botsDir() + '/sessions', other.id, group.id);
+        const otherLane = runner.sessionHome(other.id);
         const own = e => !String(e.dir).startsWith(otherLane);
         const realPrompts = () => events().filter(e => e.type === 'prompt' && own(e));
         const starts = () => events().filter(e => e.type === 'start' && own(e));
@@ -276,19 +291,16 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
         a.match(p4, /Previous session retained at /);
         a.match(marked(p4, 'A2'), /\\[already seen\\]/);
         a.ok(!marked(p4, 'A4').includes('[already seen]'));
-        // A→B→A from here: B gets its own Pi, and A's next Pi resumes the rotated file.
+        // A→B→A from here: the group's turn and A's next one stay on the rotated Pi and its session.
+        const rotations = starts().length;
         const pB = await say(group.id, '@Alpha B1');
-        const startB = starts().at(-1);
-        a.notEqual(startB.pid, rotated.pid);
-        a.notEqual(dirname(startB.dir), dirname(fixed));
-        a.ok(!pB.includes(': A4'));
+        a.ok(pB.includes(': @Alpha B1') && !pB.includes(': A4'), pB);
         const p5 = await say(direct, 'A5');
-        const backToA = starts().at(-1);
-        a.equal(backToA.dir, rotated.dir);
-        a.equal(backToA.resumed, 2, 'A4 and its answer');
+        a.equal(starts().length, rotations, cap + ': no other Pi for the group');
+        a.deepEqual(realPrompts().slice(-2).map(e => e.dir), [rotated.dir, rotated.dir]);
         a.ok(p5.includes(': A5') && !p5.includes(': A4') && !p5.includes('@Alpha B1'), p5);
         const ledger = readDeliveries(rotated.dir);
-        a.ok(ledger.has(id(direct, 'A4')) && ledger.has(id(direct, 'A5')) && !ledger.has(id(group.id, '@Alpha B1')));
+        a.ok(ledger.has(id(direct, 'A4')) && ledger.has(id(direct, 'A5')) && ledger.has(id(group.id, '@Alpha B1')));
         a.deepEqual(runner.pendingAssignments(bot.id), []);
         runner.stop(bot.id);
       }
@@ -297,3 +309,127 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
     expect({ code, stderr: stderr.replace(/\[bots\] \S+ couldn't reply:.*\n/g, "") }).toEqual({ code: 0, stderr: "" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 }, 90_000);
+
+test("a turn's chat is where what the bot sends and lists goes, and it sees the to-do lists of its other chats", async () => {
+  const root = mkdtempSync(join(tmpdir(), "bot-one-mind-"));
+  try {
+    writeFileSync(join(root, "pi"), FAKE_PI, { mode: 0o700 });
+    writeFileSync(join(root, "mode"), "reply");
+    const { code, stderr } = await spawnScript(`
+      import { strict as a } from 'node:assert';
+      import { existsSync, readFileSync } from 'node:fs';
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const runner = await import('./server/bots/runner.ts');
+      const agent = await import('./server/bots/agent.ts');
+      const store = await import('./server/friends/store.ts');
+      const chats = await import('./server/friends/chats.ts');
+      const { newKeyPair, keyId } = await import('./server/friends/protocol.ts');
+      svc.setHooks({ wake: runner.wake, stop: runner.stop });
+      svc.updateSettings({ onboarding: 'done', user: { name: 'Gal' } });
+      const { bot, conversationId: direct } = svc.createBot({ name: 'Alpha' });
+      const other = svc.createBot({ name: 'Beta' }).bot;
+      const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [bot.id, other.id] });
+      const events = () => existsSync(process.env.FAKE_LOG) ? readFileSync(process.env.FAKE_LOG, 'utf8').split('\\n').filter(Boolean).map(l => JSON.parse(l)) : [];
+      const prompts = () => events().filter(e => e.type === 'prompt');
+      const until = async (ok, what) => { for (let i = 0; i < 1000 && !ok(); i++) await Bun.sleep(10); a.ok(ok(), what); };
+      const say = async (where, text) => {
+        const before = prompts().length;
+        svc.postMessage(where, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
+        await until(() => prompts().length === before + 1 && !runner.busy(bot.id), 'turn for ' + text);
+        return prompts().at(-1).message;
+      };
+      const said = where => db.messages(where, 50).filter(r => r.message.author === bot.id && !r.message.event).map(r => r.message.text);
+      const count = (text, part) => text.split(part).length - 1;
+      const name = (c, kind, title) => 'Conversation ' + c.slice(0, 8) + ' (' + kind + ', “' + title + '”)';
+      const ELSEWHERE = 'Your to-do lists in your other chats (todo with conversation changes one):\\n';
+
+      // Each chat has a list of its own, as the user sees them.
+      svc.editTodos(direct, { action: 'add', items: ['Water the plants'] }, 'me');
+      svc.editTodos(group.id, { action: 'add', items: ['Draft the launch post', 'Book the room'] }, 'me');
+
+      // A turn in its own chat: that chat's list with its transcript, the group's under its name, and the reply lands here.
+      const one = await say(direct, 'ask one');
+      a.ok(one.startsWith(name(direct, 'direct', 'Alpha') + ', ' + runner.TURN_HERE + ':\\nTo-do list, 0/1 done:\\n'), one);
+      a.match(one, /\\n1\\. \\[[0-9a-f]{6}\\] \\[ \\] Water the plants\\n/);
+      a.ok(one.includes(ELSEWHERE + name(group.id, 'group', 'Team') + ': To-do list, 0/2 done:\\n'), one);
+      a.match(one.split(ELSEWHERE)[1], /^.*\\n1\\. \\[[0-9a-f]{6}\\] \\[ \\] Draft the launch post\\n2\\. \\[[0-9a-f]{6}\\] \\[ \\] Book the room\\n\\n/);
+      a.equal(count(one, 'Water the plants'), 1);
+      a.equal(count(one, runner.TURN_HERE), 1);
+      a.deepEqual([said(direct), said(group.id)], [['Reply ask one'], []]);
+
+      // The same Pi takes a turn in the group: the lists swap places, and this reply lands in the group.
+      const two = await say(group.id, '@Alpha ask two');
+      a.equal(events().filter(e => e.type === 'start').length, 1);
+      a.ok(two.startsWith(name(group.id, 'group', 'Team') + ', ' + runner.TURN_HERE + ':\\n'), two);
+      a.ok(two.split(ELSEWHERE)[0].includes('Draft the launch post') && !two.split(ELSEWHERE)[0].includes('Water the plants'), two);
+      a.ok(two.includes(ELSEWHERE + name(direct, 'direct', 'Alpha') + ': To-do list, 0/1 done:\\n'), two);
+      a.equal(count(two, 'Draft the launch post'), 1);
+      a.deepEqual([said(direct), said(group.id)], [['Reply ask one'], ['Reply ask two']]);
+      // What its own chat's turn said and was asked is behind it in the session, so the group turn isn't shown it again.
+      a.ok(!two.includes('ask one'), two);
+
+      // Its tools go by the chat the turn is in, and take another by its id: lists and question cards stay each chat's own.
+      agent.setFocus(bot.id, group.id);
+      agent.todo(bot.id, { action: 'update', item: '1', state: 'doing' });
+      agent.todo(bot.id, { action: 'done', item: '1', conversation: direct.slice(0, 8) });
+      a.deepEqual(db.todos(group.id).map(t => t.status), ['doing', 'todo']);
+      a.deepEqual(db.todos(direct).map(t => t.status), ['done']);
+      const card = agent.askUser(bot.id, { title: 'Which room?', options: ['Blue', 'Green'] });
+      a.equal(db.getMessage(card.id).conversationId, group.id);
+      const elsewhere = agent.askUser(bot.id, { title: 'Which plants?', options: ['Ferns', 'All'], conversation: direct.slice(0, 8) });
+      a.equal(db.getMessage(elsewhere.id).conversationId, direct);
+      a.ok(runner.todosElsewhere(bot.id, direct).includes('[doing] Draft the launch post (you)'));
+      // A chat with nothing on its list isn't named, and with none anywhere else nothing is said.
+      svc.editTodos(direct, { action: 'clear', which: 'all' }, 'me');
+      a.equal(runner.todosElsewhere(bot.id, group.id), '');
+
+      // A list too long for the room there is named with its progress, not left out.
+      const big = svc.createConversation({ kind: 'group', name: 'Big', botIds: [bot.id, other.id] });
+      svc.editTodos(big.id, { action: 'add', items: Array.from({ length: 30 }, (_, i) => 'Step ' + i + ' ' + 'x'.repeat(120)) }, 'me');
+      const capped = runner.todosElsewhere(bot.id, direct);
+      a.ok(capped.length < runner.TODOS_ELSEWHERE_MAX + 200, String(capped.length));
+      a.ok(capped.includes(name(big.id, 'group', 'Big') + ': To-do list, 0/30 done (todo list with conversation shows it).'), capped);
+      a.ok(capped.includes('Book the room') && !capped.includes('Step 3 '), capped);
+      // Not a chat it isn't in.
+      a.equal(runner.todosElsewhere(svc.createBot({ name: 'Gamma' }).bot.id, direct), '');
+
+      // A chat shared with a friend is apart from all of it: its list isn't among the others, and a turn there is shown none of them.
+      svc.setFriendHooks({ relay: chats.relay, members: chats.members, left: chats.left, list: () => [] });
+      const key = newKeyPair();
+      const FID = keyId(key.publicKey);
+      store.putFriend({ id: FID, name: 'Alice', publicKey: key.publicKey, role: 'guest', mode: 'lan', listen: '127.0.0.1', addedAt: Date.now() });
+      const CHAT = crypto.randomUUID();
+      chats.apply(store.friend(FID), 'chat.open', { chat: CHAT, name: 'Picnic', members: [{ id: crypto.randomUUID(), name: 'Bolt', look: { shape: 'pill', color: 'blue' } }], owner: 'Alice' });
+      const shared = db.listConversations().find((c) => c.friend?.chat === CHAT);
+      svc.updateConversation(shared.id, { botIds: [bot.id] });
+      svc.editTodos(shared.id, { action: 'add', items: ['Bring the blanket'] }, 'me');
+      a.ok(!runner.todosElsewhere(bot.id, direct).includes('Bring the blanket'));
+      const there = runner.render([{ kind: 'messages', conversationId: shared.id }], bot.id);
+      a.ok(there.includes('Bring the blanket') && !there.includes('Your to-do lists') && !there.includes('Book the room'), there);
+      // A memory written from that chat (a friend allowed tools) isn't one its own session wrote: its own
+      // session is sent it. One it writes in the group is held back there and in its own chat alike.
+      const memory = async (extra = {}) => (await agent.seams.handle(bot.id, 'context', { tools: ['send_message'], ...extra })).sections.openbots_memory;
+      agent.setFocus(bot.id, direct);
+      await memory({ fresh: true });
+      agent.setFocus(bot.id, shared.id);
+      agent.memory(bot.id, { action: 'write', text: 'Alice likes kites' });
+      agent.setFocus(bot.id, group.id);
+      const told = await memory();
+      a.match(told, /Alice likes kites/);
+      agent.memory(bot.id, { action: 'write', text: 'The team ships on Fridays' });
+      a.equal(await memory(), told);
+      agent.setFocus(bot.id, direct);
+      a.equal(await memory(), told);
+
+      // A wake that names no chat still says where its turn is; one steered into a turn is already in it.
+      const routine = runner.render([{ kind: 'routine', text: 'Check the build.' }], bot.id, undefined, undefined, false, direct);
+      a.ok(routine.startsWith(name(direct, 'direct', 'Alpha') + ' is ' + runner.TURN_HERE + '.\\n\\nCheck the build.\\n\\n' + ELSEWHERE), routine);
+      const steered = runner.render([{ kind: 'messages', conversationId: direct }], bot.id, undefined, undefined, true);
+      a.ok(steered.startsWith(name(direct, 'direct', 'Alpha') + ':\\n') && !steered.includes(runner.TURN_HERE) && !steered.includes('Your to-do lists'), steered);
+      runner.stop(bot.id);
+      process.exit(0);
+    `, { OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(root, "secrets.json") });
+    expect({ code, stderr: stderr.replace(/\[bots\] \S+ couldn't reply:.*\n/g, "") }).toEqual({ code: 0, stderr: "" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}, 60_000);

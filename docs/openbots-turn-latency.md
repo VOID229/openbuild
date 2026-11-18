@@ -70,8 +70,8 @@ number of requests decides the turn.
   requests, 11.2 s cold), with the shell alone it does both in one command (2 requests).
   A bot still loads a tool by name once per session when it isn't the shell, isn't one of its usual
   tools (used in 2 turns of the last 7 days, within the budget) and wasn't loaded in that session
-  before. A session lasts until 24 hours or 8 MiB, per chat, so that is at most a request a day per
-  chat and set of tools; a restart of Pi or of the server keeps what the session had loaded. Over
+  before. A session lasts until 24 hours or 8 MiB, and since 2026-11-17 a bot has one for all its
+  own chats, so that is at most a request a day per set of tools; a restart of Pi or of the server keeps what the session had loaded. Over
   the last 7 days here 7.7% of turns loaded a tool first, 2.0% of all requests.
 - **The request after the reply.** After a tool's result Pi asks the model again, and after the
   bot's last message that request had nothing to say but that it was done: 2.5 to 3.1 seconds and

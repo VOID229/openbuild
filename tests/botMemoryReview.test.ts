@@ -68,7 +68,7 @@ test("a bot with memory from before the split is asked once to promote what last
         if (cmd.type === 'prompt') prompts.push({ ...cmd, bot: bot.id, lane, armed: armed(), finish(text) { mind.draft = text; mind.onSettled?.(); } });
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
-      Object.defineProperty(mind, 'sessionPath', { get: () => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', bot.id, globalThis.openbotsFocus?.get(bot.id) ?? svc.directId(bot.id), lane)) });
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionGeneration(runner.sessionHome(bot.id, lane)) });
       minds.set(lane === 'main' ? bot.id : bot.id + '~' + lane, mind);
     };
     for (const b of [boss, scout, fresh]) fake(b.bot);

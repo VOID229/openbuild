@@ -197,7 +197,7 @@ test("the notice wakes an idle primary for a turn of its own, in its own chat", 
       if (cmd.type === 'prompt') prompts.push({ bot: bot.id, focus: agent.getFocus(bot.id), message: cmd.message, finish(text = '') { mind.draft = text; mind.onSettled?.(); } });
       return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
     } } };
-    Object.defineProperty(mind, 'sessionPath', { get: () => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', bot.id, globalThis.openbotsFocus?.get(bot.id) ?? svc.directId(bot.id))) });
+    Object.defineProperty(mind, 'sessionPath', { get: () => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', bot.id, svc.directId(bot.id))) });
     minds.set(bot.id, mind);
   };
   const until = async (check) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check(), String(check)); };

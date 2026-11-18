@@ -240,7 +240,7 @@ test("the primary's next turn opens with the note, and the turn after doesn't re
     const runner = await import('./server/bots/runner.ts');
     const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
     const primary = svc.createBot({ name: 'Boss' });
     const helper = svc.createBot({ name: 'Helper' });
     svc.updateSettings({ user: { name: 'Outis' } });
@@ -290,7 +290,7 @@ test("a change the user takes back while the primary's turn is under way is corr
     const runner = await import('./server/bots/runner.ts');
     const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, svc.directId(id)));
     const primary = svc.createBot({ name: 'Boss' });
     const helper = svc.createBot({ name: 'Helper' });
     svc.updateSettings({ user: { name: 'Outis' } });
