@@ -54,6 +54,23 @@ const press = async (page: Page, n: number, key?: string) => {
 const active = (page: Page) => page.eval<string>("bots.getState().activeId");
 const badges = (page: Page) =>
   page.eval<Record<string, string>>(`Object.fromEntries([...document.querySelectorAll('.bots-switch-key')].map((k) => [k.closest('[data-bot-slot]').dataset.botSlot, k.textContent]))`);
+/**
+ * Where each number sits: "ok" when it's on its item, a small keycap (at most 16px tall), in its
+ * avatar's bottom right (below its middle and right of it, not over its face at the top left), and
+ * not over the row's or tile's text; otherwise what's wrong.
+ */
+const placements = (page: Page) =>
+  page.eval<string[]>(`[...document.querySelectorAll('.bots-switch-key')].map((k) => {
+    const host = k.closest('[data-bot-slot]');
+    const r = k.getBoundingClientRect(), item = host.getBoundingClientRect();
+    const face = host.querySelector('.bots-sidebar-avatar > *').getBoundingClientRect();
+    const text = host.querySelector('.bots-row-text, .bots-tile-name')?.getBoundingClientRect();
+    if (r.width < 8 || r.height > 16) return "size " + r.width + "x" + r.height;
+    if (r.left < item.left || r.right > item.right || r.top < item.top || r.bottom > item.bottom) return "outside its item";
+    if (r.left + r.width / 2 < face.left + face.width / 2 || r.top < face.top + face.height / 2) return "over the avatar's face";
+    if (text && r.right > text.left && r.left < text.right && r.bottom > text.top && r.top < text.bottom) return "over the text";
+    return "ok";
+  })`);
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function shoot(page: Page, name: string) {
@@ -102,12 +119,8 @@ describe.skipIf(!browser)("⌥1–9 in the OpenBots sidebar", () => {
       await altDown(page);
       await page.until("document.querySelectorAll('.bots-switch-key').length === 9");
       expect(await badges(page)).toEqual(Object.fromEntries([...PINNED, ...LIST].slice(0, 9).map((id, i) => [id, `Alt+${i + 1}`])));
-      // Each sits on its own item's corner.
-      const inside = await page.eval<boolean[]>(`[...document.querySelectorAll('.bots-switch-key')].map((k) => {
-        const r = k.getBoundingClientRect(), item = k.closest('[data-bot-slot]').getBoundingClientRect();
-        return r.width > 10 && r.top >= item.top - 6 && r.left >= item.left - 2 && r.bottom <= item.top + 40 && r.right <= item.left + 80;
-      })`);
-      expect(inside.every(Boolean)).toBe(true);
+      // Each sits at its own avatar's bottom right, clear of its face, and inside its item.
+      expect(await placements(page)).toEqual(Array(9).fill("ok"));
       await wait(200);
       await shoot(page, `open-${theme}`);
       // Pressing one with them showing goes there, and they stay up while Option is.
@@ -118,6 +131,17 @@ describe.skipIf(!browser)("⌥1–9 in the OpenBots sidebar", () => {
       await page.until("!document.querySelector('.bots-switch-key')");
     }
   }, 40_000);
+
+  test("the numbers come up half a second after Option goes down", async () => {
+    const page = await open();
+    await page.eval(`window.downAt = 0; window.shownAt = 0;
+      addEventListener("keydown", (e) => e.key === "Alt" && (downAt = performance.now()), true);
+      new MutationObserver(() => !shownAt && document.querySelector('.bots-switch-key') && (shownAt = performance.now())).observe(document.body, { childList: true, subtree: true })`);
+    await altDown(page);
+    await page.until("document.querySelectorAll('.bots-switch-key').length === 9");
+    expect(await page.eval<number>("shownAt - downAt")).toBeGreaterThanOrEqual(495);
+    await altUp(page);
+  }, 30_000);
 
   test("left out of the numbers, the pinned ones show none", async () => {
     const page = await open();
@@ -197,6 +221,7 @@ describe.skipIf(!browser)("⌥1–9 in the OpenBots sidebar", () => {
     await altDown(page);
     await page.until("document.querySelectorAll('.bots-switch-key').length === 9");
     expect(await badges(page)).toEqual(Object.fromEntries([...PINNED, ...LIST].slice(0, 9).map((id, i) => [id, `Alt+${i + 1}`])));
+    expect(await placements(page)).toEqual(Array(9).fill("ok"));
     await wait(200);
     await shoot(page, "rail");
     await altUp(page);
@@ -214,6 +239,7 @@ describe.skipIf(!browser)("⌥1–9 in the OpenBots sidebar", () => {
     await altDown(page);
     await page.until("document.querySelectorAll('.bots-switch-key').length === 9");
     expect(Object.values(await badges(page))).toEqual(["⌥1", "⌥2", "⌥3", "⌥4", "⌥5", "⌥6", "⌥7", "⌥8", "⌥9"]);
+    expect(await placements(page)).toEqual(Array(9).fill("ok"));
     await page.eval(`document.querySelector('[aria-label="Include pinned in Option + 1–9"]').scrollIntoView({ block: "center" })`);
     await wait(200);
     await shoot(page, "mac");

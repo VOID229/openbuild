@@ -215,8 +215,10 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
       }}
     >
       <button type="button" className="bots-row-main" data-bot-slot={conversation.id} {...peek(conversation.id, "right")} onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
-        <SidebarAvatar conversation={conversation} size={avatar} retired={retired} />
-        <SwitchKeyBadge id={conversation.id} />
+        <span className="bots-row-avatar">
+          <SidebarAvatar conversation={conversation} size={avatar} retired={retired} />
+          <SwitchKeyBadge id={conversation.id} />
+        </span>
         <span className="bots-row-text">
           <span className="bots-row-name">
             <span className="bots-row-title">{title}</span>
