@@ -51,7 +51,7 @@ function migrate(db: Database): Database {
 const THREAD_ACCESS_MIGRATED = "migrated:thread-access";
 
 /**
- * "Use OpenBuild" became the one switch for what "Control others' threads", "Choose permissions" and
+ * "Run coding agents" (first called "Use OpenBuild") became the one switch for what "Control others' threads", "Choose permissions" and
  * "Answer permission prompts" used to grant apart, and it's on by default. Once: a bot that never had a
  * grant (the old default, off without anyone choosing it) gets the new default; one the user had
  * turned off stays off, since turning it on now gives more than they said no to. Every grant drops the

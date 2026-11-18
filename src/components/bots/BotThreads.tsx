@@ -17,7 +17,7 @@ import { ConfirmDeleteDialog } from "./BotDialogs";
 
 /** A bot without a grant has no access (the server fails closed too). Turning it on starts from the default. */
 const NO_ACCESS: BotThreadAccess = { ...DEFAULT_THREAD_ACCESS, enabled: false };
-/** What "Use OpenBuild" gives, as the dialog for turning it off lists it. Merging is its own switch. */
+/** What "Run coding agents" gives, as the dialog for turning it off lists it. Merging is its own switch. */
 export const OPENBUILD_ABILITIES = [
   "Start threads in its projects, and read them",
   "Send to, stop and close threads, including yours and other bots'",
@@ -94,7 +94,7 @@ function BotProjects({ access, save, compact }: { access: BotThreadAccess; save:
   const grow = compact ? "select-grow" : undefined;
   return (
     <>
-      <Row compact={compact} disabled={disabled} label="Projects" desc={disabled ? "Turn on Use OpenBuild to change which projects it can work in." : "Which projects it can start threads in and follow."}>
+      <Row compact={compact} disabled={disabled} label="Projects" desc={disabled ? "Turn on Run coding agents to change which projects it can work in." : "Which projects it can start threads in and follow."}>
         <OptionSelect label="Projects this bot can work in" value={scope} options={SCOPES} onChange={(next) => save({ scope: next })} disabled={disabled} className={grow} />
       </Row>
       {scope !== "all" && (
@@ -113,8 +113,8 @@ export function BotThreads({ bot, compact }: { bot: Bot; compact?: boolean }) {
   return (
     <>
       <BotProjects access={access} save={save} compact={compact} />
-      <Row compact={compact} label="Use OpenBuild" desc="Start, follow and control threads in its projects, yours and other bots' too: send them messages, choose their permission modes, and answer what they ask, permission prompts included. Threads run on this server as you, with your subscriptions and keys.">
-        <Toggle checked={access.enabled} onChange={(enabled) => (enabled ? save({ enabled }) : setConfirmOff(true))} label="Use OpenBuild" />
+      <Row compact={compact} label="Run coding agents" desc="Start, follow and control threads in its projects, yours and other bots' too: send them messages, choose their permission modes, and answer what they ask, permission prompts included. Threads run on this server as you, with your subscriptions and keys.">
+        <Toggle checked={access.enabled} onChange={(enabled) => (enabled ? save({ enabled }) : setConfirmOff(true))} label="Run coding agents" />
       </Row>
       {access.enabled && (
         <Row compact={compact} label="Merge pull requests" desc="Merge once every check passes.">
@@ -123,7 +123,7 @@ export function BotThreads({ bot, compact }: { bot: Bot; compact?: boolean }) {
       )}
       {confirmOff && (
         <ConfirmDeleteDialog
-          title={`Turn off OpenBuild for “${bot.name}”?`}
+          title={`Turn off Run coding agents for “${bot.name}”?`}
           body={
             <>
               <p className="confirm-lead">{bot.name} won't be able to:</p>

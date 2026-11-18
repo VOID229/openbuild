@@ -77,17 +77,17 @@ test("a change in the app's settings posts one activity line in the bot's chat, 
   `);
 });
 
-test("OpenBuild access names its projects and the switches that changed", async () => {
+test("Run coding agents names its projects and the switches that changed", async () => {
   await run(`${SETUP}
     const { addProject } = await import('./server/projects.ts');
     const { mkdtempSync } = await import('node:fs');
     const { join } = await import('node:path');
     const site = await addProject(mkdtempSync(join(process.env.OPENCHAT_DATA_DIR, 'site-')));
     const base = { enabled: true, scope: 'choose', projects: [site.id] };
-    // A new bot starts with OpenBuild on, in every project.
+    // A new bot starts with Run coding agents on, in every project.
     a.deepEqual(db.getBot(helper.id).threads, { enabled: true, scope: 'all', projects: [] });
     await patch(helper.id, { threads: base });
-    // The switches folded into Use OpenBuild are neither saved nor announced.
+    // The switches folded into Run coding agents are neither saved nor announced.
     await patch(helper.id, { threads: { ...base, merge: true, approve: true, others: true, choosePermission: true } });
     await patch(helper.id, { threads: { ...base, merge: true, scope: 'all' } });
     await patch(helper.id, { threads: { ...base, enabled: false, merge: true, scope: 'all' } });
@@ -97,8 +97,8 @@ test("OpenBuild access names its projects and the switches that changed", async 
       \`Juniper's OpenBuild projects: all → \${site.name}\`,
       "Juniper's merge pull requests: off → on",
       \`Juniper's OpenBuild projects: \${site.name} → all\`,
-      "Juniper's OpenBuild: on → off",
-      "Juniper's OpenBuild: off → on",
+      "Juniper's run coding agents: on → off",
+      "Juniper's run coding agents: off → on",
     ]);
     process.exit(0);
   `);

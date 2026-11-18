@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnScript } from "./spawnScript";
 
-// "Use OpenBuild" became the one switch for what three others used to grant apart, and on by default.
+// "Run coding agents" became the one switch for what three others used to grant apart, and on by default.
 // Bots saved before keep what the user chose: run against a database written in the old shape, in a
 // data directory and process of its own.
-test("saved grants fold into Use OpenBuild: on gains the rest, off stays off, none gets the new default", async () => {
+test("saved grants fold into Run coding agents: on gains the rest, off stays off, none gets the new default", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-thread-access-"));
   try {
     const { code, stdout, stderr } = await spawnScript(

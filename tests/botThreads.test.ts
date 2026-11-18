@@ -139,7 +139,7 @@ const ask = (over: object = {}) => ({ t: "ask" as const, id: "a1", method: "sele
 
 test("a bot has no access until the user gives it some, and can't give itself any", async () => {
   svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
-  await expect(call("options")).rejects.toThrow(/hasn't given you access/);
+  await expect(call("options")).rejects.toThrow(/hasn't turned on Run coding agents/);
   expect(guide({ threads: undefined })).toBe("");
   expect(brief({ threads: undefined })).toBe("");
   const { manage } = await import("../server/bots/agent");
@@ -289,7 +289,7 @@ test("questions wake the bot once, and it can answer them", async () => {
   expect(wakes.filter((w) => w.text.includes("Which?")).length).toBe(1);
 });
 
-test("Use OpenBuild answers permission prompts; a bot that has lost it is told they're the user's", async () => {
+test("Run coding agents answers permission prompts; a bot that has lost it is told they're the user's", async () => {
   await call("start", { project: project.name, prompt: "Go" });
   const { threadId, stream } = admitted[0];
   const prompt = ask({ id: "p1", title: "Allow rm -rf?", options: ["Allow once", "Deny"] });
@@ -311,9 +311,9 @@ test("Use OpenBuild answers permission prompts; a bot that has lost it is told t
   grant({ enabled: false });
   await settle();
   const off = wakes.find((w) => w.text.includes("Allow push"));
-  expect(off.text).toContain("only the user");
+  expect(off.text).toContain("Run coding agents is off for you now, so only the user");
   expect(off.text).not.toContain("question p2");
-  await expect(call("answer", { thread: threadId, question: "p2", answer: "Allow once" })).rejects.toThrow(/hasn't given you access/);
+  await expect(call("answer", { thread: threadId, question: "p2", answer: "Allow once" })).rejects.toThrow(/hasn't turned on Run coding agents/);
   expect(answers).toEqual([]);
 });
 
@@ -704,7 +704,7 @@ test("merging needs the grant and every check green", async () => {
   expect(merged[0]).toEqual([repo, 7, "squash", "abc", false]);
 });
 
-test("Use OpenBuild controls threads it didn't start too: the user's and other bots'", async () => {
+test("Run coding agents controls threads it didn't start too: the user's and other bots'", async () => {
   const theirs = { id: crypto.randomUUID(), title: "Theirs", workspace: { projectId: project.id, projectName: project.name, cwd: repo }, createdAt: 1, updatedAt: 1, messages: [{ id: "u", role: "user", content: "Hi", createdAt: 1 }, { id: "a", role: "assistant", content: "Hello", createdAt: 1, model: { plan: "pi", id: "acme/one", name: "One" } }] };
   storage.putChat(theirs as never);
   await call("start", { project: project.name, prompt: "Go" });
@@ -1302,12 +1302,12 @@ test("the primary adds a project and starts a thread in it; other bots and stray
     await expect(call("add_project", {})).rejects.toThrow(/Say where/);
     expect(projects.listProjects().length).toBe(before);
 
-    // Primary only, and only with OpenBuild access.
+    // Primary only, and only with Run coding agents on.
     const other = svc.createBot({ name: "Helper" }).bot;
     svc.updateBot(other.id, { threads: { enabled: true, scope: "all", projects: [] } });
     await expect(handle(other.id, { action: "add_project", path: folder })).rejects.toThrow(/Only the primary/);
     svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
-    await expect(call("add_project", { path: folder })).rejects.toThrow(/hasn't given you access/);
+    await expect(call("add_project", { path: folder })).rejects.toThrow(/hasn't turned on Run coding agents/);
     svc.retireBot(other.id);
     await svc.deleteBot(other.id);
     expect(guide({ threads: { enabled: true, scope: "all", projects: [] }, primary: true })).toContain("add_project");

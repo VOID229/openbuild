@@ -368,7 +368,7 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
       <Group title="Machines" hint={MACHINES_DESC} card={false}>
         <BotMachines compact />
       </Group>
-      <Group title="OpenBuild access">
+      <Group title="Coding agents">
         <BotThreads bot={bot} compact />
       </Group>
     </div>
