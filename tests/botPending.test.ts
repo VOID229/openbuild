@@ -128,7 +128,8 @@ test('a group request steered into a turn still deciding, naming that bot, shows
       const runner = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
-      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
+      // A bot is one session in all its chats (#373): the fake mind is that one, wherever the bot is focused.
+      const sessionPathFor = id => sessionGeneration(runner.sessionHome(id));
       const { showWorking } = await import('./src/lib/bots/activity.ts');
       const helpers = await import('./server/bots/helpers.ts');
       helpers.seams.spawn = () => ({ send: async (cmd) => (cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {}), on: () => () => {}, close() {} });
