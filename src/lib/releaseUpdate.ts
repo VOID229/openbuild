@@ -5,8 +5,8 @@ import { followJob } from "./pi";
 import { isHosted } from "./runtime";
 
 // Updating OpenBuild from the app: one state for the button beside the version in either sidebar
-// (components/ReleaseUpdate.tsx) and the notice at the top of the window (components/Notices.tsx), so
-// an update started from one shows in the other.
+// (components/ReleaseUpdate.tsx), so an update started from one shows in the other. The notices over
+// the window (components/Notices.tsx) only read it, to hold harness updates while it installs.
 //
 // Nothing is installed here. The server checks the installation's track (`/api/releases`), runs
 // `ob update` as a maintenance job (`/api/releases/update`) and `ob restart` (`/api/releases/restart`);

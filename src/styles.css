@@ -299,8 +299,9 @@ svg {
   display: none !important;
 }
 
-/* Notices at the top of the window (a newer OpenBuild build or Pi release); below popovers
-   (z 40), so an open picker or menu draws over them, and below modals */
+/* Notices over the window (Notices.tsx): reconnecting at the top in the middle, updates (a newer
+   build to reload, newer harnesses) in the top right corner, sliding in from its edge. Below
+   popovers (z 40), so an open picker or menu draws over them, and below modals */
 
 .notices {
   position: fixed;
@@ -339,6 +340,28 @@ svg {
 
 @keyframes notice-out {
   to { opacity: 0; transform: translateY(-4px); }
+}
+
+.notices-corner {
+  align-items: flex-end;
+}
+
+.notices-corner .notice {
+  animation: notice-slide-in 260ms var(--ease-out) both;
+}
+
+/* As long as NOTICE_LEAVE_MS in Notices.tsx. */
+.notices-corner .notice-leaving {
+  animation: notice-slide-out 220ms var(--ease) both;
+}
+
+@keyframes notice-slide-in {
+  from { opacity: 0; transform: translateX(calc(100% + 12px)); }
+  60% { opacity: 1; }
+}
+
+@keyframes notice-slide-out {
+  to { opacity: 0; transform: translateX(calc(100% + 12px)); }
 }
 
 .notice-row {
@@ -406,7 +429,8 @@ svg {
 
 @media (prefers-reduced-motion: reduce) {
   .notice,
-  .notice-leaving { animation: none; }
+  .notice-leaving,
+  .notices-corner .notice { animation: none; }
   .notice-details[data-open] { animation: none; }
 }
 

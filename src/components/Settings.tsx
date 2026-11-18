@@ -148,7 +148,7 @@ function NotificationsSection() {
   return (
     <>
       <Heading>Notifications</Heading>
-      <SettingRow label="New builds" desc="When an OpenBuild update is available.">
+      <SettingRow label="New builds" desc="When a newer OpenBuild has loaded and this page needs a reload.">
         <Toggle checked={n.builds} onChange={(builds) => update({ notifications: { ...n, builds } })} label="New builds" />
       </SettingRow>
       <SettingRow label="Harness updates" desc="When an installed harness has a new version.">

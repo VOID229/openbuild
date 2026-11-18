@@ -72,6 +72,20 @@ export function useUpdateAvailable(enabled = true): boolean {
   return available;
 }
 
+/**
+ * Providers named in a notice, never with versions: "Claude Code", "Codex and Cursor", and past two
+ * "Codex, Cursor, and 2 more providers".
+ */
+export function providerList(names: string[]): string {
+  if (names.length <= 2) return names.join(" and ");
+  const more = names.length - 2;
+  return `${names[0]}, ${names[1]}, and ${more} more provider${more === 1 ? "" : "s"}`;
+}
+
+/** "Claude Code has an update", "Codex, Cursor, and 2 more providers have an update". */
+export const providerUpdateText = (names: string[]): string =>
+  `${providerList(names)} ${names.length === 1 ? "has" : "have"} an update`;
+
 const RUNTIME_CHECK_EVERY = 10 * 60_000;
 
 export interface RuntimeUpdate {
