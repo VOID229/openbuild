@@ -74,7 +74,7 @@ function appSettings(): { profile?: Profile; effort?: Effort; autoDeleteWorktree
 
 function accessOf(botId: string): BotThreadAccess {
   const access = db.getBot(botId)?.threads;
-  if (!access?.enabled) throw refuse("The user hasn't given you access to OpenBuild. They can in Settings → Bots, in your settings.", 403);
+  if (!access?.enabled) throw refuse("The user hasn't turned on Run coding agents for you. They can in Settings → Bots, in your settings.", 403);
   return access;
 }
 
@@ -153,11 +153,11 @@ export function replyFor(ask: Ask, answer: unknown): { value?: string; confirmed
 
 /**
  * Who can answer: secrets are only ever the user's, and the rest, questions and permission prompts
- * alike, need "Use OpenBuild" (which a bot following a thread may have lost since it started it).
+ * alike, need "Run coding agents" (which a bot following a thread may have lost since it started it).
  */
 export function answerRefusal(ask: Pick<Ask, "secret">, access: Pick<BotThreadAccess, "enabled"> | undefined): string | undefined {
   if (ask.secret) return "It wants something secret. Only the user can answer it.";
-  if (!access?.enabled) return "You don't have OpenBuild access anymore, so only the user can answer it.";
+  if (!access?.enabled) return "Run coding agents is off for you now, so only the user can answer it.";
 }
 
 const askView = (ask: Ask, access: BotThreadAccess) => ({

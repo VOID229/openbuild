@@ -80,16 +80,16 @@ async function press(el: HTMLElement) {
 }
 
 for (const surface of ["settings", "advanced"] as const) {
-  test(`${surface}: Projects is a dropdown above Use OpenBuild, with no pill selector`, async () => {
+  test(`${surface}: Projects is a dropdown above Run coding agents, with no pill selector`, async () => {
     await mount(surface, { enabled: true, scope: "all", projects: [] });
     const labels = rowLabels();
     expect(labels.indexOf("Projects")).toBeGreaterThanOrEqual(0);
-    expect(labels.indexOf("Projects")).toBeLessThan(labels.indexOf("Use OpenBuild"));
+    expect(labels.indexOf("Projects")).toBeLessThan(labels.indexOf("Run coding agents"));
     expect(trigger("Projects this bot can work in")?.textContent).toBe("All projects");
     expect(host.querySelector(".segmented, [role=radiogroup]")).toBeNull();
   });
 
-  test(`${surface}: with OpenBuild off, Projects is greyed out and disabled but keeps its saved selection`, async () => {
+  test(`${surface}: with Run coding agents off, Projects is greyed out and disabled but keeps its saved selection`, async () => {
     const threads = { enabled: false, scope: "exclude", projects: ["alpha"], excluded: ["beta", "gone"] } as Access;
     await mount(surface, threads);
     const scope = trigger("Projects this bot can work in")!;
@@ -109,14 +109,14 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(patches).toEqual([]);
 
     // Turning access on keeps exactly what was saved, including ids of projects since removed.
-    await press(host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Use OpenBuild"]')!);
+    await press(host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Run coding agents"]')!);
     expect(saved()).toEqual({ ...threads, enabled: true });
     expect(patches.at(-1)!.body.threads).toEqual({ ...threads, enabled: true });
     expect(trigger("Projects this bot can work in")!.disabled).toBe(false);
     expect(host.querySelector(".setting-row-disabled")).toBeNull();
 
     // And turning it off again, once confirmed, greys it out without touching the scope.
-    await press(host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Use OpenBuild"]')!);
+    await press(host.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Run coding agents"]')!);
     await press(button(dialog()!, "Turn off"));
     expect(saved()).toEqual(threads);
     expect(trigger("Projects this bot can work in")!.disabled).toBe(true);
@@ -188,25 +188,25 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(patches.map((p) => p.body.threads.scope)).toEqual(["exclude", "exclude", "exclude", "choose", "all"]);
   });
 
-  test(`${surface}: Use OpenBuild is the one switch, with only Merge pull requests apart`, async () => {
+  test(`${surface}: Run coding agents is the one switch, with only Merge pull requests apart`, async () => {
     await mount(surface, { enabled: true, scope: "all", projects: [] });
     const labels = rowLabels();
     for (const gone of ["Control others' threads", "Choose permissions", "Answer permission prompts"]) expect(labels).not.toContain(gone);
-    expect(labels.indexOf("Merge pull requests")).toBe(labels.indexOf("Use OpenBuild") + 1);
-    expect(toggle("Use OpenBuild")!.getAttribute("aria-checked")).toBe("true");
+    expect(labels.indexOf("Merge pull requests")).toBe(labels.indexOf("Run coding agents") + 1);
+    expect(toggle("Run coding agents")!.getAttribute("aria-checked")).toBe("true");
     expect(toggle("Merge pull requests")!.getAttribute("aria-checked")).toBe("false");
     await press(toggle("Merge pull requests")!);
     expect(patches.at(-1)!.body.threads).toEqual({ enabled: true, scope: "all", projects: [], merge: true });
   });
 
-  test(`${surface}: turning Use OpenBuild off asks first, listing what the bot loses`, async () => {
+  test(`${surface}: turning Run coding agents off asks first, listing what the bot loses`, async () => {
     await mount(surface, { enabled: true, scope: "all", projects: [], merge: true });
-    await press(toggle("Use OpenBuild")!);
+    await press(toggle("Run coding agents")!);
     // Nothing is saved until it's confirmed.
     expect(patches).toEqual([]);
     expect(saved()!.enabled).toBe(true);
     const asked = dialog()!;
-    expect(asked.querySelector("h2")!.textContent).toBe("Turn off OpenBuild for “manager”?");
+    expect(asked.querySelector("h2")!.textContent).toBe("Turn off Run coding agents for “manager”?");
     expect([...asked.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
       "Start threads in its projects, and read them",
       "Send to, stop and close threads, including yours and other bots'",
@@ -219,12 +219,12 @@ for (const surface of ["settings", "advanced"] as const) {
     await press(button(asked, "Cancel"));
     expect(dialog()).toBeNull();
     expect(patches).toEqual([]);
-    expect(toggle("Use OpenBuild")!.getAttribute("aria-checked")).toBe("true");
+    expect(toggle("Run coding agents")!.getAttribute("aria-checked")).toBe("true");
 
     // Without merging, the list doesn't claim it loses that.
     await press(toggle("Merge pull requests")!);
     patches = [];
-    await press(toggle("Use OpenBuild")!);
+    await press(toggle("Run coding agents")!);
     expect([...dialog()!.querySelectorAll("li")].map((li) => li.textContent)).not.toContain("Merge pull requests");
     await press(button(dialog()!, "Turn off"));
     expect(dialog()).toBeNull();
@@ -232,16 +232,16 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(toggle("Merge pull requests")).toBeNull();
 
     // Turning it on needs no confirmation.
-    await press(toggle("Use OpenBuild")!);
+    await press(toggle("Run coding agents")!);
     expect(dialog()).toBeNull();
     expect(saved()!.enabled).toBe(true);
   });
 }
 
-test("a bot without a grant shows OpenBuild off, and turning it on gives the default: all projects", async () => {
+test("a bot without a grant shows Run coding agents off, and turning it on gives the default: all projects", async () => {
   await mount("settings", undefined);
-  expect(toggle("Use OpenBuild")!.getAttribute("aria-checked")).toBe("false");
-  await press(toggle("Use OpenBuild")!);
+  expect(toggle("Run coding agents")!.getAttribute("aria-checked")).toBe("false");
+  await press(toggle("Run coding agents")!);
   expect(patches.at(-1)!.body.threads).toEqual({ enabled: true, scope: "all", projects: [] });
 });
 

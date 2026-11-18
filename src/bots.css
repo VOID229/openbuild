@@ -6304,7 +6304,7 @@ a.bots-btn.bots-btn-primary {
    OpenBots — the Advanced tab of a bot's details (src/components/bots/BotAdvanced.tsx)
    ========================================================================== */
 
-/* Three titled groups (Model, Machines, OpenBuild access), each a hairline card of rows, the
+/* Three titled groups (Model, Machines, Coding agents), each a hairline card of rows, the
    descriptions in tooltips on the labels: one line each (label left, control right) but the model's,
    which stack. */
 .bots-advanced {

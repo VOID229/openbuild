@@ -555,7 +555,7 @@ export async function resetAll() {
 // ------------------------------------------------------------------ bots and conversations
 
 /**
- * A new bot's OpenBuild access: on, in every project, for one the user makes. One a bot makes gets no
+ * A new bot's Run coding agents grant: on, in every project, for one the user makes. One a bot makes gets no
  * more than its maker has (its projects, never merging), so a bot can't widen its reach by making
  * another: a maker without access makes a bot without it.
  */
@@ -705,7 +705,7 @@ export function settingChanges(before: db.StoredBot, after: db.StoredBot): strin
   line("check-ins", CHECK_INS[before.proactivity ?? "normal"] ?? "every 3 hours", CHECK_INS[after.proactivity ?? "normal"] ?? "every 3 hours");
   const was = before.threads ?? { enabled: false, projects: [] };
   const now = after.threads ?? { enabled: false, projects: [] };
-  line("OpenBuild", onOff(was.enabled), onOff(now.enabled));
+  line("run coding agents", onOff(was.enabled), onOff(now.enabled));
   // While it's off, the rest isn't used, and Settings hides it.
   if (was.enabled || now.enabled) {
     line("OpenBuild projects", projectsOf(was), projectsOf(now));

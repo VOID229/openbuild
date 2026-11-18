@@ -211,7 +211,7 @@ export type BotProjectScope = "all" | "choose" | "exclude";
 
 /**
  * What a bot may do with the user's OpenBuild threads. Only the user can change this. `enabled` is the
- * one "Use OpenBuild" switch: in the projects it covers, the bot starts, reads, writes to, answers,
+ * one "Run coding agents" switch: in the projects it covers, the bot starts, reads, writes to, answers,
  * stops and closes any thread (its own, the user's and other bots'), picks each thread's permission
  * mode, and answers permission prompts. Merging pull requests is the only thing granted apart.
  */
@@ -227,7 +227,7 @@ export interface BotThreadAccess {
   merge?: boolean;
 }
 
-/** What a new bot gets, and a bot that never had a grant: OpenBuild on, in every project, merging off. */
+/** What a new bot gets, and a bot that never had a grant: Run coding agents on, in every project, merging off. */
 export const DEFAULT_THREAD_ACCESS: BotThreadAccess = { enabled: true, scope: "all", projects: [] };
 
 /** The switches folded into `enabled`. Stored grants from before still have them: they mean nothing now. */
