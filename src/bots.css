@@ -881,7 +881,7 @@
   bottom: 0;
   left: 0;
   z-index: 1;
-  background: var(--bg-fill);
+  background: var(--bg);
   pointer-events: none;
   animation: bots-list-out calc(var(--sidebar-ms) * 0.6) var(--ease-out) both;
 }
@@ -1574,7 +1574,8 @@
 }
 
 :root[data-theme="dark"] {
-  --bm-them: color-mix(in srgb, var(--text) 6%, var(--surface));
+  /* Solid, a raised level of its own: a mix this close to black is what a lifted display greys out. */
+  --bm-them: var(--surface-raised);
 }
 
 /* Switching between OpenBuild and OpenBots (ui.ts crossfade): the layout changes at once and the

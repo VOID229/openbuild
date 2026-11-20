@@ -75,7 +75,7 @@ for (const [device, width, height] of [["desktop", 1280, 800], ["phone", 390, 70
       expect(look.box.right).toBeLessThanOrEqual(look.vw);
       expect(look.box.bottom).toBeLessThanOrEqual(look.vh);
       if (device === "desktop") expect(look.box.width).toBeLessThanOrEqual(480);
-      expect(look.background).toBe(theme === "dark" ? "rgb(15, 15, 15)" : "rgb(255, 255, 255)");
+      expect(look.background).toBe(theme === "dark" ? "rgb(18, 18, 18)" : "rgb(255, 255, 255)");
       // More than fits, so it scrolls, and ↓ from the search scrolls it.
       expect(look.scrollable).toBeGreaterThan(0);
       await key(page, "ArrowDown", "ArrowDown", 40);
