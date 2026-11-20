@@ -126,7 +126,8 @@ describe.skipIf(!browser)("model picker", () => {
     expect(l.levels).toEqual(["Low", "Medium", "High", "Extra high", "Max"]);
     expect(l.foot.top).toBeGreaterThanOrEqual(l.list.bottom - 1);
     expect(l.speed).not.toBeNull();
-    expect(Math.max(...l.rows)).toBeLessThanOrEqual(30);
+    // Roomy rows, not a cramped list.
+    expect(Math.max(...l.rows)).toBe(36);
     expect(l.mp.bottom).toBeLessThanOrEqual(l.viewport[1]);
     expect(l.spills).toEqual([]);
 
@@ -156,7 +157,38 @@ describe.skipIf(!browser)("model picker", () => {
     expect(at.list.width).toBeGreaterThan(150);
   }, 60_000);
 
-  test("one compact height whatever it shows: a short list leaves room, a long one scrolls", async () => {
+  test("it opens upward whenever there's room above the composer, even with more room below", async () => {
+    const page = await open("desktop");
+    // The composer a little above the middle, as on the new-thread screen: less room over it than under it.
+    await page.eval("document.querySelector('.chat-view').style.cssText += ';justify-content:flex-start;padding-top:260px'");
+    await page.settle();
+    await page.openPicker();
+    const at = await page.eval<{ up: boolean; mpBottom: number; pillTop: number; height: number }>(`(() => {
+      const mp = document.querySelector('.mp'), r = mp.getBoundingClientRect(), pill = document.querySelector('.pill-model').getBoundingClientRect();
+      return { up: mp.classList.contains('drop-up'), mpBottom: r.bottom, pillTop: pill.top, height: Math.round(r.height) };
+    })()`);
+    expect(at.up).toBe(true);
+    expect(at.mpBottom).toBeLessThanOrEqual(at.pillTop);
+    // Shorter than its usual 400px, to fit what's above.
+    expect(at.height).toBeLessThan(400);
+    expect(at.height).toBeGreaterThanOrEqual(240);
+    await page.shoot("picker-up-from-middle");
+  }, 30_000);
+
+  test("on the new-thread screen too, it opens upward over the heading, not down over the page", async () => {
+    const page = await open("desktop", "home=1");
+    await page.openPicker();
+    const at = await page.eval<{ up: boolean; mpBottom: number; pillTop: number; top: number }>(`(() => {
+      const mp = document.querySelector('.mp'), r = mp.getBoundingClientRect(), pill = document.querySelector('.pill-model').getBoundingClientRect();
+      return { up: mp.classList.contains('drop-up'), mpBottom: r.bottom, pillTop: pill.top, top: r.top };
+    })()`);
+    expect(at.up).toBe(true);
+    expect(at.mpBottom).toBeLessThanOrEqual(at.pillTop);
+    expect(at.top).toBeGreaterThanOrEqual(0);
+    await page.shoot("picker-home");
+  }, 30_000);
+
+  test("one height whatever it shows: a short list leaves room, a long one scrolls", async () => {
     const page = await open("desktop");
     await page.openPicker();
     const measure = () =>
@@ -167,19 +199,19 @@ describe.skipIf(!browser)("model picker", () => {
     // Two favorites.
     const favorites = await measure();
     expect(favorites.names).toBe(2);
-    expect(favorites.height).toBe(320);
+    expect(favorites.height).toBe(400);
     // The provider's two dozen models: the same height, and the list scrolls.
     await page.click(".mp-rail-scroll .mp-rail-btn");
     await page.until("document.querySelectorAll('.mp-name').length > 20");
     await page.settle();
     const all = await measure();
-    expect(all.height).toBe(320);
+    expect(all.height).toBe(400);
     expect(all.listScroll).toBeGreaterThan(all.listClient + 100);
     // A search down to one model doesn't shrink it either.
     await page.eval("document.querySelector('.mp-search input').focus()");
     await page.send("Input.insertText", { text: "haiku" });
     await page.settle();
-    expect((await measure()).height).toBe(320);
+    expect((await measure()).height).toBe(400);
   }, 30_000);
 
   test("Remote control's row is as wide as its label and toggle, so its tooltip opens under them", async () => {
@@ -338,6 +370,8 @@ describe.skipIf(!browser)("model picker", () => {
     expect(l.mp.right).toBeLessThanOrEqual(l.viewport[0]);
     expect(l.mp.bottom).toBeLessThanOrEqual(l.viewport[1]);
     expect(l.foot.bottom).toBeLessThanOrEqual(l.mp.bottom + 0.5);
+    // The footer is one line: speed on the left, the harness on the right.
+    expect(l.foot.height).toBeLessThan(60);
     expect(l.spills).toEqual([]);
     // Every level is on screen, not scrolled out of the row.
     const levels = await page.eval<{ left: number; right: number }[]>("[...document.querySelectorAll('.mp-effort-level')].map((el) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right }; })");

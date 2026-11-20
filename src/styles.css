@@ -9462,24 +9462,47 @@ a.btn-primary {
 
 /* Model picker: provider rail, search, one-line rows, and the model's reasoning and speed. Wide,
    the Reasoning column sits beside the list; narrow (a phone's sheet), its levels make a row under
-   it. The footer, across the whole picker, holds the speed toggle and the runtime. */
+   it. The footer, across the whole picker, holds the speed toggle and the runtime. A frosted pane:
+   the page shows through, blurred, behind a hairline. */
 
 .mp {
+  --mp-pad: 6px;
+  --mp-row: 36px;
+  --mp-head: 48px;
   display: flex;
   flex-direction: column;
-  width: min(540px, calc(100vw - 24px));
+  width: min(640px, calc(100vw - 24px));
   overflow: hidden;
   padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  -webkit-backdrop-filter: blur(40px) saturate(1.6);
+  backdrop-filter: blur(40px) saturate(1.6);
+  box-shadow: 0 16px 48px -12px rgba(0, 0, 0, 0.28), 0 4px 12px -4px rgba(0, 0, 0, 0.12);
   container: mp / inline-size;
 }
 
+:root[data-theme="dark"] .mp {
+  background: color-mix(in srgb, #161616 68%, transparent);
+  box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.8);
+}
+
+/* Where the browser can't blur, an opaque pane rather than a see-through one. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mp,
+  :root[data-theme="dark"] .mp {
+    background: var(--surface-raised);
+  }
+}
+
 .mp.drop-up {
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 8px);
   left: 0;
 }
 
 .mp.drop-down {
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   left: 0;
 }
 
@@ -9487,7 +9510,7 @@ a.btn-primary {
   display: grid;
   grid-template:
     "rail main effort" minmax(0, 1fr)
-    "foot foot foot" auto / 40px minmax(0, 1fr) 132px;
+    "foot foot foot" auto / 52px minmax(0, 1fr) 184px;
   /* Fills the picker's fixed height (Pickers.tsx); the list scrolls within it. */
   flex: 1 1 auto;
   min-height: 0;
@@ -9498,7 +9521,7 @@ a.btn-primary {
     grid-template:
       "rail main" minmax(0, 1fr)
       "effort effort" auto
-      "foot foot" auto / 40px minmax(0, 1fr);
+      "foot foot" auto / 48px minmax(0, 1fr);
   }
 }
 
@@ -9507,23 +9530,26 @@ a.btn-primary {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
   min-height: 0;
-  padding: 5px 0 0;
+  padding: 8px 0 0;
   border-right: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text) 2%, var(--surface-raised));
 }
 
-/* Favorites stays put; only the providers below it scroll. */
+/* Favorites stays put, a rule under it; only the providers below it scroll. */
+.mp-rail > .mp-rail-btn {
+  margin-bottom: 8px;
+}
+
 .mp-rail-scroll {
   display: flex;
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   width: 100%;
   min-height: 0;
-  padding: 2px 0 5px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -9548,40 +9574,54 @@ a.btn-primary {
   }
 }
 
+/* The chosen provider: its mark at full strength and a bar against the rail's edge. */
 .mp-rail-btn {
+  position: relative;
   display: grid;
   flex: none;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
+  width: 100%;
+  height: 38px;
   color: var(--text-3);
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition: color var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
 .mp-rail-btn .brand-icon {
-  width: 17px;
-  height: 17px;
-  font-size: 17px;
+  width: 20px;
+  height: 20px;
+  font-size: 20px;
 }
 
 .mp-rail-btn .provider-letter {
-  width: 19px;
-  height: 19px;
+  width: 20px;
+  height: 20px;
   font-size: 11px;
+}
+
+.mp-rail-scroll .mp-rail-btn:not([aria-selected="true"]) {
+  opacity: 0.6;
 }
 
 @media (hover: hover) {
   .mp-rail-btn:hover {
-    background: var(--hover);
     color: var(--text);
+    opacity: 1 !important;
   }
 }
 
 .mp-rail-btn[aria-selected="true"] {
-  background: var(--active);
   color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.mp-rail-btn[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  right: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--text);
 }
 
 .mp-main {
@@ -9596,8 +9636,9 @@ a.btn-primary {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
-  height: 36px;
+  gap: 10px;
+  height: var(--mp-head);
+  margin: 0 var(--mp-pad);
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
   color: var(--text-3);
@@ -9609,14 +9650,18 @@ a.btn-primary {
   border: 0;
   outline: none;
   background: transparent;
-  font-size: 13px;
+  font-size: 14.5px;
   color: var(--text);
+}
+
+.mp-search input::placeholder {
+  color: var(--text-3);
 }
 
 .mp-list {
   flex: 1;
   min-height: 0;
-  padding: 4px;
+  padding: var(--mp-pad);
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
@@ -9626,44 +9671,46 @@ a.btn-primary {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding-right: 3px;
-  border-radius: 6px;
-  transition: background-color var(--fast) var(--ease);
+  padding-right: 4px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .mp-row:hover {
     background: var(--hover);
+    color: var(--text);
   }
 }
 
 .mp-row[aria-selected="true"] {
-  background: var(--active);
+  color: var(--text);
 }
 
 .mp-pick {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 7px;
+  gap: 10px;
   min-width: 0;
-  height: 28px;
-  padding: 0 4px 0 7px;
+  height: var(--mp-row);
+  padding: 0 6px 0 10px;
   text-align: left;
 }
 
 .mp-pick .brand-icon {
   flex: none;
-  width: 14px;
-  height: 14px;
-  font-size: 14px;
+  width: 17px;
+  height: 17px;
+  font-size: 17px;
 }
 
 .mp-pick .provider-letter {
   flex: none;
-  width: 14px;
-  height: 14px;
-  font-size: 9px;
+  width: 17px;
+  height: 17px;
+  font-size: 10px;
 }
 
 .mp-name {
@@ -9671,8 +9718,14 @@ a.btn-primary {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 450;
+}
+
+.mp-pick-check {
+  flex: none;
+  margin-left: -2px;
+  color: var(--text);
 }
 
 /* Context and price, after the name; it gives way first when the row runs out of room. */
@@ -9680,11 +9733,11 @@ a.btn-primary {
   flex: 0 100 auto;
   min-width: 0;
   margin-left: auto;
-  padding-left: 6px;
+  padding-left: 8px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
@@ -9693,9 +9746,8 @@ a.btn-primary {
   display: grid;
   flex: none;
   place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
   color: var(--text-3);
   opacity: 0;
   transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
@@ -9707,7 +9759,14 @@ a.btn-primary {
   opacity: 1;
 }
 
-.mp-star-on {
+@media (hover: hover) {
+  .mp-star:hover {
+    color: var(--text);
+  }
+}
+
+.mp-star-on,
+.mp-star-on:hover {
   color: var(--warn);
 }
 
@@ -9724,24 +9783,22 @@ a.btn-primary {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  width: 100%;
-  padding: 6px 10px;
+  margin: 0 var(--mp-pad);
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 12.5px;
   text-align: left;
   color: var(--text-3);
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition: color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .mp-scope:hover {
-    background: var(--hover);
     color: var(--text);
   }
 }
 
 :where([data-keyboard-nav]) .mp-scope:focus-visible {
-  background: var(--hover);
   color: var(--text);
   outline: none;
 }
@@ -9750,7 +9807,7 @@ a.btn-primary {
   color: var(--text);
 }
 
-/* Reasoning: a column of levels beside the list. */
+/* Reasoning: a column of levels beside the list, under the model it's for. */
 .mp-effort {
   grid-area: effort;
   display: flex;
@@ -9764,25 +9821,25 @@ a.btn-primary {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  height: 36px;
+  gap: 8px;
+  height: var(--mp-head);
+  margin: 0 var(--mp-pad);
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
 }
 
 .mp-section-label {
   flex: none;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
+  font-size: 14px;
+  color: var(--text-2);
 }
 
 .mp-effort-levels {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 0;
   min-height: 0;
-  padding: 4px;
+  padding: var(--mp-pad);
   overflow-y: auto;
 }
 
@@ -9790,11 +9847,11 @@ a.btn-primary {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 13px;
+  gap: 8px;
+  height: var(--mp-row);
+  padding: 0 10px;
+  border-radius: var(--radius);
+  font-size: 14px;
   white-space: nowrap;
   text-align: left;
   color: var(--text-2);
@@ -9823,9 +9880,9 @@ a.btn-primary {
 
 .mp-effort-note {
   margin: 0;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.4;
+  padding: 10px 16px;
+  font-size: 13px;
+  line-height: 1.45;
   color: var(--text-3);
 }
 
@@ -9835,13 +9892,14 @@ a.btn-primary {
     flex-direction: row;
     align-items: center;
     gap: 8px;
-    padding: 4px 6px 4px 10px;
+    padding: 6px 8px 6px 14px;
     border-top: 1px solid var(--border);
     border-left: 0;
   }
 
   .mp-effort-head {
     height: auto;
+    margin: 0;
     padding: 0;
     border: 0;
   }
@@ -9857,9 +9915,9 @@ a.btn-primary {
   }
 
   .mp-effort-level {
-    height: 26px;
-    padding: 0 8px;
-    font-size: 12.5px;
+    height: 30px;
+    padding: 0 9px;
+    font-size: 13px;
   }
 
   .mp-effort-level[aria-checked="true"] {
@@ -9885,17 +9943,47 @@ a.btn-primary {
   }
 }
 
+/* Narrow: the names get the row (context and price give way), and the footer stays one line. */
+@container mp (max-width: 479px) {
+  .mp-facts {
+    display: none;
+  }
+
+  .mp-pick {
+    padding-left: 8px;
+  }
+
+  .mp-foot {
+    gap: 6px;
+    padding: 8px 12px 8px 8px;
+  }
+
+  /* The harness's mark and name say it; its tooltip says it's fixed. */
+  .mp-foot-label {
+    display: none;
+  }
+
+  .mp-foot-value {
+    margin-left: auto;
+  }
+
+  .mp-speed-opt {
+    padding: 0 10px;
+    font-size: 13px;
+  }
+}
+
 /* Footer: speed on the left, the runtime on the right. */
 .mp-foot {
   grid-area: foot;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
-  min-height: 38px;
-  padding: 5px 6px 5px 8px;
+  gap: 6px 10px;
+  min-height: 52px;
+  padding: 8px 14px 8px 10px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .mp-foot-label {
@@ -9913,20 +10001,20 @@ a.btn-primary {
   display: inline-flex;
   flex: none;
   gap: 2px;
-  padding: 2px;
-  border-radius: var(--radius);
-  background: var(--seg-track);
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   box-shadow: inset 0 0 0 1px var(--border);
 }
 
 .mp-speed-opt {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 9px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
@@ -9943,25 +10031,28 @@ a.btn-primary {
   box-shadow: var(--seg-on-shadow);
 }
 
+/* The harness, chosen in the footer of a new thread's picker: its runtimes' marks as radios. */
 .mp-levels {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 1px;
+  gap: 2px;
 }
 
 .mp-level {
-  height: 26px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
+  display: grid;
+  place-items: center;
+  height: 30px;
+  min-width: 30px;
+  padding: 0 7px;
+  border-radius: var(--radius);
+  font-size: 13px;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .mp-level:hover {
-    background: var(--hover);
     color: var(--text);
   }
 }
@@ -10058,20 +10149,19 @@ a.btn-primary {
     min-height: 52px;
   }
 
-  /* Still compact, but tall enough to tap. */
-  .mp-pick,
-  .mp-effort-level {
-    height: 38px;
+  /* Tall enough to tap. */
+  .mp {
+    --mp-row: 42px;
   }
 
   .mp-level,
   .mp-speed-opt {
-    height: 32px;
+    height: 34px;
   }
 
   .mp-star {
-    width: 32px;
-    height: 32px;
+    width: 36px;
+    height: 36px;
   }
 }
 
