@@ -1,8 +1,8 @@
-// OpenBots' details panel, beside the chat: a bot's look, name, instructions, routines and tasks, with its
-// model, computer and OpenBuild permissions under Advanced and its threads, both in the More menu; a
-// group's members, goal (with its tasks) and routines; the working threads either started from its chat; who's in a
+// OpenBots' details panel, beside the chat: a bot's look, name, instructions, its tasks above its
+// routines, the threads it has going from its chat, and its model, computer and OpenBuild permissions
+// under Advanced; a group's members, goal (with its tasks) and routines; the working threads either started from its chat; who's in a
 // side chat.
-import { Archive, ArchiveRestore, Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Timer, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronLeft, Maximize2, Minus, Pencil, Plus, Timer, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { runningThreads, threadActivity, threadBrands } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
@@ -14,11 +14,11 @@ import { cleanRole, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
-import { arrowNav, cx, useFocusOnShow, useMediaQuery, usePresence } from "../../lib/ui";
+import { cx, useMediaQuery, usePresence } from "../../lib/ui";
 import { useEdgeDrag } from "../FileTree";
 import { LoadedChat } from "../LoadedChat";
 import { ThreadPreview } from "../Workspace";
-import { HermesMark, IconButton, Popover, ProviderIcon, RuntimeIcon, Toggle } from "../primitives";
+import { HermesMark, IconButton, ProviderIcon, RuntimeIcon, Toggle } from "../primitives";
 import { expandBotsThread } from "../Sidebar";
 import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
@@ -70,32 +70,8 @@ function InlineName({ value, onChange }: { value: string; onChange: (v: string) 
 
 type Tab<T> = readonly [T, string];
 
-/** The More menu's tabs, the open one ticked; it takes the focus as the menu shows, or the first one does. */
-function MoreItems<T extends string>({ items, value, pick }: { items: readonly Tab<T>[]; value: T; pick: (t: T) => void }) {
-  const focus = useRef<HTMLButtonElement>(null);
-  useFocusOnShow(focus);
-  const focused = items.some(([id]) => id === value) ? value : items[0]?.[0];
-  return (
-    <div onKeyDown={(e) => arrowNav(e)}>
-      {items.map(([id, label]) => (
-        <button key={id} ref={id === focused ? focus : undefined} type="button" role="menuitemradio" aria-checked={value === id} className="menu-item" onClick={() => pick(id)}>
-          <span className="menu-item-label">{label}</span>
-          {value === id && <Check size={14} className="menu-check" />}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * The details' tabs. Those in `more` sit behind a More tab, in a small menu floating over the panel, so
- * the row stays short enough to show whole; More shows as the active tab while one of them is open.
- */
-function Tabs<T extends string>({ tabs, more = [], value, onChange }: { tabs: readonly Tab<T>[]; more?: readonly Tab<T>[]; value: T; onChange: (t: T) => void }) {
-  const moreButton = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState(false);
-  const inMore = more.some(([id]) => id === value);
-  // The row never scrolls: its tabs shrink to fit it (.bots-tabs).
+/** The details' tabs: a plain row that never scrolls, its tabs shrinking to fit it (.bots-tabs). */
+function Tabs<T extends string>({ tabs, value, onChange }: { tabs: readonly Tab<T>[]; value: T; onChange: (t: T) => void }) {
   return (
     <div className="bots-tabs" role="tablist">
       {tabs.map(([id, label]) => (
@@ -103,37 +79,6 @@ function Tabs<T extends string>({ tabs, more = [], value, onChange }: { tabs: re
           {label}
         </button>
       ))}
-      {more.length > 0 && (
-        <>
-          <button
-            ref={moreButton}
-            type="button"
-            role="tab"
-            aria-selected={inMore}
-            aria-haspopup="menu"
-            aria-expanded={menu}
-            className="bots-tab bots-tab-more"
-            onClick={() => setMenu(!menu)}
-            onKeyDown={(e) => {
-              if (e.key !== "ArrowDown") return;
-              e.preventDefault();
-              setMenu(true);
-            }}
-          >
-            More
-          </button>
-          <Popover open={menu} onClose={() => setMenu(false)} anchor={moreButton} className="bots-tab-menu" role="menu" label="More tabs" fixed="down">
-            <MoreItems
-              items={more}
-              value={value}
-              pick={(id) => {
-                setMenu(false);
-                onChange(id);
-              }}
-            />
-          </Popover>
-        </>
-      )}
     </div>
   );
 }
@@ -195,13 +140,16 @@ export function Instructions({ value, placeholder, hint, onChange }: { value: st
 
 /**
  * A bot's routines, under where each reports: its chat with you first, then each group (its mascots and
- * name) or other chat. Kept to one list while they all report to its own chat.
+ * name) or other chat. Kept to one list while they all report to its own chat. `label` heads them with
+ * "Routines", for when something sits above them on the tab (its tasks).
  */
-export function Routines({ bot }: { bot: Bot }) {
+export function Routines({ bot, label }: { bot: Bot; label?: boolean }) {
   const conversations = useBots((s) => s.conversations);
   const bots = useBots((s) => s.bots);
+  const head = label && <span className="bots-pane-label">Routines</span>;
   if (!bot.routines.length) return (
     <div className="bots-pane">
+      {head}
       <p className="bots-hint">No routines yet. Ask {bot.name.split(" ·")[0]} in chat to set one up.</p>
     </div>
   );
@@ -216,9 +164,15 @@ export function Routines({ bot }: { bot: Bot }) {
       ))}
     </ul>
   );
-  if (keys.length === 1 && !keys[0]) return <div className="bots-pane">{list(bot.routines)}</div>;
+  if (keys.length === 1 && !keys[0]) return (
+    <div className="bots-pane">
+      {head}
+      {list(bot.routines)}
+    </div>
+  );
   return (
     <div className="bots-pane">
+      {head}
       {keys.map((key) => {
         const conversation = key ? conversations.find((c) => c.id === key) : direct;
         const routines = bot.routines.filter((r) => where(r) === key);
@@ -581,7 +535,7 @@ function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: bo
   );
 }
 
-type DetailsTab = "instructions" | "routines" | "tasks" | "advanced" | "members" | "goal" | "threads";
+type DetailsTab = "instructions" | "routines" | "advanced" | "members" | "goal" | "threads";
 
 function LookEditor({ bot, onDone }: { bot: Bot; onDone: () => void }) {
   const before = useRef<BotLook>(bot.look);
@@ -650,9 +604,9 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setThreadId(undefined);
     setBefore(undefined);
   }
-  // Asked for a tab: the header's task progress opens a bot's own Tasks, or the group's Goal, where its
-  // list is; a routine line in the chat opens the Routines, the bot's or the group's (EventLine); a link
-  // in the chat to a thread still running opens that thread, under Threads.
+  // Asked for a tab: the header's task progress opens a bot's Routines, its list above them, or the
+  // group's Goal, where its list is; a routine line in the chat opens the Routines, the bot's or the
+  // group's (EventLine); a link in the chat to a thread still running opens that thread, under Threads.
   const asked = useBots((s) => s.detailsTab);
   const [askedKey, setAskedKey] = useState(asked?.key);
   if (asked && asked.key !== askedKey) {
@@ -663,7 +617,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
       setThreadId(asked.thread);
     } else if (asked.tab === "routines") {
       if (conversation.kind !== "side") setTab("routines");
-    } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
+    } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "routines" : "goal");
   }
   const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
   const panel = useRef<HTMLElement>(null);
@@ -761,12 +715,9 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["instructions", "Instructions"],
                   ["routines", "Routines"],
-                  ["tasks", "Tasks"],
-                ]}
-                more={[
-                  ["advanced", "Advanced"],
                   // Only while the bot has threads going from here (or the tab is showing, as they finish).
                   ...(threads.length || tab === "threads" ? [["threads", "Threads"] as const] : []),
+                  ["advanced", "Advanced"],
                 ]}
                 value={tab}
                 onChange={setTab}
@@ -782,12 +733,18 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   />
                 </>
               )}
-              {tab === "routines" && <Routines bot={bot} />}
-              {tab === "tasks" && (
-                <div className="bots-pane">
-                  <TodoList conversation={conversation} bots={bots} />
-                </div>
-              )}
+              {tab === "routines" &&
+                // Its to-do list, above the routines, only while it has one.
+                (conversation.todos?.length ? (
+                  <>
+                    <div className="bots-pane bots-tasks-pane">
+                      <TodoList conversation={conversation} bots={bots} />
+                    </div>
+                    <Routines bot={bot} label />
+                  </>
+                ) : (
+                  <Routines bot={bot} />
+                ))}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
               {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
               {/* A bot is retired first; deleting it for good is only offered once it is. */}

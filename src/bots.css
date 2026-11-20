@@ -4281,13 +4281,13 @@ button.bots-details-name:hover {
   color: var(--text-2);
 }
 
-/* Tabs: a plain underlined row that never scrolls. Past the first few they're under More, so they fit
-   the panel; where they wouldn't (a narrow phone, a wide font), each gives up a little of its label to
-   an ellipsis rather than the row scrolling sideways. The line under the row is a shadow, under the
-   selected tab's underline. */
+/* Tabs: a plain underlined row that never scrolls, a bot's four fitting the panel whole down to a 320px
+   phone (mobile.css tightens them). Where they wouldn't (a narrower screen, a wide font), each gives
+   up a little of its label to an ellipsis rather than the row scrolling sideways. The line under the
+   row is a shadow, under the selected tab's underline. */
 .bots-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   margin-bottom: 16px;
   box-shadow: inset 0 -1px 0 var(--border);
 }
@@ -4302,7 +4302,7 @@ button.bots-details-name:hover {
   flex: 0 1 auto;
   min-width: 0;
   height: 36px;
-  padding: 0 8px;
+  padding: 0 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   font-size: 13.5px;
@@ -4315,7 +4315,7 @@ button.bots-details-name:hover {
 .bots-tab::after {
   content: "";
   position: absolute;
-  inset: auto 8px 0;
+  inset: auto 6px 0;
   height: 2px;
   border-radius: 1px;
   background: var(--text);
@@ -4335,32 +4335,6 @@ button.bots-details-name:hover {
 
 .bots-tab[aria-selected="true"]::after {
   opacity: 1;
-}
-
-/*
- * Tabs past the first few, in a small menu under More that floats over the panel. Not a .menu: on a
- * phone those become sheets rising from the bottom, and this one stays a small dropdown by its tab.
- */
-.bots-tab-menu {
-  width: max-content;
-  min-width: 132px;
-  padding: 4px;
-}
-
-.bots-tab-menu .menu-item {
-  height: 30px;
-}
-
-@media (max-width: 768px) {
-  .bots-tab-menu {
-    min-width: 150px;
-  }
-
-  .bots-tab-menu .menu-item {
-    height: 40px;
-    padding: 0 12px;
-    font-size: 15px;
-  }
 }
 
 .bots-pane {
@@ -6837,6 +6811,11 @@ a.bots-btn.bots-btn-primary {
 
 .bots-pane + .bots-todos {
   margin-top: 20px;
+}
+
+/* A bot's Routines tab: its tasks first, then its routines under their own label. */
+.bots-tasks-pane + .bots-pane {
+  margin-top: 12px;
 }
 
 .bots-todos-head {

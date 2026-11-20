@@ -58,18 +58,10 @@ const open = async (chat: string, width: number, height: number) => {
   return page;
 };
 
-/** Each tab in turn, the ones under More too, with its name. */
+/** Each tab in turn, with its name. */
 async function* tabs(page: Page) {
-  for (const label of await page.eval<string[]>("[...document.querySelectorAll('.bots-details .bots-tab:not(.bots-tab-more)')].map((t) => t.textContent)")) {
+  for (const label of await page.eval<string[]>("[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)")) {
     await page.eval(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent === ${JSON.stringify(label)}).click(), true`);
-    await page.settle();
-    yield label;
-  }
-  if (!(await page.eval<boolean>("!!document.querySelector('.bots-details .bots-tab-more')"))) return;
-  await page.click(".bots-details .bots-tab-more");
-  for (const label of await page.eval<string[]>("[...document.querySelectorAll('.bots-tab-menu .menu-item')].map((t) => t.textContent)")) {
-    if (!(await page.eval<boolean>("!!document.querySelector('.bots-tab-menu')"))) await page.click(".bots-details .bots-tab-more");
-    await page.eval(`[...document.querySelectorAll('.bots-tab-menu .menu-item')].find((t) => t.textContent === ${JSON.stringify(label)}).click(), true`);
     await page.settle();
     yield label;
   }
@@ -86,7 +78,8 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
         seen.push(tab);
         expect({ tab, wide: await wide(page) }).toEqual({ tab, wide: [] });
       }
-      expect(seen).toEqual(["Instructions", "Routines", "Tasks", "Advanced"]);
+      // All a bot's tabs, Threads too while it has one going, each in the row.
+      expect(seen).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
       // Every tab shows its whole label.
       expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);
       // The mascot leaning after a pointer at each of the panel's corners (it follows the pointer

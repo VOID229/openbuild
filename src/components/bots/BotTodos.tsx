@@ -1,7 +1,7 @@
 // A conversation's to-do list: the steps of the work going on in a chat, which its bots keep with
 // their todo tool. Read-only here: it shows where the work stands, and only the bots change it. It
-// sits in the details panel (a group's Goal tab, a bot's Tasks tab), and its progress shows in the
-// chat's header.
+// sits in the details panel (on a group's Goal tab, and above a bot's routines while it has one), and
+// its progress shows in the chat's header.
 import { Check } from "lucide-react";
 import { todoProgress } from "../../../shared/bots";
 import { useBots } from "../../lib/bots/store";

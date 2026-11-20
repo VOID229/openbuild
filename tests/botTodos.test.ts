@@ -1,6 +1,6 @@
 // OpenBots' to-do lists and pages, in a real Chrome: a group's list under its goal, with its progress in
 // the chat's header (a click there opens it); read-only for the user, since only bots change it; a bot's own chat
-// keeping its list on a Tasks tab; and a page a bot showed, drawn in OpenBuild's sandboxed frame.
+// keeping its list on the Routines tab, above its routines, once it has one; and a page a bot showed, drawn in OpenBuild's sandboxed frame.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -75,22 +75,32 @@ describe.skipIf(!browser)("to-do lists", () => {
     expect(await page.eval<string>("document.querySelector('.bots-head-tasks').textContent")).toBe("1/5");
   }, 30_000);
 
-  test("a bot's own chat keeps its list on a Tasks tab, and shows no progress until it has one", async () => {
+  test("a bot's own chat keeps its list above its routines, and shows neither list nor progress until it has one", async () => {
     const page = await open("theme=light&chat=dm");
     expect(await page.eval<boolean>("!!document.querySelector('.bots-head-tasks')")).toBe(false);
-    await page.eval("[...document.querySelectorAll('.bots-tab')].find((b) => b.textContent === 'Tasks').click()");
-    await page.until("!!document.querySelector('.bots-todos')");
-    // Empty until the bot starts one.
-    expect(await page.eval<string>("document.querySelector('.bots-todos-empty')?.textContent")).toContain("No tasks yet");
+    // No Tasks tab: the list goes on Routines.
+    expect(await page.eval<string[]>("[...document.querySelectorAll('.bots-tab')].map((b) => b.textContent)")).toEqual(["Instructions", "Routines", "Advanced"]);
+    await page.eval("[...document.querySelectorAll('.bots-tab')].find((b) => b.textContent === 'Routines').click()");
+    await page.until("document.querySelector('.bots-tab[aria-selected=true]').textContent === 'Routines' && document.querySelector('.bots-details .bots-hint')?.textContent.startsWith('No routines yet')");
+    // Without one, only the routines, unlabelled as the tab names them.
+    expect(await page.eval<boolean>("!!document.querySelector('.bots-todos')")).toBe(false);
+    expect(await page.eval<boolean>("!!document.querySelector('.bots-details .bots-pane-label')")).toBe(false);
     // The bot adds an item (as its todo tool's sync would).
     await page.eval(`bots.setState((s) => ({ conversations: s.conversations.map((c) => c.id === "dm" ? { ...c, todos: [{ id: "t1", text: "Find a venue", status: "todo", by: "egg", at: Date.now() }] } : c) }))`);
-    await page.settle();
+    await page.until("!!document.querySelector('.bots-todos')");
     expect(await page.eval<string>("document.querySelector('.bots-head-tasks').textContent")).toBe("0/1");
+    expect(await page.eval<string>("document.querySelector('.bots-todo-text').textContent")).toBe("Find a venue");
+    // Above the routines, which now have a label of their own.
+    expect(await page.eval<string>("document.querySelector('.bots-details .bots-pane-label').textContent")).toBe("Routines");
+    const order = await page.eval<number>("document.querySelector('.bots-todos').compareDocumentPosition(document.querySelector('.bots-details .bots-pane-label'))");
+    expect(order & 4).toBeTruthy(); // DOCUMENT_POSITION_FOLLOWING
     // From another tab, the header's progress brings the list back.
     await page.eval("[...document.querySelectorAll('.bots-tab')].find((b) => b.textContent === 'Instructions').click()");
     await page.settle();
+    expect(await page.eval<boolean>("!!document.querySelector('.bots-todos')")).toBe(false);
     await page.click(".bots-head-tasks");
-    expect(await page.eval<string>("document.querySelector('.bots-tab[aria-selected=true]').textContent")).toBe("Tasks");
+    await page.until("!!document.querySelector('.bots-todos')");
+    expect(await page.eval<string>("document.querySelector('.bots-tab[aria-selected=true]').textContent")).toBe("Routines");
   }, 30_000);
 });
 

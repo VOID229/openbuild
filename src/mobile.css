@@ -1255,16 +1255,28 @@
 
 /* A narrow phone: tighter tabs, so their labels still fit whole (past that they end in an ellipsis). */
 @media (max-width: 374px) {
-  .bots-tabs {
-    gap: 2px;
-  }
-
   .bots-tab {
     padding: 0 5px;
   }
 
   .bots-tab::after {
     inset: auto 5px 0;
+  }
+}
+
+/* Narrower than most phones (320px): a bot's four tabs fit whole only a size smaller, nearly touching. */
+@media (max-width: 359px) {
+  .bots-tabs {
+    gap: 0;
+  }
+
+  .bots-tab {
+    padding: 0 4px;
+    font-size: 13px;
+  }
+
+  .bots-tab::after {
+    inset: auto 4px 0;
   }
 }
 

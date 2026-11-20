@@ -1,7 +1,7 @@
 // The real OpenBots pane with a chat's details open, for tests/botDetailsOverflow.test.ts to measure in
 // Chrome: a primary bot (Dr Eggbot, the white puff) with words too long to wrap in its role,
-// instructions, routines (one reporting to the group), tasks and model, and a group of two with a long
-// name, goal and routine. The server is faked: the models bots run on, and nothing else.
+// instructions, routines (one reporting to the group), tasks, model and a thread it has going (so all
+// of a bot's tabs show), and a group of two with a long name, goal and routine. The server is faked: the models bots run on, and nothing else.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -9,6 +9,8 @@ import { createRoot } from "react-dom/client";
 import { BotsView } from "../../../src/components/bots/BotsView";
 import { useBots } from "../../../src/lib/bots/store";
 import type { Bot, Conversation, TodoItem } from "../../../src/lib/bots/types";
+import type { Chat } from "../../../src/lib/types";
+import { EXTERNAL_VIA } from "../../../shared/replies";
 import { openBotsDetails } from "../../../src/lib/gestures";
 import { useStore } from "../../../src/lib/store";
 
@@ -47,7 +49,20 @@ const conversations: Conversation[] = [
   { id: "dm", kind: "direct", botIds: ["egg"], createdAt: at, updatedAt: at, messages: [], todos: [todo("t1", `Fix ${long}`, "doing", "egg"), todo("t2", "Ship it", "todo")] },
   { id: "crew", kind: "group", name: `Crew ${long}`, botIds: ["egg", "moss"], instructions: long, createdAt: at, updatedAt: at, messages: [], todos: [todo("t3", long, "todo")] },
 ];
-useStore.setState({ botsOpen: true, botsSidebarOpen: false });
+// A thread the bot started from its chat, its reply still coming: its Threads tab shows.
+const thread: Chat = {
+  id: "t1",
+  title: `Fix ${long}`,
+  createdAt: at,
+  updatedAt: at,
+  startedBy: { bot: "egg", conversation: "dm" },
+  workspace: { projectId: "openbuild", projectName: "openbuild", cwd: "/tmp/openbuild" } as Chat["workspace"],
+  messages: [
+    { id: "t1-u", role: "user", content: "Fix it, please.", createdAt: at, sentBy: "egg", sentByBot: "egg" },
+    { id: "t1-a", role: "assistant", content: "Looking into it…", status: "streaming", createdAt: at, stream: { id: "t1-s", via: EXTERNAL_VIA } },
+  ],
+} as Chat;
+useStore.setState({ botsOpen: true, botsSidebarOpen: false, chats: [thread] });
 useBots.setState({ bots, conversations, activeId: new URLSearchParams(location.search).get("chat") ?? "dm", loaded: true, connected: true, ensureSeeded: () => {} });
 Object.assign(window, { bots: useBots, openBotsDetails });
 createRoot(document.getElementById("root")!).render(
