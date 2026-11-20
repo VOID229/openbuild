@@ -418,8 +418,8 @@ function ThreadBrands({ chat }: { chat: Chat }) {
 }
 
 /** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
-function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
-  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads running. Threads the bots here start show up until they finish.</p></div>;
+function Threads({ threads, bots, open, empty }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void; empty: React.ReactNode }) {
+  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">{empty}</p></div>;
   return (
     <div className="bots-pane">
       <ul className="bots-cards">
@@ -615,9 +615,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     if (asked.tab === "threads") {
       setTab("threads");
       setThreadId(asked.thread);
-    } else if (asked.tab === "routines") {
-      if (conversation.kind !== "side") setTab("routines");
-    } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "routines" : "goal");
+    } else if (asked.tab === "goal" ? conversation.kind === "group" : conversation.kind !== "side") setTab(asked.tab);
   }
   const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
   const panel = useRef<HTMLElement>(null);
@@ -715,8 +713,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["instructions", "Instructions"],
                   ["routines", "Routines"],
-                  // Only while the bot has threads going from here (or the tab is showing, as they finish).
-                  ...(threads.length || tab === "threads" ? [["threads", "Threads"] as const] : []),
+                  ["threads", "Threads"],
                   ["advanced", "Advanced"],
                 ]}
                 value={tab}
@@ -746,7 +743,27 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   <Routines bot={bot} />
                 ))}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
-              {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
+              {tab === "threads" && (
+                <Threads
+                  threads={threads}
+                  bots={bots}
+                  open={openThread}
+                  empty={
+                    // Without "Run coding agents" it can't start any: say where that's turned on.
+                    bot.threads?.enabled ? (
+                      "No threads running. Threads it starts from this chat show up here until they finish."
+                    ) : (
+                      <>
+                        No threads running. To let it start them, turn on Run coding agents under{" "}
+                        <button type="button" className="link" onClick={() => setTab("advanced")}>
+                          Advanced
+                        </button>
+                        .
+                      </>
+                    )
+                  }
+                />
+              )}
               {/* A bot is retired first; deleting it for good is only offered once it is. */}
               {bot.retiredAt ? (
                 <div className="bots-details-foot bots-details-foot-retired">
@@ -785,7 +802,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               />
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
               {tab === "routines" && <GroupRoutines conversation={conversation} bots={bots} />}
-              {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
+              {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} empty="No threads running. Threads the bots here start show up until they finish." />}
               {tab === "goal" && (
                 <>
                   <Instructions

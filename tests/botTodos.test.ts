@@ -79,7 +79,7 @@ describe.skipIf(!browser)("to-do lists", () => {
     const page = await open("theme=light&chat=dm");
     expect(await page.eval<boolean>("!!document.querySelector('.bots-head-tasks')")).toBe(false);
     // No Tasks tab: the list goes on Routines.
-    expect(await page.eval<string[]>("[...document.querySelectorAll('.bots-tab')].map((b) => b.textContent)")).toEqual(["Instructions", "Routines", "Advanced"]);
+    expect(await page.eval<string[]>("[...document.querySelectorAll('.bots-tab')].map((b) => b.textContent)")).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
     await page.eval("[...document.querySelectorAll('.bots-tab')].find((b) => b.textContent === 'Routines').click()");
     await page.until("document.querySelector('.bots-tab[aria-selected=true]').textContent === 'Routines' && document.querySelector('.bots-details .bots-hint')?.textContent.startsWith('No routines yet')");
     // Without one, only the routines, unlabelled as the tab names them.

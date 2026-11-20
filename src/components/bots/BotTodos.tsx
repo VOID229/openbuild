@@ -82,7 +82,8 @@ export function HeadTasks({ conversation, mobile }: { conversation: Conversation
       onClick={(e) => {
         e.stopPropagation();
         if (mobile) openBotsDetails();
-        useBots.getState().showDetailsTab("tasks");
+        // Where its list is: a bot's above its routines, a group's under its goal.
+        useBots.getState().showDetailsTab(conversation.kind === "group" ? "goal" : "routines");
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
