@@ -3910,23 +3910,46 @@ select.input {
   align-items: center;
 }
 
+/* A wave along three solid dots: each lifts and brightens in turn, then rests, on a 1s loop. */
 .typing span {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--text-3);
-  animation: pulse 1.2s ease-in-out infinite;
+  background: var(--text-2);
+  opacity: 0.35;
+  will-change: transform, opacity;
+  animation: typing-wave 1s cubic-bezier(0.45, 0, 0.55, 1) infinite;
   /* Negative delays only: the loop is already in progress on mount (see Typing), and no dot waits
-     un-animated at full size before its first beat. 1.05s/0.9s = 0.15s/0.3s behind dot one. */
+     un-animated before its first beat. 0.84s/0.68s = 0.16s/0.32s behind dot one. */
   animation-delay: var(--typing-phase, 0s);
 }
 
 .typing span:nth-child(2) {
-  animation-delay: calc(var(--typing-phase, 0s) - 1.05s);
+  animation-delay: calc(var(--typing-phase, 0s) - 0.84s);
 }
 
 .typing span:nth-child(3) {
-  animation-delay: calc(var(--typing-phase, 0s) - 0.9s);
+  animation-delay: calc(var(--typing-phase, 0s) - 0.68s);
+}
+
+/* Without motion: the same beat in brightness alone. */
+@media (prefers-reduced-motion: reduce) {
+  .typing span {
+    animation-name: pulse;
+  }
+}
+
+@keyframes typing-wave {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 
 @keyframes pulse {
@@ -3953,13 +3976,10 @@ select.input {
   align-items: center;
   gap: 5px;
   height: 28px;
-  max-width: calc(100% + 8px);
-  margin-left: -8px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
+  max-width: 100%;
   font-size: 13px;
   color: var(--text-3);
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  transition: color var(--fast) var(--ease);
 }
 
 .reasoning-open > .reasoning-toggle {
@@ -3968,8 +3988,7 @@ select.input {
 
 @media (hover: hover) {
   .reasoning-toggle:hover {
-    background: var(--hover);
-    color: var(--text-2);
+    color: var(--text);
   }
 }
 
@@ -7072,7 +7091,7 @@ p.key-status svg {
 
 @media (hover: hover) {
   .tool-head:not(:disabled):hover {
-    background: var(--hover);
+    color: var(--text);
   }
 }
 
@@ -7261,7 +7280,7 @@ p.key-status svg {
 
 @media (hover: hover) {
   .shell-toggle:hover {
-    background: var(--hover);
+    color: var(--text);
   }
 }
 
