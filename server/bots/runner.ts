@@ -84,7 +84,7 @@ interface Mind {
   said?: string;
   /** The OpenBuild thread its current openbuild call is about (BotStatus.thread). */
   thread?: string;
-  /** Its current tool call is it reading something (BotStatus.reading). */
+  /** Its current tool call is it reading something, or Pi is summarizing its session (BotStatus.reading). */
   reading?: boolean;
   /** Between handing Pi the prompt and it settling: a message now can be steered into the turn. */
   steerable?: boolean;
@@ -828,7 +828,8 @@ function refresh(botId: string, mind: Mind, boundary = false) {
   const running = live.steps.findLast((s) => s.state === "running" && works(s));
   mind.tool = running ? { name: running.tool, since: running.since, activity: running.activity, label: ownStatus((running.args as { status?: unknown } | undefined)?.status) } : undefined;
   mind.thread = live.steps.map((s) => (s.state === "running" ? threadOf(s.tool, s.args) : undefined)).findLast(Boolean);
-  mind.reading = !!running && reads(running.tool, running.args);
+  // Reading: a step that reads something, or Pi summarizing the conversation so far, until it's done.
+  mind.reading = live.pause === "compaction" || (!!running && reads(running.tool, running.args));
   // Between turns nothing is its to show: a record that trails in must not put the bot back to work.
   if (!mind.busy) return;
   const activity = liveActivity(live, { writing: writing(mind, live), counts: counts(mind) });

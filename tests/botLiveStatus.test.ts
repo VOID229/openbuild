@@ -433,6 +433,24 @@ test("while its step reads something the status says it's reading, and not a mom
   a.deepEqual(said(sent.slice(0, during)), [true]);
   a.ok(said(sent.slice(during)).length >= 1 && said(sent.slice(during)).every((on) => !on), JSON.stringify(said(sent)));
   end('bash', 'b2');
+  // Pi summarizing the conversation so far is reading too, from the moment it starts until it ends;
+  // Pi trying a call again isn't.
+  feed({ type: 'compaction_start', reason: 'threshold' });
+  a.equal(status().reading, true);
+  a.equal(line(), 'Summarizing the conversation so far');
+  feed({ type: 'compaction_end', reason: 'threshold' });
+  a.equal(status().reading, undefined);
+  feed({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: '529 overloaded' });
+  a.equal(status().reading, undefined);
+  feed({ type: 'auto_retry_end', success: true, attempt: 2 });
+  // A summary cut short ends the reading just the same, and the steps after it read only as they do.
+  feed({ type: 'compaction_start', reason: 'overflow' });
+  a.equal(status().reading, true);
+  feed({ type: 'compaction_end', reason: 'overflow', aborted: true });
+  a.equal(status().reading, undefined);
+  start('bash', 'b3', { command: 'make' });
+  a.equal(status().reading, undefined);
+  end('bash', 'b3');
   // A turn that ends mid-read leaves nothing of it to the next.
   start('read', 'r3', { path: 'b.md' });
   a.equal(status().reading, true);
@@ -441,7 +459,14 @@ test("while its step reads something the status says it's reading, and not a mom
   const second = await turn();
   a.equal(status().reading, undefined);
   a.equal(mind.reading, false);
+  // Nor does one that settles mid-summary.
+  feed({ type: 'compaction_start', reason: 'threshold' });
+  a.equal(status().reading, true);
   await over(second);
+  a.equal(status(), undefined);
+  const third = await turn();
+  a.equal(status().reading, undefined);
+  await over(third);
 `), 30_000);
 
 test("a record that trails in after the turn doesn't put the bot back to work, and the next turn starts clean", () => run("trailing", `
