@@ -98,10 +98,11 @@ interface BotsState {
   detailsOpen: boolean;
   /**
    * A tab the details panel was asked to show, new `key` each time: the header's to-do progress opens
-   * its list, a routine line the bot's routines, and a link to a running thread that thread under Threads.
+   * where its list is (a bot's Routines, a group's Goal), a routine line the routines, and a link to a
+   * running thread that thread under Threads.
    * `closes`: the panel was closed when the link was followed, so the thread's X closes it again.
    */
-  detailsTab?: { tab: "tasks" | "routines"; key: number } | { tab: "threads"; thread: string; closes: boolean; key: number };
+  detailsTab?: { tab: "routines" | "goal"; key: number } | { tab: "threads"; thread: string; closes: boolean; key: number };
   /** The starter bots were added (once per browser). */
   seeded: boolean;
   /** "provider/model" for bots without their own. Pi's default when unset. */
@@ -138,7 +139,7 @@ interface BotsState {
   stopWork: (conversationId: string) => void;
   setDetailsOpen: (open: boolean) => void;
   /** Open the details on a tab. */
-  showDetailsTab: (tab: "tasks" | "routines") => void;
+  showDetailsTab: (tab: "routines" | "goal") => void;
   /** Open the details on Threads, with this thread open in them (from a link in the chat). */
   showDetailsThread: (thread: string) => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string; role?: string }) => string;

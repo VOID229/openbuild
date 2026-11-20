@@ -78,7 +78,7 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
         seen.push(tab);
         expect({ tab, wide: await wide(page) }).toEqual({ tab, wide: [] });
       }
-      // All a bot's tabs, Threads too while it has one going, each in the row.
+      // All a bot's tabs, each in the row.
       expect(seen).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
       // Every tab shows its whole label.
       expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);

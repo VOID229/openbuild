@@ -1,7 +1,7 @@
 // The real OpenBots pane with a chat's details open, for tests/botDetailsOverflow.test.ts to measure in
 // Chrome: a primary bot (Dr Eggbot, the white puff) with words too long to wrap in its role,
-// instructions, routines (one reporting to the group), tasks, model and a thread it has going (so all
-// of a bot's tabs show), and a group of two with a long name, goal and routine. The server is faked: the models bots run on, and nothing else.
+// instructions, routines (one reporting to the group), tasks, model and a thread it has going (so its
+// Threads tab lists one), and a group of two with a long name, goal and routine. The server is faked: the models bots run on, and nothing else.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -49,7 +49,7 @@ const conversations: Conversation[] = [
   { id: "dm", kind: "direct", botIds: ["egg"], createdAt: at, updatedAt: at, messages: [], todos: [todo("t1", `Fix ${long}`, "doing", "egg"), todo("t2", "Ship it", "todo")] },
   { id: "crew", kind: "group", name: `Crew ${long}`, botIds: ["egg", "moss"], instructions: long, createdAt: at, updatedAt: at, messages: [], todos: [todo("t3", long, "todo")] },
 ];
-// A thread the bot started from its chat, its reply still coming: its Threads tab shows.
+// A thread the bot started from its chat, its reply still coming: its Threads tab lists it.
 const thread: Chat = {
   id: "t1",
   title: `Fix ${long}`,

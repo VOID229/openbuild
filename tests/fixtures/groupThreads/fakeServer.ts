@@ -1,6 +1,7 @@
 // A fake OpenBuild server for the group Threads tab's page: imported before the app, so its config,
 // thread list and OpenBots stream answer from here. `window.serverChats` is the thread list the app's
 // poll reads; the test changes it to start and finish threads.
+import { DEFAULT_THREAD_ACCESS } from "../../../shared/bots";
 import { EXTERNAL_VIA } from "../../../shared/replies";
 import type { Bot, BotMessage, Conversation } from "../../../src/lib/bots/types";
 import type { Chat } from "../../../src/lib/types";
@@ -8,7 +9,8 @@ import type { Chat } from "../../../src/lib/types";
 const ID = "fixture";
 const start = Date.now() - 3_600_000;
 const bot = (id: string, name: string, shape: Bot["look"]["shape"], color: string): Bot => ({ id, name, look: { shape, color } as Bot["look"], instructions: "", memory: [], routines: [], createdAt: 1 });
-const bots = [bot("manager", "manager", "ghost", "orange"), bot("tracer", "tracer", "pill", "blue"), bot("outsider", "obsidian", "pill", "purple")];
+// manager may run coding agents, tracer not: their Threads tabs say different things while empty.
+const bots = [{ ...bot("manager", "manager", "ghost", "orange"), threads: DEFAULT_THREAD_ACCESS }, bot("tracer", "tracer", "pill", "blue"), bot("outsider", "obsidian", "pill", "purple")];
 const conversation = (id: string, kind: "direct" | "group", botIds: string[], messages: BotMessage[] = []): Conversation => ({
   id, kind, botIds, createdAt: start, updatedAt: start, messages, ...(kind === "group" ? { name: "OpenBuild Dev" } : {}),
 });

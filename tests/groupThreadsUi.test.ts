@@ -489,7 +489,7 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await tabSelected("Threads")).toBe("true");
   }, 60_000);
 
-  test("in a bot's own chat: a Threads tab shows while it has one running, and the link opens it there", async () => {
+  test("in a bot's own chat: a Threads tab lists the ones it has running, and the link opens it there", async () => {
     const page = await chat("dm-manager");
     await page.eval(`bots.getState().setDetailsOpen(true)`);
     await page.until("!!document.querySelector('.bots-details-open')");
@@ -510,7 +510,7 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.until("document.activeElement?.classList.contains('bots-details-name-input')");
     await page.eval(`document.activeElement.blur()`);
     await page.until("!!document.querySelector('button.bots-details-name')");
-    // Its tabs in one row, Threads among them while it has one running, before Advanced.
+    // Its tabs in one row, Threads before Advanced.
     const labels = `[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`;
     expect(await page.eval<unknown>(labels)).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
     // The row shows whole, nothing scrolled out of it, and the page doesn't scroll sideways.
@@ -537,14 +537,34 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect((await rows(page)).map((r) => r.title)).toEqual(["Rename the config loader"]);
     await shoot(page, "bot-threads-tab-open");
 
-    // Once it finishes Threads stays while it's showing, and goes with the next chat.
+    // Once it finishes, the tab says none are running, and it stays for the next chat too.
     await serve(page, `serverChats.map((c) => c.id === "t-direct" ? { ...thread(c.id, c.title, "manager", "dm-manager", "openbuild", true), pullRequest: c.pullRequest } : c)`);
     await page.until(`!document.querySelector('.bots-details .bots-cards')`);
     expect(await selected(page, "Threads")).toBe("true");
+    const hint = `document.querySelector('.bots-details .bots-hint')?.textContent`;
+    expect(await page.eval<unknown>(hint)).toBe("No threads running. Threads it starts from this chat show up here until they finish.");
     await page.eval(`bots.getState().select("dm-tracer")`);
     await page.eval(`bots.getState().select("dm-manager")`);
-    await page.until(`${labels}.join() === "Instructions,Routines,Advanced"`);
+    await page.until(`${labels}.join() === "Instructions,Routines,Threads,Advanced"`);
     expect(await selected(page, "Instructions")).toBe("true");
+  }, 60_000);
+
+  test("in a bot's own chat with no threads: the Threads tab shows anyway, and says where to let it start them", async () => {
+    const page = await chat("dm-tracer");
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open .bots-tabs')");
+    await page.finish();
+    const labels = `[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`;
+    expect(await page.eval<unknown>(labels)).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
+    await page.eval(`${TAB}.click()`);
+    await page.until(`${TAB}.getAttribute('aria-selected') === 'true'`);
+    await page.finish();
+    // tracer can't run coding agents: the hint says so, and its link opens Advanced, where the switch is.
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads running. To let it start them, turn on Run coding agents under Advanced.");
+    await shoot(page, "bot-threads-empty");
+    await page.click(".bots-details .bots-hint button");
+    await page.until(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent === 'Advanced').getAttribute('aria-selected') === 'true'`);
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details [aria-label="Run coding agents"]')`)).toBe(true);
   }, 60_000);
 
   test("on a phone, a running thread opens on the details screen", async () => {
