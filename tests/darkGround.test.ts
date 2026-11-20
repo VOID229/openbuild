@@ -87,6 +87,42 @@ describe("dark ground", () => {
     expect(token(light, "--border")).toBe("rgba(0, 0, 0, 0.08)");
   });
 
+  test("the terminal is the pane's black, not a near-black drawer", () => {
+    expect(token(dark, "--terminal-bg")).toBe("#000000");
+    expect(rule(".terminal-panel")).toContain("border-top: 1px solid var(--border);");
+  });
+
+  test("no white wash in the dark tokens is too faint to survive a lifted black", () => {
+    const blocks = [css, bots].flatMap((sheet) => sheet.split('\n:root[data-theme="dark"] {').slice(1).map((b) => b.slice(0, b.indexOf("\n}"))));
+    expect(blocks.length).toBeGreaterThan(2);
+    const washes = blocks.join("\n").matchAll(/rgba?\(255,? 255,? 255(?:,| \/) ?([\d.]+)\)/g);
+    for (const [wash, alpha] of washes) expect({ wash, faint: Number(alpha) < 0.07 }).toEqual({ wash, faint: false });
+    // The editor's current line is the theme's hover wash, as in the light theme.
+    expect(blocks.join("\n")).not.toContain("--cm-active-line");
+    expect(css).toContain("--cm-active-line: var(--hover);");
+  });
+
+  test("the chosen segment's ring is a solid line clear of its fill", () => {
+    expect(token(dark, "--seg-on-shadow")).toBe("inset 0 0 0 1px var(--border-strong)");
+    expect(grey(token(dark, "--border-strong"))! - grey(token(dark, "--seg-on"))!).toBeGreaterThanOrEqual(8);
+  });
+
+  test("nothing bordered with the hairline sits on surface-3, and its dim text stays readable", () => {
+    // Every rule that fills with --surface-3 and draws a border draws it with --border-strong: --border is
+    // too close to surface-3 to show on it.
+    for (const sheet of [css, bots]) {
+      for (const [, body] of sheet.matchAll(/\{([^{}]*background: var\(--surface-3[^{}]*)\}/g)) {
+        expect(body!).not.toMatch(/border(?:-color)?: [^;]*var\(--border\)/);
+      }
+    }
+    // WCAG contrast of --text-3 on --surface-3 (.msg-usage's label), and on the black ground.
+    const lum = (v: number) => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const contrast = (a: number, b: number) => (lum(Math.max(a, b)) + 0.05) / (lum(Math.min(a, b)) + 0.05);
+    const text3 = grey(token(dark, "--text-3"))!;
+    expect(contrast(text3, grey(token(dark, "--surface-3"))!)).toBeGreaterThanOrEqual(3.3);
+    expect(contrast(text3, 0)).toBeGreaterThanOrEqual(4.5);
+  });
+
   test("the page says it's dark", () => {
     expect(token(dark, "color-scheme")).toBe("dark");
   });
