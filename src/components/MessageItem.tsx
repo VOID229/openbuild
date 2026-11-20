@@ -334,7 +334,7 @@ function Parts({ message, chatId, old }: { message: Message; chatId: string; old
   return <>{blocks.map(render)}</>;
 }
 
-const PULSE_MS = 1200;
+const PULSE_MS = 1000;
 
 /** The waiting dots, phased off the page clock so a remount (e.g. switching threads) continues the loop
  *  mid-beat instead of restarting it. */

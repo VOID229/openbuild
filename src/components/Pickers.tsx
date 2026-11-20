@@ -330,9 +330,11 @@ function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>>
 
 const RAIL_FAV = "★";
 /** The picker's width on a wide screen: rail, list and the Reasoning column side by side. */
-const PICKER_WIDTH = 540;
-/** The model picker's height: room for about seven models, the reasoning levels and the footer. */
-const PICKER_HEIGHT = 320;
+const PICKER_WIDTH = 640;
+/** The model picker's height: room for about eight models, the reasoning levels and the footer. */
+const PICKER_HEIGHT = 400;
+/** Above the pill it goes whenever at least this much fits there, even if more would fit below. */
+const PICKER_MIN_UP = 240;
 
 /**
  * The stretch of the screen a popover inside `el` can show in: the window, less what any ancestor that
@@ -478,8 +480,9 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
-  // Open right at the pill, toward whichever side has room. One compact height whatever it holds (less
-  // only when the window has less room), so it never grows or shrinks with the models: more of them scroll.
+  // Open right at the pill: up, over what's above the composer, unless the window leaves it too little
+  // room there and more below. One height whatever it holds (less only when the window has less room),
+  // so it never grows or shrinks with the models: more of them scroll.
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -490,8 +493,8 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
       const below = window.innerHeight - pill.bottom - 16;
       const above = pill.top - 16;
       const up = dropUp
-        ? above >= 360 || above >= below
-        : below < 360 && above > below;
+        ? above >= PICKER_MIN_UP || above >= below
+        : below < PICKER_MIN_UP && above > below;
       // A phone shows it as a sheet along the bottom (styles.css), whatever is set here.
       const phone = window.innerWidth <= 768;
       // Inside what's on screen of the composer's container: a narrow pane at the side of the window
@@ -619,7 +622,7 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
               data-tooltip-side="right"
               onClick={() => (setTab(RAIL_FAV), setQuery(""))}
             >
-              <Star size={15} fill="currentColor" />
+              <Star size={18} fill="currentColor" />
             </button>
             {/* Providers scroll on their own so Favorites stays in view. */}
             <div className="mp-rail-scroll">
@@ -641,7 +644,7 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
           </div>
           <div className="mp-main">
             <label className="mp-search">
-              <Search size={14} />
+              <Search size={16} />
               <input
                 ref={search}
                 value={query}
@@ -694,6 +697,7 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
                     >
                       <ProviderIcon provider={providerOf(m)} />
                       <span className="mp-name">{m.name}</span>
+                      {selected && <Check size={15} className="mp-pick-check" aria-hidden />}
                       {modelFacts(m) && <span className="mp-facts">{modelFacts(m)}</span>}
                     </button>
                     <button
@@ -705,7 +709,7 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
                       aria-pressed={fav >= 0}
                       onClick={() => toggleFavorite(m.id)}
                     >
-                      <Star size={13} fill={fav >= 0 ? "currentColor" : "none"} />
+                      <Star size={14} fill={fav >= 0 ? "currentColor" : "none"} />
                     </button>
                   </div>
                 );
