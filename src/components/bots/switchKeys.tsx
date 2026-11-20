@@ -13,7 +13,7 @@ import { isTyping } from "../../lib/shortcutKeys";
 import { useStore } from "../../lib/store";
 
 /** How long Option is held before the numbers show, so a quick ⌥2 doesn't flash them. */
-export const HINT_DELAY_MS = 400;
+export const HINT_DELAY_MS = 500;
 
 const NONE: Record<string, number> = {};
 

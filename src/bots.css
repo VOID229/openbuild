@@ -1370,44 +1370,58 @@
   outline-offset: -2px;
 }
 
-/* ⌥N on a tile, row or rail avatar while Option is held (switchKeys.tsx): a keycap on its corner. */
-.bots-row-main {
+/* ⌥N on a tile, row or rail avatar while Option is held (switchKeys.tsx): a small, quiet keycap in
+   the empty space at the avatar's bottom right, clear of its face. */
+.bots-row-avatar {
   position: relative;
+  display: grid;
+  flex: none;
 }
 
 .bots-switch-key {
   position: absolute;
   z-index: 1;
-  top: 2px;
-  left: 2px;
   display: inline-grid;
   place-items: center;
-  min-width: 22px;
-  height: 18px;
-  padding: 0 4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--surface-raised);
-  box-shadow: var(--shadow-sm);
-  color: var(--text);
+  color: var(--text-2);
   font-family: var(--font);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 9.5px;
+  font-weight: 500;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   pointer-events: none;
   animation: bots-switch-key-in 120ms var(--ease) both;
 }
 
+/* A row's: at its avatar's bottom right corner, in the row's padding and the gap before its text. */
+.bots-row-avatar .bots-switch-key {
+  right: -5px;
+  bottom: -5px;
+}
+
+/* A tile's: beside its avatar, at the bottom, where the tile is empty. */
 .bots-tile-avatar .bots-switch-key {
-  top: -4px;
-  left: -10px;
+  left: calc(100% + 6px);
+  bottom: 0;
+}
+
+/* The rail's: in its item's bottom right corner. */
+.bots-rail-item .bots-switch-key {
+  right: 3px;
+  bottom: 3px;
 }
 
 @keyframes bots-switch-key-in {
   from {
     opacity: 0;
-    transform: scale(0.85);
+    transform: scale(0.9);
   }
 }
 
