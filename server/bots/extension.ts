@@ -272,19 +272,33 @@ export function stepSaysDone(message: { role?: string; content?: unknown } | und
 // and Opus 5.5 return the note they write before a call as a thinking block of its own, a progress
 // update, which isn't text at all. A model that writes its answer there and passes send_message only
 // a line, or a question card, believes it answered: on 2026-11-20 Dr Eggbot wrote a whole
-// explanation that way twice, then sent "Sent the explanation above". So when a step's own words say
-// more than what its calls sent, its first tool result tells it, and that step doesn't end the turn.
+// explanation that way twice, then sent "Sent the explanation above". Most words beside a call are
+// the model working things out, though: a draft it then sends shorter, "I'll just react", a plan
+// beside a command. So a step is told only when what it sent can't be the reply its words were: a
+// message that points at words that aren't there, or a stub that ends the turn. Its first tool result
+// says so, that step doesn't end the turn, and a turn is told once.
 
 /** Tools whose arguments are what the chat shows. */
 const SHOWN = new Set(["send_message", "question", "poll"]);
 /** Shorter than this, words beside a call are the model thinking aloud ("Asking tracer to review."). */
 export const UNSAID_MIN = 120;
+/**
+ * A message this short, ending a turn beside at least STUB_WORDS characters and STUB_RATIO times its own
+ * length, is a stub of a reply. The incident's notes ran 275 to 431 characters (they're summaries of
+ * longer ones); a draft of 160 beside a one-line verdict is the verdict.
+ */
+export const STUB_MAX = 100;
+const STUB_WORDS = 2 * UNSAID_MIN;
+const STUB_RATIO = 3;
+/** A message pointing at words the chat doesn't have: "see above", "sent the explanation". */
+const POINTS = /\b(?:above|earlier message|previous message|last message)\b|\b(?:sent|gave|wrote|posted|shared) (?:you )?(?:the|my|an?) (?:explanation|answer|details|summary|reply|breakdown|rundown)\b/i;
 
 /**
  * A progress update: the note Claude 5.5 models write before a tool call, returned as a thinking block
  * of its own. Under `display: "summarized"` (claude-code/transcript.ts) it reads like the reasoning
  * summaries around it; only its signature tells it apart, whose clear header names it "narration"
- * where reasoning says "thinking" (every one of 29 in the bots' sessions by 2026-11-20).
+ * where reasoning says "thinking" (every one of 29 in the bots' sessions by 2026-11-20; the
+ * incident's own are in tests/fixtures/botUnsaid).
  */
 export function progressNote(block: any): boolean {
   if (block?.type !== "thinking" || block.redacted || typeof block.thinkingSignature !== "string") return false;
@@ -295,46 +309,46 @@ export function progressNote(block: any): boolean {
   }
 }
 
-const words = (value: string) => new Set(value.toLowerCase().match(/[\p{L}\p{N}#']{4,}/gu) ?? []);
-
-/** The words of a call that the chat shows: a message, a card's questions and choices, a poll. */
+/** The words of a call that the chat shows as said: a message, a card's questions (its choices aren't an answer), a poll's question. */
 function shownText(call: any): string {
   const a = call?.arguments ?? {};
-  const list = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
   if (call?.name === "send_message") return String(a.text ?? "");
-  const questions = Array.isArray(a.questions) ? a.questions.flatMap((q: any) => [q?.title, q?.hint, ...list(q?.options)]) : [];
-  if (call?.name === "question") return [a.title, a.hint, ...list(a.options), ...questions].filter(Boolean).join("\n");
-  if (call?.name === "poll") return [a.question, ...list(a.options)].filter(Boolean).join("\n");
+  const questions = Array.isArray(a.questions) ? a.questions.flatMap((q: any) => [q?.title, q?.hint]) : [];
+  if (call?.name === "question") return [a.title, a.hint, ...questions].filter(Boolean).join("\n");
+  if (call?.name === "poll") return String(a.question ?? "");
   return "";
 }
 
 /**
- * What a step wrote beside its calls that no call carried, when the step speaks (a message or card) or
- * ends the turn: its text and its progress notes, unless they're short, or what it sent is as long and
- * holds most of their words (a model that drafts its message and then sends it).
+ * What a step wrote beside its calls (its text and its progress notes) that its message or card can't
+ * have carried: the message points at words the chat doesn't have, or it's a stub on the step that
+ * ends the turn. A step that writes nothing to the chat (a reaction, [silent]) stays quiet on purpose,
+ * and one that goes on to other work ("On it" beside a command) will write again.
  */
 export function unsaidWords(message: { role?: string; content?: unknown } | undefined): string | undefined {
   if (message?.role !== "assistant" || !Array.isArray(message.content)) return undefined;
   const blocks: any[] = message.content;
-  const calls = blocks.filter((b) => b?.type === "toolCall");
-  if (!calls.length || !(calls.some((c) => SHOWN.has(c.name)) || stepSaysDone(message))) return undefined;
+  const shown = blocks.filter((b) => b?.type === "toolCall" && SHOWN.has(b.name));
+  if (!shown.length) return undefined;
   const loose = blocks
     .flatMap((b) => (b?.type === "text" ? [String(b.text ?? "")] : progressNote(b) ? [String(b.thinking ?? "")] : []))
     .join("\n\n")
     .replace(/\[silent\]/gi, "")
     .trim();
-  if (loose.length < UNSAID_MIN) return undefined;
-  const sent = calls.map(shownText).join("\n");
-  const said = words(sent);
-  const own = [...words(loose)];
-  const covered = own.filter((w) => said.has(w)).length / Math.max(1, own.length);
-  return sent.length >= loose.length || covered >= 0.5 ? undefined : loose;
+  const sent = shown.map(shownText).join("\n").trim();
+  if (loose.length < UNSAID_MIN || loose.length <= sent.length) return undefined;
+  const points = POINTS.test(sent);
+  const stub = sent.length <= STUB_MAX && loose.length >= Math.max(STUB_WORDS, STUB_RATIO * sent.length) && stepSaysDone(message);
+  return points || stub ? loose : undefined;
 }
 
 /** What the bot is told when a step's words reached no one. */
 export function unsaidNote(chars: number): string {
-  return `Not delivered: the ${chars} characters you wrote outside your tool calls in this step reached no one. Only what you pass to send_message, question or poll shows in the chat. If that text was meant for someone, send it now with send_message, in full. If what you sent already says it, end your turn. This step didn't end it.`;
+  return `Not delivered: the ${chars} characters you wrote outside your tool calls in this step reached no one. Only what you pass to send_message, question or poll shows in the chat. If that was a reply you meant to send and haven't, send it now with send_message. Otherwise end your turn.`;
 }
+
+/** Whether this turn has been told already: once is enough, so a bot that keeps writing beside short messages still ends its turn. */
+const turn = { told: false };
 
 /** Results that told the bot its words reached no one: they never end the turn, whatever they said of done. */
 const unheard = new WeakSet<object>();
@@ -344,6 +358,7 @@ function tellUnsaid<T extends { content: { type: "text"; text: string }[] }>(res
   const loose = step.unsaid;
   if (!loose) return result;
   step.unsaid = undefined;
+  turn.told = true;
   const told = { ...result, content: [...result.content, ...text(unsaidNote(loose.length))] };
   unheard.add(told);
   return told;
@@ -353,7 +368,13 @@ function tellUnsaid<T extends { content: { type: "text"; text: string }[] }>(res
 export function stepIn(message: { role?: string; content?: unknown } | undefined) {
   if (message?.role !== "assistant") return;
   step.done = stepSaysDone(message);
-  step.unsaid = unsaidWords(message);
+  step.unsaid = turn.told ? undefined : unsaidWords(message);
+}
+
+/** A new turn (Pi's before_agent_start: a prompt, not a steer into one) can be told again. */
+export function turnStarts() {
+  turn.told = false;
+  step.unsaid = undefined;
 }
 
 /** A tool that takes `done`: its call ends the turn when the bot says it's the last, on it or on a call beside it, and it went through (see ending). */
@@ -621,6 +642,7 @@ export default function openbots(pi: any) {
   });
 
   pi.on("before_agent_start", async (event: any) => {
+    turnStarts();
     try {
       // What's loaded goes along: the guides to tools it hasn't loaded stay out of its context (agent.ts).
       const context = (await call("context", { ...(dynamic() ? { tools: pi.getActiveTools() } : {}), ...(fresh ? { fresh: true } : {}) })) as { sections: Record<string, string>; load?: string[] };
