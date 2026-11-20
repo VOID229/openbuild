@@ -1,10 +1,11 @@
 // OpenBots: what a bot does of its own accord. At work it plays clips: short choreographed runs of
 // looks, each pose held a moment, as the reference recording of Grok Bot's mascots does: a look
-// round that ends in a backflip, a sway from side to side looking down, a curious spell with round
-// eyes, and a breather back at rest. Every clip is the same each time it plays, as the reference's
+// round, a sway from side to side looking down, a curious spell with round eyes, and a breather back
+// at rest. Every clip is the same each time it plays, as the reference's
 // are; which one comes next is chosen at random, never the same twice running. Idle, a bot mostly rests,
 // with a blink or a calm look about now and then. Nothing hops: a bot moves by turning, rolling and
-// leaning, and at work, now and then, by going right round (a flip or a spin).
+// leaning, and at work, now and then, by spinning right round. A flip isn't in any of them: a bot
+// flips when it sends a message (BotAvatar's `pulse`), so a flip always means one went out.
 import type { Action, Mood } from "./looks";
 import { RESTING, type Pose } from "./rig";
 
@@ -28,17 +29,15 @@ const ahead = (): Pose => ({ x: 0, y: 0 });
 export const CLIPS = {
   /**
    * A look round: left, up and left (blinking on the way), a long look over to the right, up, and down,
-   * then a backflip, the face going up over the top and coming back up from below.
+   * and back to straight ahead. (The reference ends it in a backflip; ours flip only on sending a message.)
    */
-  lookFlip: (): Step[] => [
+  lookRound: (): Step[] => [
     [{ x: -0.48, y: -0.28, roll: 11 }, 500],
     ["blink", 0],
     [{ x: -0.62, y: -0.57, roll: 14 }, 620],
     [{ x: 0.27, y: -0.5, roll: -5 }, 1080],
     [{ x: 0.03, y: -0.79, roll: 0 }, 420],
     [{ x: 0, y: 0.72 }, 430],
-    [ahead(), 0],
-    ["flip", 700],
     [ahead(), 900],
   ],
   /**
@@ -89,7 +88,7 @@ export const CLIPS = {
 export type Clip = keyof typeof CLIPS;
 
 /** How often each clip comes up at work: the look round most, as in the reference. */
-const WEIGHTS: Record<Clip, number> = { lookFlip: 4, sway: 2, curious: 1, glance: 1, breather: 2 };
+const WEIGHTS: Record<Clip, number> = { lookRound: 4, sway: 2, curious: 1, glance: 1, breather: 2 };
 
 /** A busy bot's next clip, never the one it just played. */
 export function nextClip(last?: Clip): Clip {
@@ -154,7 +153,7 @@ export function nextBlink(): Step[] {
  * Busy in another chat: calm, its mind on the work over there. It rests small-eyed, as an idle bot
  * does, and now and then turns slowly to look off to one side a good while, as if over at that chat,
  * or up and away, thinking it over, and comes back; a blink between. None of the work's big eyes,
- * clips, flips or spins: those are for the chat it's working in.
+ * clips or spins: those are for the chat it's working in.
  */
 export function nextAway(): Step[] {
   const s = side();

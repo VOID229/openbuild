@@ -376,8 +376,9 @@ export function liveActivity(live: Live, opts: { writing?: boolean; counts?: (st
 
 // Which of a bot's tool calls are it reading something: a file, a page, its messages or memory,
 // search results, a thread's output. While one runs its status says so (BotStatus.reading), and its
-// mascot reads, eyes down, along one line after another. Apart from the status line's words above,
-// which can change without changing this.
+// mascot reads, eyes down, along one line after another; it reads too while Pi summarizes the
+// conversation (compaction, runner.ts). Apart from the status line's words above, which can change
+// without changing this.
 /** Tools that only ever read. */
 const READERS = new Set(["read", "search", "bot_web_search"]);
 

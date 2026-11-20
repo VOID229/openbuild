@@ -87,7 +87,7 @@ export interface BotStatus {
   conversationId?: string;
   /** The OpenBuild thread it's acting on right now (reading, messaging, stopping, closing…), by id or the prefix it named. */
   thread?: string;
-  /** Its live step is reading something: a file, a page, messages, memory, search results, a thread (steps.ts `reads`). Its mascot reads along. */
+  /** Its live step is reading something (a file, a page, messages, memory, search results, a thread: steps.ts `reads`), or Pi is summarizing the conversation so far. Its mascot reads along. */
   reading?: boolean;
   /** Working, but nothing to show in the chat yet (a reaction it may let be, or tidying up after a reply). */
   quiet?: boolean;
@@ -944,7 +944,7 @@ export type BotsEvent =
   | { t: "typing"; conversationId: string; botIds: string[] }
   | { t: "draft"; draft: Draft; done?: boolean }
   | { t: "status"; botId: string; status: BotStatus }
-  | { t: "pulse"; botId: string; mood?: string }
+  | { t: "pulse"; botId: string; mood?: string; action?: string }
   | { t: "settings"; settings: BotsSettings }
   | { t: "setup"; setup?: PiSetup }
   /** The connected apps changed: ask /api/bots/apps for them. */

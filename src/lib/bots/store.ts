@@ -13,7 +13,7 @@ import { suspectOutage, waitForServer } from "../serverOutage";
 import { uid } from "../id";
 import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
-import type { BotLook, Mood } from "./looks";
+import type { Action, BotLook, Mood } from "./looks";
 import { botModels } from "../pi";
 import { useStore } from "../store";
 import { trackShown, type Shown } from "./activity";
@@ -122,7 +122,7 @@ interface BotsState {
   /** Text a bot is still writing, shown in place of "Typing…". */
   drafts: LiveDraft[];
   /** The last reaction each bot was asked to show (BotAvatar's `pulse`). */
-  pulses: Record<string, { key: number; mood?: Mood }>;
+  pulses: Record<string, { key: number; mood?: Mood; action?: Action }>;
   /** A message to scroll to and flash (from a reply's quote). */
   focus?: { conversationId: string; messageId: string; key: number };
 
@@ -187,7 +187,7 @@ interface BotsState {
   votePoll: (conversationId: string, messageId: string, keys: string[]) => void;
   /** Change a conversation's to-do list as the user. */
   setTyping: (conversationId: string, botId: string, typing: boolean) => void;
-  pulse: (botId: string, mood?: Mood) => void;
+  pulse: (botId: string, mood?: Mood, action?: Action) => void;
   focusMessage: (conversationId: string, messageId: string) => void;
 
   updateRoutine: (botId: string, routineId: string, patch: Partial<Routine>) => void;
@@ -503,7 +503,7 @@ export const useBots = create<BotsState>()(
         const next = typing ? [...new Set([...now, botId])] : now.filter((b) => b !== botId);
         return { typing: { ...s.typing, [conversationId]: next } };
       }),
-    pulse: (botId, mood) => set((s) => ({ pulses: { ...s.pulses, [botId]: { key: (s.pulses[botId]?.key ?? 0) + 1, mood } } })),
+    pulse: (botId, mood, action) => set((s) => ({ pulses: { ...s.pulses, [botId]: { key: (s.pulses[botId]?.key ?? 0) + 1, mood, action } } })),
     focusMessage: (conversationId, messageId) => set((s) => ({ focus: { conversationId, messageId, key: (s.focus?.key ?? 0) + 1 } })),
 
     updateRoutine: (botId, routineId, patch) => {
@@ -1229,7 +1229,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "pulse") {
-    if (!authoritativeOnly) get().pulse(e.botId, e.mood as Mood | undefined);
+    if (!authoritativeOnly) get().pulse(e.botId, e.mood as Mood | undefined, e.action as Action | undefined);
     return;
   }
   if (e.t === "apps") {

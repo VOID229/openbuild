@@ -3,13 +3,14 @@
 // that only follows the pointer; a playful one to press; one that starts on something when
 // `wait(true)` is called, and has a step to show at `wait(false)`; and a busy one that's three dots
 // for as long as `hold(true)` says (`holdShape` changes its shape); and one that's busy reading for as
-// long as `read(true)` says (`readShape` changes its shape), still otherwise.
+// long as `read(true)` says (`readShape` changes its shape), still otherwise; and one that reacts once
+// at each `pulse(action?)`, as a bot does that sent a message ("flip") or got a reaction (none).
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BotAvatar } from "../../../src/components/bots/BotAvatar";
-import { SHAPES, type BotLook, type Mood } from "../../../src/lib/bots/looks";
+import { SHAPES, type Action, type BotLook, type Mood } from "../../../src/lib/bots/looks";
 
 const moods: Mood[] = ["idle", "happy", "thinking", "sleepy", "surprised", "love", "wink", "squint"];
 const looks: BotLook[] = [{ shape: "blob", color: "green" }, { shape: "cloud", color: "white" }, { shape: "tablet", color: "pink" }];
@@ -30,6 +31,12 @@ function Reader() {
   const [shape, setShape] = useState("blob");
   Object.assign(window, { read: setOn, readShape: setShape });
   return <BotAvatar look={{ shape, color: "green" }} size={96} alive={false} busy={on} reading={on} />;
+}
+
+function Pulser() {
+  const [pulse, setPulse] = useState<{ key: number; mood?: Mood; action?: Action }>();
+  Object.assign(window, { pulse: (action?: Action) => setPulse((p) => ({ key: (p?.key ?? 0) + 1, mood: "happy", action })) });
+  return <BotAvatar look={looks[2]!} size={96} alive={false} pulse={pulse} />;
 }
 
 createRoot(document.getElementById("root")!).render(
@@ -62,6 +69,9 @@ createRoot(document.getElementById("root")!).render(
     </div>
     <div className="row" id="reading">
       <span className="cell"><Reader /></span>
+    </div>
+    <div className="row" id="pulse">
+      <span className="cell"><Pulser /></span>
     </div>
     <div className="row" id="play">
       <span className="cell"><BotAvatar look={looks[1]!} size={96} alive={false} playful /></span>

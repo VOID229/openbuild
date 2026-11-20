@@ -23,7 +23,7 @@ test("at work, it plays the reference's clips: each the same every time, and nev
   let last: Clip | undefined;
   for (let i = 0; i < RUNS; i++) counts[(last = nextClip(last))]++;
   for (const c of clips) expect(counts[c]).toBeGreaterThan(RUNS * 0.05);
-  expect(Math.max(...Object.values(counts))).toBe(counts.lookFlip);
+  expect(Math.max(...Object.values(counts))).toBe(counts.lookRound);
   // One after another, as a busy bot plays them.
   const next = beats();
   let prev = "";
@@ -34,14 +34,16 @@ test("at work, it plays the reference's clips: each the same every time, and nev
   }
 });
 
-test("at work, a bot never hops: it moves in place, and goes right round now and then, by a flip or a spin", () => {
+test("at work, a bot never hops: it moves in place, and now and then spins right round, but never flips of its own accord", () => {
   const all = sample(nextBeat);
-  expect([...moves(all)].sort()).toEqual(["flip", "spin"]);
-  // About as often as the reference does: once in every ten seconds or so of work, not every few.
+  // A flip is for a message going out (BotAvatar's pulse), so seeing one means something was sent.
+  expect([...moves(all)].sort()).toEqual(["spin"]);
+  for (const r of [...all, AFTER_DOTS, ...sample(() => nextIdle(true)), ...sample(nextBlink)]) expect(r.some(([w]) => w === "flip")).toBe(false);
+  // Once in a good while: the curious spell's spin, not every few seconds.
   const ms = all.reduce((n, r) => n + r.reduce((m, [, t]) => m + t, 0), 0);
-  const turns = all.reduce((n, r) => n + r.filter(([w]) => w === "flip" || w === "spin").length, 0);
-  expect(ms / turns).toBeGreaterThan(8000);
-  expect(ms / turns).toBeLessThan(25000);
+  const turns = all.reduce((n, r) => n + r.filter(([w]) => w === "spin").length, 0);
+  expect(ms / turns).toBeGreaterThan(20000);
+  expect(ms / turns).toBeLessThan(90000);
   // Facing straight out when it goes round, so the face goes off the top or the side and comes back.
   for (const c of clips) {
     const r = CLIPS[c]();
