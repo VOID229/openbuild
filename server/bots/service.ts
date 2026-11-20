@@ -361,8 +361,9 @@ export function setDraft(draft: Draft | undefined, key: { conversationId: string
   else drafts.push(draft);
   emit({ t: "draft", draft });
 }
-export function pulse(botId: string, mood?: string) {
-  emit({ t: "pulse", botId, mood });
+/** A bot's avatar reacts once: the mood's face, and a move (a jelly unless `action` says otherwise). */
+export function pulse(botId: string, mood?: string, action?: string) {
+  emit({ t: "pulse", botId, mood, ...(action ? { action } : {}) });
 }
 
 function emitConversation(id: string) {
@@ -1726,7 +1727,8 @@ export function postMessage(conversationId: string, message: BotMessage, { from 
   db.putConversation({ ...c, updatedAt: message.at, unread, hidden });
   emitConversation(conversationId);
   emit({ t: "message", conversationId, message });
-  if (message.author !== "me" && !message.event && !friendHere) pulse(message.author, "happy");
+  // A bot's message went out: it flips, head over heels. The only flip there is, so one always means a message.
+  if (message.author !== "me" && !message.event && !friendHere) pulse(message.author, "happy", "flip");
   if (c.friend && !c.friend.ended && !friendHere && !message.event) friendHooks.relay(c, message);
 
   const waiting = waiters.filter((w) => w.conversationId === conversationId && w.afterSeq < seq && w.botId !== message.author);

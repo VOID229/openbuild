@@ -4,7 +4,7 @@
 // spring. A still bot rests turned up and away and rolled over, and holds quite still. Left alone it
 // rests, blinks and now and then looks about; at work its eyes grow big and it plays the reference's
 // clips (lib/bots/routines.ts): looking round, swaying, curious round-eyed spells, a breather, and now
-// and then a flip or a spin right round. Every avatar of the same bot at the same thing moves as one
+// and then a spin right round. It flips head over heels only when it sends a message (a `pulse`). Every avatar of the same bot at the same thing moves as one
 // (lib/bots/life.ts). It can follow the pointer, turning and leaning toward it; a held mood (thinking
 // while typing, happy at a reaction) changes its eyes, and in a group the ones not at work doze, a
 // "zzz" floating up over them. At work with nothing at all to say what on, it can turn into three dots
@@ -163,7 +163,10 @@ export interface BotAvatarProps {
    * it shows alike.
    */
   dots?: boolean;
-  /** Change it to make the bot react once: a swell and a happy face, or the given mood and move. */
+  /**
+   * Change it to make the bot react once: a jelly and a happy face, or the given mood and move. A bot
+   * that sent a message flips (action "flip"); a reaction, a vote or a pick keeps the jelly.
+   */
   pulse?: { key: string | number; mood?: Mood; action?: Action };
   className?: string;
   label?: string;
@@ -397,6 +400,9 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     if (calm()) return;
     // A turn right round and a nod are the body's own: the face goes round the back and comes out the
     // other side, or dips and comes back up. The rest are played over it (.bot-act).
+    // A flip already under way plays out: a reply sent as several bubbles at once is one flip, not a
+    // flip that keeps starting over.
+    if (a === "flip" && body.current!.flipped) return;
     if (a === "spin") body.current!.spun = performance.now();
     if (a === "flip") body.current!.flipped = performance.now();
     if (a === "nod") nod(body.current!.rig);

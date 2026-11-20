@@ -469,6 +469,25 @@ test("while its step reads something the status says it's reading, and not a mom
   await over(third);
 `), 30_000);
 
+test("a bot flips when a message of its goes out, and only then: a reaction keeps the jelly", () => run("flip", `
+  const pulses = [];
+  svc.subscribe((e) => { if (e.t === 'pulse') pulses.push(e); });
+  const first = await turn();
+  // The user's own message moves no mascot.
+  a.deepEqual(pulses, []);
+  const out = await agent.sendMessage(alpha.bot.id, { text: 'Done.' });
+  a.deepEqual(pulses, [{ t: 'pulse', botId: alpha.bot.id, mood: 'happy', action: 'flip' }]);
+  // Its reply in bubbles: a flip each, which the avatar plays as one (BotAvatar keeps a flip under way).
+  pulses.length = 0;
+  await agent.sendMessage(alpha.bot.id, { text: 'First.\\n\\nSecond.' });
+  a.ok(pulses.length >= 1 && pulses.every((p) => p.action === 'flip'), JSON.stringify(pulses));
+  // A reaction is no message: the pulse it always had, a jelly with the face.
+  pulses.length = 0;
+  await agent.seams.handle(alpha.bot.id, 'react', { message: out.id, emoji: '❤️' });
+  a.deepEqual(pulses, [{ t: 'pulse', botId: alpha.bot.id, mood: 'love' }]);
+  await over(first);
+`), 30_000);
+
 test("a record that trails in after the turn doesn't put the bot back to work, and the next turn starts clean", () => run("trailing", `
   const first = await turn();
   start('bash', 't1', { status: 'Deploying the site', command: './deploy.sh' });

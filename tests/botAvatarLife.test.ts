@@ -242,6 +242,38 @@ describe.skipIf(!browser)("a bot on its own", () => {
     expect(Math.max(...turns.map((t) => Math.abs(t.lift)))).toBeLessThan(0.06);
   }, 20_000);
 
+  test("a message sent, it flips head over heels once (a second one mid-flip doesn't start it over); a reaction only jellies", async () => {
+    const page = await open();
+    const bot = "document.querySelector('#pulse .bot')";
+    // Each frame for `ms`: how squeezed top to bottom and side to side the body is, whether the face shows, and the move played over it.
+    const watch = (ms: number) => page.eval<{ at: number; kx: number; ky: number; hidden: boolean; action: string }[]>(`new Promise((done) => {
+      const b = ${bot}, out = [], t0 = performance.now();
+      const tick = () => {
+        const m = /scale\\((-?[\\d.]+), (-?[\\d.]+)\\)/.exec(b.querySelector('.bot-body').style.transform);
+        out.push({ at: performance.now() - t0, kx: m ? Number(m[1]) : 1, ky: m ? Number(m[2]) : 1, hidden: b.querySelector('.bot-skin').style.visibility === 'hidden', action: b.dataset.action ?? '' });
+        if (performance.now() - t0 < ${ms}) requestAnimationFrame(tick); else done(out);
+      };
+      requestAnimationFrame(tick);
+    })`);
+    // A message: over the top it goes, squeezed top to bottom (never side to side: that's a spin).
+    await page.eval("pulse('flip'), setTimeout(() => pulse('flip'), 300), true");
+    const flip = await watch(1600);
+    const round = flip.filter((f) => f.ky < 0.999);
+    expect(Math.min(...flip.map((f) => f.ky))).toBeLessThan(0.95);
+    expect(Math.min(...flip.map((f) => f.kx))).toBeGreaterThan(0.999);
+    // The face goes round the back a moment (wherever frames came often enough to catch it) and is back for the end.
+    const gaps = flip.slice(1, 20).map((f, i) => f.at - flip[i]!.at);
+    if (Math.max(...gaps) < 50) expect(flip.some((f) => f.hidden)).toBe(true);
+    expect(flip.at(-1)!.hidden).toBe(false);
+    // One flip, not one started over by the second message: round for no longer than a single turn (SPIN, 720 ms).
+    expect(round.at(-1)!.at - round[0]!.at).toBeLessThan(800);
+    // A reaction: the jelly it always had, and no going round.
+    await page.eval("pulse(), true");
+    const jelly = await watch(900);
+    expect(jelly.some((f) => f.action === "jelly")).toBe(true);
+    expect(jelly.every((f) => f.ky > 0.999 && f.kx > 0.999 && !f.hidden)).toBe(true);
+  }, 20_000);
+
   test("starting on something, it turns into three dots, and comes back as itself when there's a step to show", async () => {
     const page = await open();
     const read = () =>

@@ -944,7 +944,7 @@ export type BotsEvent =
   | { t: "typing"; conversationId: string; botIds: string[] }
   | { t: "draft"; draft: Draft; done?: boolean }
   | { t: "status"; botId: string; status: BotStatus }
-  | { t: "pulse"; botId: string; mood?: string }
+  | { t: "pulse"; botId: string; mood?: string; action?: string }
   | { t: "settings"; settings: BotsSettings }
   | { t: "setup"; setup?: PiSetup }
   /** The connected apps changed: ask /api/bots/apps for them. */
