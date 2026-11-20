@@ -20,8 +20,10 @@ afterAll(async () => {
   await server?.stop();
 });
 
-/** How the rows on screen moved while a step ran: the most in one frame, in all, and in how many frames. */
-type Moves = { most: number; net: number; frames: number };
+/** How the rows on screen moved while a step ran: the most in one frame, in all, the longest animation
+ *  (ms) seen moving them, and how far (ms) such animations went in the frame that moved them most and
+ *  the frame before it. */
+type Moves = { most: number; net: number; eased: number; mostSpan: number };
 
 class StillPage extends Page {
   /** Runs `change` on the bots store and watches every message row on screen for the next `ms`, and
@@ -33,19 +35,43 @@ class StillPage extends Page {
       const rows = [...el.querySelectorAll('.bm-row[data-id]')].filter((r) => { const b = r.getBoundingClientRect(); return b.bottom > view.top && b.top < view.bottom; });
       const at = () => rows.map((r) => r.getBoundingClientRect().top);
       const start = at();
-      let last = start, most = 0, net = 0, frames = 0;
+      let last = start, most = 0, net = 0, eased = 0, mostSpan = 0;
       const ends = performance.now() + ${ms};
       // Animations that end (not the mascots breathing or a status glowing, which loop).
-      const moving = () => el.getAnimations({ subtree: true }).some((a) => a.playState !== "finished" && a.effect?.getComputedTiming().endTime !== Infinity);
+      const ending = () => el.getAnimations({ subtree: true }).filter((a) => a.playState !== "finished" && a.effect?.getComputedTiming().endTime !== Infinity);
+      // Those that move the rows: the size or margins of something in the flow changing (not, say, a
+      // mascot's eyes, placed out of it), or a transform on something holding a row.
+      const sizes = /^(height|min-?height|max-?height|margin|padding|top|bottom|inset)/i;
+      const easesRows = (a) => {
+        const target = a.effect.target, inFlow = !/absolute|fixed/.test(getComputedStyle(target).position);
+        return a.effect.getKeyframes().flatMap((k) => Object.keys(k)).some((p) => (inFlow && sizes.test(p)) || (/^(transform|translate)$/.test(p) && rows.some((r) => target.contains(r))));
+      };
+      // Each such animation and how far into it (ms) the last two frames were. Rows sit where their
+      // animations' time puts them (a frame late where the chat follows a height to its end), so a frame
+      // that moves them a lot must have taken that time a long way, in it or the frame before.
+      const seen = new Map();
       const tick = () => {
         const now = at();
         let moved = 0;
         now.forEach((y, i) => { moved = Math.max(moved, Math.abs(y - last[i])); net = Math.max(net, Math.abs(y - start[i])); });
-        if (moved >= 0.5) frames++;
-        most = Math.max(most, moved);
+        let span = 0;
+        for (const [a, [before, was]] of seen) {
+          const { duration } = a.effect.getComputedTiming();
+          const got = a.playState === "idle" ? was : Math.min(duration, Math.max(0, a.currentTime ?? 0));
+          span = Math.max(span, got - before);
+          seen.set(a, [was, got]);
+        }
+        if (moved > most) { most = moved; mostSpan = span; }
         last = now;
-        if (performance.now() < ends || (moving() && performance.now() < ends + 4000)) requestAnimationFrame(tick);
-        else done({ most, net, frames });
+        const going = ending();
+        for (const a of going) {
+          if (seen.has(a) || !easesRows(a)) continue;
+          const got = Math.max(0, a.currentTime ?? 0);
+          seen.set(a, [got, got]);
+          eased = Math.max(eased, a.effect.getComputedTiming().duration || 0);
+        }
+        if (performance.now() < ends || (going.length && performance.now() < ends + 4000)) requestAnimationFrame(tick);
+        else done({ most, net, eased, mostSpan });
       };
       bots.setState(${change});
       requestAnimationFrame(tick);
@@ -81,12 +107,15 @@ const still = (m: Moves) => {
   expect(m.most).toBeLessThan(0.5);
   expect(m.net).toBeLessThan(0.5);
 };
-/** It moved, but over several frames, no one of them doing most of it (a frame dropped on a busy
- *  machine can carry a good part of a short move; all at once, as a jump, is what this rules out). */
+/** It moved, and an animation eased it there: one changing the rows' layout ran while they moved, and
+ *  no frame did most of the move unless that animation's own time went half its length by then (in that
+ *  frame or the one before, as the chat follows a height a frame late). A stalled runner can skip a whole
+ *  ease in one frame (its clock shows it), but a jump has no animation behind it, or one whose time
+ *  hardly moved as the rows did. */
 const glided = (m: Moves) => {
   expect(m.net).toBeGreaterThan(20);
-  expect(m.frames).toBeGreaterThanOrEqual(3);
-  expect(m.most).toBeLessThan(m.net * 0.7);
+  expect(m.eased).toBeGreaterThan(0);
+  if (m.mostSpan < m.eased / 2) expect(m.most).toBeLessThan(m.net * 0.7);
 };
 
 for (const [label, width, height] of [["desktop", 1000, 700], ["phone", 390, 760]] as const) {
