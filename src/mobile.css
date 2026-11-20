@@ -106,7 +106,7 @@
 .bm-hold-reactions {
   order: -1;
   padding: 4px;
-  border-radius: 26px;
+  border-radius: var(--radius-xl);
 }
 
 .bm-hold-quick {
@@ -167,7 +167,7 @@
 .bm-hold-menu {
   min-width: 220px;
   padding: 5px;
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
 }
 
 .bm-hold-item {
@@ -178,7 +178,7 @@
   width: 100%;
   min-height: 44px;
   padding: 0 12px 0 14px;
-  border-radius: 13px;
+  border-radius: var(--radius);
   font-size: 16px;
   text-align: left;
   color: var(--text);
@@ -473,7 +473,7 @@
     height: 40px;
     margin: 2px 16px 10px;
     padding: 0 12px;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
   }
 
   .bots-sidebar .history-wrap {
@@ -493,7 +493,7 @@
 
   .bots-tile {
     padding: 10px 2px 8px;
-    border-radius: 18px;
+    border-radius: var(--radius-xl);
   }
 
   .bots-tile-active {
@@ -606,7 +606,7 @@
     height: 20px;
     margin: 0 2px 0 -4px;
     padding: 0 5px;
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     background: var(--hover);
     color: var(--text-2);
     font-size: 12.5px;
@@ -624,7 +624,7 @@
     height: 48px;
     padding: 0 6px 0 4px;
     border: 0;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     background: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -666,7 +666,7 @@
     right: 10px;
     z-index: 7;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-md);
   }
 
@@ -747,7 +747,7 @@
 
   .bm-reaction-pill {
     padding: 0 8px;
-    border-radius: 14px;
+    border-radius: var(--radius);
   }
 
   .bm-reaction-emoji {
@@ -815,7 +815,7 @@
 
   .bm-own .input {
     height: 42px;
-    border-radius: 21px;
+    border-radius: var(--radius-lg);
     padding: 0 14px;
   }
 
