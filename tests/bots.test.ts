@@ -718,6 +718,8 @@ test("send_message, models and check-ins against a real bots database", async ()
       db.setValue('hb:' + bot.id, 1);
       svc.tick(() => false);
       a.equal(woken.filter((w) => w.kind === 'heartbeat').length, 1);
+      // A check-in asks for the work, not only whether there's something to say.
+      a.match(woken.find((w) => w.kind === 'heartbeat').text, /for work in your role that is unfinished, stuck or worth starting, and do what you can now\\. Then tell the user what you did, or what needs their decision\\./);
 
       // A reaction on a bot's message wakes that bot; taking it back or reacting to your own doesn't.
       const reacted = () => woken.filter((w) => w.kind === 'reaction');

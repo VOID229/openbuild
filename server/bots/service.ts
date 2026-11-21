@@ -472,6 +472,10 @@ export function ensureStarted() {
   updateSettings({ onboarding: "active" });
 }
 
+/** What a check-in asks of a bot: to look for work in its role and do it, not only whether there's something to say. */
+export const CHECK_IN =
+  "Nobody has messaged you in a while. Look at your memory, routines and recent chats for work in your role that is unfinished, stuck or worth starting, and do what you can now. Then tell the user what you did, or what needs their decision. If there is truly nothing, reply [silent].";
+
 /** What the welcome is waiting on, shown in the primary bot's chat until Pi is ready. */
 const setup = (mem.openbotsSetup ??= {});
 export const piSetup = () => setup.value;
@@ -2391,7 +2395,7 @@ export function tick(busy: (botId: string) => boolean) {
     wakeUp(bot.id, {
       kind: "heartbeat",
       conversationId: homeId(bot.id),
-      text: "Nobody has messaged you in a while. Look at your memory, routines and recent chats. If something is worth telling the user, send it. If not, reply [silent].",
+      text: CHECK_IN,
     });
   }
 }

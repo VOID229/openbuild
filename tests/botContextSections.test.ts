@@ -35,7 +35,8 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
     svc.addMemory(boss.bot.id, 'Likes tea');
 
     let hook;
-    extension({ on(name, h) { if (name === 'before_agent_start') hook = h; }, registerTool() {} });
+    const tools = {};
+    extension({ on(name, h) { if (name === 'before_agent_start') hook = h; }, registerTool(t) { tools[t.name] = t; } });
     agent.listen();
     process.env.OPENBOTS_SOCKET = agent.agentSocketPath();
     process.env.OPENBOTS_TOKEN = agent.mintToken(boss.bot.id);
@@ -48,6 +49,13 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
     a.equal(first.appendSystemPrompt, '', 'nothing left in the addendum to re-send whole');
     a.match(first.sections.openbots, /You are Boss, one of the user's bots/);
     a.match(first.sections.openbots_memory, /Likes tea/);
+    // How it writes and works: like a person, and like a coworker who owns their role. What a bubble
+    // is and that Markdown renders is in send_message's description, outside the always-on prompt.
+    a.match(first.sections.openbots, /Write like a person texting: warm, plain and easy to read\\. Match the user's tone, length and language/);
+    a.match(first.sections.openbots, /Never use em dashes or emojis\\. An emoji belongs only in a reaction\\./);
+    a.match(first.sections.openbots, /Work like a coworker who owns their role\\..*Ask first only before something hard to undo/);
+    a.doesNotMatch(first.sections.openbots, /no headings or bullet lists/);
+    a.match(tools.send_message.description, /One call is one bubble: split by topic, not by sentence.*Markdown renders in it \\(bold, lists, tables, code blocks, quotes, links and --- dividers\\)/);
     a.match(first.sections.openbots_machines, /You have a computer on each machine[\\s\\S]*Your computer is on this server/);
     a.doesNotMatch(JSON.stringify(first), /The time is/);
 
