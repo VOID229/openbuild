@@ -8,7 +8,7 @@ import { escapeLeavesPage, leavePage, openSettingsSection, settingsUp } from "..
 import { UPDATABLE_RUNTIMES, runtimeEnabled, runtimeName } from "../lib/runtimes";
 import { cachedRuntimeStatuses, loadRuntimeStatuses } from "../lib/runtimeStatus";
 import { loadPlanModels, planDetection, useStore, type SettingsSection } from "../lib/store";
-import type { FontStyle, NamingModel, Theme } from "../lib/types";
+import type { BotGroupDrop, FontStyle, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, useMediaQuery } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DevicesSection } from "./DeviceSettings";
@@ -180,6 +180,12 @@ function NotificationsSection() {
 
 // ------------------------------------------------------------------ General
 
+const GROUP_DROPS: { value: BotGroupDrop; label: string }[] = [
+  { value: "ask", label: "Ask each time" },
+  { value: "add", label: "Add it to the group" },
+  { value: "swap", label: "Swap places" },
+];
+
 function GeneralSection() {
   const s = useStore((st) => st.settings);
   const page = useStore((st) => st.settingsPage);
@@ -211,7 +217,7 @@ function GeneralSection() {
       <SettingRow label="Share the stash with OpenBots">
         <Toggle checked={s.crossStash ?? false} onChange={(crossStash) => update({ crossStash })} label="Cross-stashing" />
       </SettingRow>
-      <SettingRow label="Follow new output">
+      <SettingRow label="Autoscroll">
         <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Auto scroll" />
       </SettingRow>
       <SettingRow label="Confirm before deleting threads">
@@ -219,6 +225,13 @@ function GeneralSection() {
       </SettingRow>
 
       <RemoteControlSettings />
+
+      {/* How the OpenBots sidebar's drag and drop behaves (BotsSidebar.tsx). */}
+      <SettingsGroup title="Sidebar" className="sgroup-rows">
+        <SettingRow label="Dropping a bot on a group" desc="Add the bot to the group, or swap the two's places in the OpenBots sidebar.">
+          <OptionSelect label="Dropping a bot on a group" value={s.botGroupDrop ?? "ask"} options={GROUP_DROPS} onChange={(botGroupDrop) => update({ botGroupDrop })} />
+        </SettingRow>
+      </SettingsGroup>
 
       <SettingsGroup title="Text generation" className="sgroup-rows">
         <SettingRow label="Name threads automatically" desc="After their first prompt.">

@@ -158,8 +158,6 @@ interface BotsState {
   togglePin: (id: string) => void;
   /** A drag (or a keyboard move) in the sidebar: chats that changed list, and the new order. */
   arrange: (arrangement: Arrangement) => void;
-  /** Back to the usual order: pins as they were pinned, rows by their latest message. */
-  resetOrder: () => void;
   addSection: (name: string) => void;
   toggleFolded: (name: string) => void;
 
@@ -420,10 +418,6 @@ export const useBots = create<BotsState>()(
       // One write: sent as separate ones, a swap's first half would empty a section the second half fills, and the server would drop it in between.
       const body: ArrangeRequest = { patches: patches.map(([id, patch]) => [id, wirePatch(patch)]), order: next };
       void send("POST", "/api/bots/arrange", body);
-    },
-    resetOrder: () => {
-      set({ order: NO_ORDER });
-      void send("PATCH", "/api/bots/settings", { order: [] });
     },
     addSection: (name) => {
       if (get().sections.includes(name)) return;
