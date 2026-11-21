@@ -101,8 +101,6 @@ window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (path === "/api/projects") return Response.json({ projects: [] });
   if (path === "/api/plugins") return Response.json({ plugins: [] });
   if (path === "/api/chats") return Response.json({ chats: w.serverChats });
-  // Settings → Bots, with no models set up.
-  if (path.endsWith("/api/bots/models") || path === "/api/pi/models") return Response.json({ models: [], checkedAt: Date.now() });
   // Usage, with nothing used yet.
   if (path === "/api/usage/limits") return Response.json({ providers: [], checkedAt: Date.now() });
   if (path === "/api/usage") {
