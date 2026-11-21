@@ -728,39 +728,11 @@
   background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-.bots-glyph-eyes rect {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 120ms var(--ease);
-}
-
-@media (hover: hover) {
-  :hover > .bots-glyph .bots-glyph-eyes rect {
-    animation: bots-glyph-blink 1.6s var(--ease) infinite;
-  }
-}
-
-@keyframes bots-glyph-blink {
-  0%,
-  8%,
-  100% {
-    transform: none;
-  }
-  4% {
-    transform: scaleY(0.1);
-  }
-  40%,
-  70% {
-    transform: translateX(1.2px);
-  }
-}
-
 /* Reduced motion: no life of their own, and a dozing bot simply holds the pose. */
 @media (prefers-reduced-motion: reduce) {
   .bot-alive,
   .bot .bot-act,
-  .bot-zzz > span,
-  .bots-glyph-eyes rect {
+  .bot-zzz > span {
     animation: none !important;
   }
   .bot .bot-dots i {
