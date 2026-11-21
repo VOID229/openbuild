@@ -3738,7 +3738,8 @@
   max-width: var(--bots-composer-w);
   min-height: 24px;
   margin: 4px auto 0;
-  padding: 0 14px;
+  /* The model's mark sits right under the box's paperclip. */
+  padding: 0 10px;
   font-size: 12px;
   line-height: 16px;
   color: var(--text-3);
