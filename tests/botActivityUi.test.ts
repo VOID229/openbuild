@@ -226,6 +226,17 @@ test("a change of settings links its bot by id, so a rename shows up, and keeps 
   expect(document.body.textContent).not.toContain("Scout");
 });
 
+test("a side chat's line says who asked whom what on one line, with Read along; a line saved before reads the same way", async () => {
+  await show([
+    event("e1", "scout", { kind: "message", text: "Scout asked Juniper", detail: "which views should change first?", conversationId: "side" }),
+    event("e2", "scout", { kind: "message", text: "Scout is talking it over with Juniper", detail: "How do we split the release? Answer in a line. And then say which of the two plans you would rather ship this wee", conversationId: "side" }),
+  ]);
+  expect(lead("e1").textContent).toBe("Scout asked Juniper which views should change first? · Read along");
+  expect(lead("e2").textContent).toBe("Scout asked Juniper how do we split the release? · Read along");
+  // What was asked is in the sentence, not on a second line under it.
+  for (const id of ["e1", "e2"]) expect(line(id).querySelector(".bm-event-detail")).toBeNull();
+});
+
 test("failed replies show provider diagnostics on old and new lines", async () => {
   await show([
     // Saved before: every fallback's error, a provider's JSON, an HTTP status.

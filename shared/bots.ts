@@ -1090,6 +1090,33 @@ export function firstSentence(text: string): string {
   return line;
 }
 
+/** Words a question starts with, lowercased after "asked Tracer": "asked Tracer how we split it?". A name keeps its capital. */
+const ASK_STARTS = new Set(["how", "what", "why", "when", "where", "which", "who", "whether", "can", "could", "should", "would", "will", "is", "are", "do", "does", "did", "please", "help", "review", "check", "look", "find", "pick", "decide", "agree", "work", "figure", "tell", "give", "suggest", "plan"]);
+
+/**
+ * A side chat's topic as the line in the chat it came from shows it ("Dr asked Tracer how we split the
+ * release?"): its first sentence that asks something, else its first, at most 80 characters.
+ */
+export function sideChatAsk(topic: string): string {
+  let rest = topic.replace(/\s+/g, " ").trim();
+  let pick = "";
+  for (let i = 0; rest && i < 12; i++) {
+    const sentence = firstSentence(rest);
+    if (!pick) pick = sentence;
+    if (sentence.endsWith("?")) {
+      pick = sentence;
+      break;
+    }
+    rest = rest.slice(sentence.length).trim();
+  }
+  const word = /^\p{L}+/u.exec(pick)?.[0] ?? "";
+  const lowered = ASK_STARTS.has(word.toLowerCase()) ? word.toLowerCase() + pick.slice(word.length) : pick;
+  return fitWords(lowered.replace(/[.!]+$/, ""), 80);
+}
+
+/** A side chat's opening line, "Dr asked Tracer and Manager". Lines saved before said "is talking it over with". */
+export const sideChatAsked = (text: string) => text.replace(/ is talking it over with /, " asked ");
+
 /** What a bot is for, in a line: its role when it has one, else its instructions' first sentence, cut to ROLE_MAX. Empty with neither. */
 export function roleLine(bot: { role?: string; instructions: string }): string {
   const role = cleanRole(bot.role);

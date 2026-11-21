@@ -151,7 +151,7 @@ test("a side chat between several bots: read-only to the user, capped, closed on
     a.deepEqual(side.huddle.request, [ask.id]);
     // The group hears where they went, as an activity line that wakes nobody, and the opener's question asks them both.
     const line = db.messages(group.id, 5).at(-1).message;
-    a.deepEqual(line.event, { kind: 'message', text: 'Dr Eggbot is talking it over with Tracer and Manager', detail: 'How do we split the release? Answer in a line.', conversationId: side.id });
+    a.deepEqual(line.event, { kind: 'message', text: 'Dr Eggbot asked Tracer and Manager', detail: 'how do we split the release?', conversationId: side.id });
     a.deepEqual(wakes.map(w => [w.id, w.conversationId]), [[tracer, side.id], [manager, side.id]]);
 
     // Nobody in it opens another; the user only reads.

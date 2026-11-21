@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, mentionQuery, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING } from "../../../shared/bots";
+import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, mentionQuery, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING, sideChatAsk, sideChatAsked } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -2049,7 +2049,8 @@ const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, ind
   const authored = author && !namesBot(eventText(event), bots) ? authoredEventText(event) : undefined;
   // A message between bots names the other bot by id, so a rename shows up on old lines too.
   const messaged = event.kind === "message" && event.conversationId ? eventBot : undefined;
-  // A side chat several bots went off to ("Dr is talking it over with Tracer and Manager") links to it.
+  // A side chat several bots went off to ("Dr asked Tracer and Manager how we split the release?") links to it,
+  // on one line: what was asked goes right after who, not under it.
   const huddled = event.kind === "message" && event.conversationId && !event.bot ? event.conversationId : undefined;
   // A change of model names the bot and the model it moved to, with its account only when the bot has two of that model.
   const switcher = event.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
@@ -2072,7 +2073,7 @@ const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, ind
       onClick={(e) => (folds ? setOpen(!open) : e.currentTarget.classList.toggle("bm-event-open"))}
     >
       <span className="bm-event-text">
-        {set ? <>At {clock(m.at)}, <BotLink bot={author!} /> <RoutinesLink bot={author!}>{set.followUp ? "set a follow-up" : "set routine"}</RoutinesLink> “<WithBotLinks text={set.title} bots={bots} />” for {lowerFirst(set.schedule)}</> : authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
+        {set ? <>At {clock(m.at)}, <BotLink bot={author!} /> <RoutinesLink bot={author!}>{set.followUp ? "set a follow-up" : "set routine"}</RoutinesLink> “<WithBotLinks text={set.title} bots={bots} />” for {lowerFirst(set.schedule)}</> : authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={sideChatAsked(eventText(event))} bots={bots} />{detail && <> <WithBotLinks text={sideChatAsk(detail)} bots={bots} /></>} · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
       </span>
       {/* The chevron is what a keyboard opens it with; a click anywhere on the line bubbles to the same toggle. */}
       {folds && (
@@ -2080,7 +2081,7 @@ const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, ind
           <ChevronRight size={13} strokeWidth={2} aria-hidden />
         </button>
       )}
-      {event.kind !== "model" && !set && detail && (
+      {event.kind !== "model" && !set && !huddled && detail && (
         <span className="bm-event-detail">
           {event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
         </span>

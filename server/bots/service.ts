@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { ArrangeRequest, Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, sideChatAsk, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1929,7 +1929,7 @@ export function openHuddle(by: string, from: string, botIds: string[], topic: st
   const name = (id: string) => mentionName(db.getBot(id)?.name ?? "a bot");
   const list = others.map(name);
   const who = list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0];
-  postMessage(from, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "message", text: `${name(by)} is talking it over with ${who}`, detail: clip(text, 120), conversationId: side.id } });
+  postMessage(from, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "message", text: `${name(by)} asked ${who}`, detail: sideChatAsk(text), conversationId: side.id } });
   postMessage(side.id, { id: crypto.randomUUID(), author: by, at: Date.now(), text });
   return db.getConversation(side.id)!;
 }

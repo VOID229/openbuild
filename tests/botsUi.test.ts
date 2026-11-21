@@ -232,7 +232,7 @@ test("a folded run of activity says what was done, with a count, most done first
   expect(runLabel([{ kind: "joined", text: "Added", detail: "Scout" }, { kind: "joined", text: "Added", detail: "Juniper" }, { kind: "left", text: "Removed", detail: "Tally" }])).toBe("Added 2 bots, removed 1");
   expect(runLabel([{ kind: "message", text: "Sent a message to Scout" }, { kind: "message", text: "Sent a message to Juniper" }])).toBe("Sent 2 messages");
   // Lines with no wording of their own count only among the rest, or as the generic label when that's all there is.
-  const huddle = { kind: "message", text: "Scout is talking it over with Juniper" };
+  const huddle = { kind: "message", text: "Scout asked Juniper" };
   expect(runLabel([closed, closed, huddle])).toBe("Closed 2 threads, 1 more");
   expect(runLabel(times(3, huddle))).toBe("3 background actions");
   expect(runLabel([huddle, { kind: "model", text: "Switched to GPT 6" }])).toBe("2 background actions");
@@ -316,4 +316,14 @@ test("a model switch names the bot and its model, and the account only to tell t
   expect(accountName("openai-codex-2")).toBe("Codex 2");
   expect(accountName("openai-codex")).toBe("Codex");
   expect(accountName("glm-local")).toBe("Glm Local");
+});
+
+test("a side chat's line says who was asked what, in a short sentence", async () => {
+  const { sideChatAsk, sideChatAsked } = await import("../shared/bots");
+  expect(sideChatAsk("How do we split the release? Answer in a line.")).toBe("how do we split the release?");
+  expect(sideChatAsk("Gal wants a CSS redesign and a PR against the main repo. Which tokens should change first? Be brief.")).toBe("which tokens should change first?");
+  expect(sideChatAsk("Review the plan for the new sidebar.\nKeep it short.")).toBe("review the plan for the new sidebar");
+  expect(sideChatAsk("Gal wants me to redesign the app's CSS and file a PR, no merge, against the main repo, with screenshots of every view that changed")).toBe("Gal wants me to redesign the app's CSS and file a PR, no merge, against the…");
+  // Lines saved before read the same way.
+  expect(sideChatAsked("Dr Eggbot is talking it over with Tracer and Manager")).toBe("Dr Eggbot asked Tracer and Manager");
 });
