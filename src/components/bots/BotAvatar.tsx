@@ -539,6 +539,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-looking={held ? "" : undefined}
       data-busy={busy || undefined}
       data-away={away || undefined}
+      data-plain={plain || undefined}
       data-reading={reads ? "" : undefined}
       data-asleep={sleeping ? "" : undefined}
       data-eyes={form}
