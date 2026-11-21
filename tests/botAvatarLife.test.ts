@@ -42,17 +42,27 @@ const STANCE = `((b) => {
 
 /**
  * Waits until the bots under `scope` have come to rest: nothing passing on any of them (a blink, a
- * move, a face pulled) and every layer where it was 400 ms ago, which is longer than the gap in a
- * double blink and than a spring takes to stop once it's nearly there.
+ * move, a face pulled) and every layer where it was on each of the last 20 frames. Frames, not
+ * milliseconds: a slow machine can go 400 ms without drawing a single frame, which would pass as
+ * "nothing changed" with the springs still on their way.
  */
-const settled = (page: Page, scope: string) =>
-  page.until(`(() => {
-    const bots = [...document.querySelectorAll(${JSON.stringify(`${scope} .bot`)})];
-    const now = JSON.stringify(bots.map((b) => [b.dataset.blink, b.dataset.action, b.dataset.mood, ...[...b.querySelectorAll('.bot-whole, .bot-body, .bot-eye')].map((el) => el.style.transform)]));
-    const state = (window.settling ??= {});
-    if (state.seen !== now) Object.assign(state, { seen: now, since: performance.now() });
-    return performance.now() - state.since >= 400 && bots.every((b) => !('blink' in b.dataset) && !b.dataset.action && b.dataset.mood === 'idle');
-  })()`, 8000);
+const REST_FRAMES = 20;
+const settled = async (page: Page, scope: string) => {
+  await page.eval(`(() => {
+    const state = (window.settling = { seen: undefined, frames: 0, done: false });
+    const tick = () => {
+      const bots = [...document.querySelectorAll(${JSON.stringify(`${scope} .bot`)})];
+      const now = JSON.stringify(bots.map((b) => [b.dataset.blink, b.dataset.action, b.dataset.mood, ...[...b.querySelectorAll('.bot-whole, .bot-body, .bot-eye')].map((el) => el.style.transform)]));
+      const idle = bots.every((b) => !('blink' in b.dataset) && !b.dataset.action && b.dataset.mood === 'idle');
+      state.frames = idle && state.seen === now ? state.frames + 1 : 0;
+      state.seen = now;
+      if (state.frames >= ${REST_FRAMES}) state.done = true;
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  })()`);
+  await page.until("window.settling.done", 8000);
+};
 
 describe.skipIf(!browser)("a bot on its own", () => {
   test("its eyes are solid and big, with nothing in them, and a pleased eye is a thick solid arch: never a stroke", async () => {
