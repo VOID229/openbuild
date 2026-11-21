@@ -1,5 +1,5 @@
-// A group's Threads tab in the details panel, in a real Chrome with the whole app on a fake server
-// (fixtures/groupThreads): it lists the coding threads the group's bots started from it while they
+// A group's Minions tab in the details panel, in a real Chrome with the whole app on a fake server
+// (fixtures/groupThreads): it lists its bots' minions, then the coding threads the group's bots started from it while they
 // work, follows the thread list as threads start and finish, opens one inside the panel itself (not over
 // OpenBots), and Back returns to the list; one a chat's link opened with the panel closed has an X that
 // closes it again, leaving the panel as it was. Set OPENBUILD_SCREENSHOTS to a folder to keep
@@ -32,12 +32,12 @@ async function shoot(page: Page, name: string) {
   await Bun.write(join(shots, `${name}.png`), Buffer.from(data, "base64"));
 }
 
-const TAB = `[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith('Threads'))`;
+const TAB = `[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith('Minions'))`;
 
 /** Whether the details' tab whose label starts with `name` is the open one ("true"), or not ("false"). */
 const selected = (page: Page, name: string) => page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith(${JSON.stringify(name)}))?.getAttribute('aria-selected')`);
 
-/** The group chat open in OpenBots with its details showing the Threads tab. */
+/** The group chat open in OpenBots with its details showing the Minions tab, where its threads are listed. */
 async function open(width = 1280, height = 860, theme = "dark") {
   // Opened at /bots: the app's routing applies the URL once threads load, and at / that could close
   // OpenBots again after it was opened here.
@@ -86,12 +86,15 @@ async function clickRow(page: Page, title: string) {
 }
 
 
-describe.skipIf(!browser)("a group's Threads tab", () => {
+describe.skipIf(!browser)("a group's Minions tab, and the threads under it", () => {
   test("lists the working threads the group's bots started from it, with each bot's mascot and the project", async () => {
     const page = await open();
     await page.until(`document.querySelectorAll('.bots-details .bots-cards .bots-member').length === 2`);
     const tabs = await page.eval<string[]>(`[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`);
-    expect(tabs).toEqual(["Members 2", "Goal", "Routines", "Threads"]);
+    expect(tabs).toEqual(["Members 2", "Goal", "Routines", "Minions"]);
+    // The threads its bots still have going are under their own label, below the minions (none here).
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-pane-label')].map((l) => l.textContent)`)).toEqual(["Threads"]);
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-hint')].map((h) => h.textContent)`)).toEqual(["No minions yet. Minions the bots here spawn for their tasks show up here."]);
     const listed = await rows(page);
     expect(listed.map((r) => [r.title, r.sub])).toEqual([
       ["Fix the flaky sidebar test", "manager · openbuild"],
@@ -120,8 +123,10 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     // And the rest.
     await serve(page, `serverChats.map((c) => thread(c.id, c.title, c.startedBy.bot, c.startedBy.conversation, c.workspace.projectName, true))`);
     await page.until(`!document.querySelector('.bots-details .bots-cards')`);
-    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads running. Threads the bots here start show up until they finish.");
-    expect(await page.eval<unknown>(`${TAB}.textContent`)).toBe("Threads");
+    // With no thread left, only the Minions' own line is there: these bots have none, and no Threads label is left over.
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-hint')].map((h) => h.textContent)`)).toEqual(["No minions yet. Minions the bots here spawn for their tasks show up here."]);
+    expect(await page.eval<unknown>(`document.querySelectorAll('.bots-details .bots-pane-label').length`)).toBe(0);
+    expect(await page.eval<unknown>(`${TAB}.textContent`)).toBe("Minions");
     await shoot(page, "threads-empty");
   }, 60_000);
 
@@ -409,7 +414,7 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.click("[data-test-link]");
   }
 
-  test("in a group: running, it opens under Threads in the details beside the chat; finished, over OpenBots", async () => {
+  test("in a group: running, it opens under Minions in the details beside the chat; finished, over OpenBots", async () => {
     const page = await chat("dev");
     await follow(page, "Fix the flaky sidebar test");
     await page.until(`!!document.querySelector('.bots-details-open .bots-details-threadpane .chat')`);
@@ -472,7 +477,7 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await page.eval<unknown>(`!!${closeX}`)).toBe(false);
     await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
     await page.until("!document.querySelector('.bots-details-threadpane')");
-    expect(await tabSelected("Threads")).toBe("true");
+    expect(await tabSelected("Minions")).toBe("true");
     expect(await page.eval<unknown>("bots.getState().detailsOpen")).toBe(true);
 
     // Escape does what the X does, for a thread opened with the panel closed.
@@ -486,10 +491,10 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.eval(`bots.getState().setDetailsOpen(true)`);
     await page.until("!!document.querySelector('.bots-details-open')");
     expect(await page.eval<unknown>("!!document.querySelector('.bots-details-threadpane')")).toBe(false);
-    expect(await tabSelected("Threads")).toBe("true");
+    expect(await tabSelected("Minions")).toBe("true");
   }, 60_000);
 
-  test("in a bot's own chat: a Threads tab lists the ones it has running, and the link opens it there", async () => {
+  test("in a bot's own chat: its Minions tab lists the threads it still has running, and the link opens it there", async () => {
     const page = await chat("dm-manager");
     await page.eval(`bots.getState().setDetailsOpen(true)`);
     await page.until("!!document.querySelector('.bots-details-open')");
@@ -510,14 +515,14 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.until("document.activeElement?.classList.contains('bots-details-name-input')");
     await page.eval(`document.activeElement.blur()`);
     await page.until("!!document.querySelector('button.bots-details-name')");
-    // Its tabs in one row, Threads before Advanced.
+    // Its tabs in one row, Minions before Advanced.
     const labels = `[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`;
-    expect(await page.eval<unknown>(labels)).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
+    expect(await page.eval<unknown>(labels)).toEqual(["Instructions", "Routines", "Minions", "Advanced"]);
     // The row shows whole, nothing scrolled out of it, and the page doesn't scroll sideways.
     const tabRow = `document.querySelector('.bots-details .bots-tabs')`;
     expect(await page.eval<unknown>(`${tabRow}.scrollWidth <= ${tabRow}.clientWidth`)).toBe(true);
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
-    expect(await selected(page, "Threads")).toBe("false");
+    expect(await selected(page, "Minions")).toBe("false");
     await page.eval(`${TAB}.click()`);
     await page.until(`${TAB}.getAttribute('aria-selected') === 'true'`);
     expect((await rows(page)).map((r) => r.title)).toEqual(["Rename the config loader"]);
@@ -533,38 +538,48 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
     await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
     await page.until("!document.querySelector('.bots-details-threadpane')");
-    expect(await selected(page, "Threads")).toBe("true");
+    expect(await selected(page, "Minions")).toBe("true");
     expect((await rows(page)).map((r) => r.title)).toEqual(["Rename the config loader"]);
     await shoot(page, "bot-threads-tab-open");
 
-    // Once it finishes, the tab says none are running, and it stays for the next chat too.
+    // Once it finishes, the tab is down to its minions (none yet), and it stays for the next chat too.
     await serve(page, `serverChats.map((c) => c.id === "t-direct" ? { ...thread(c.id, c.title, "manager", "dm-manager", "openbuild", true), pullRequest: c.pullRequest } : c)`);
     await page.until(`!document.querySelector('.bots-details .bots-cards')`);
-    expect(await selected(page, "Threads")).toBe("true");
+    expect(await selected(page, "Minions")).toBe("true");
     const hint = `document.querySelector('.bots-details .bots-hint')?.textContent`;
-    expect(await page.eval<unknown>(hint)).toBe("No threads running. Threads it starts from this chat show up here until they finish.");
+    expect(await page.eval<unknown>(hint)).toBe("No minions yet. When manager hands a task to a minion, it shows up here.");
     await page.eval(`bots.getState().select("dm-tracer")`);
     await page.eval(`bots.getState().select("dm-manager")`);
-    await page.until(`${labels}.join() === "Instructions,Routines,Threads,Advanced"`);
+    await page.until(`${labels}.join() === "Instructions,Routines,Minions,Advanced"`);
     expect(await selected(page, "Instructions")).toBe("true");
   }, 60_000);
 
-  test("in a bot's own chat with no threads: the Threads tab shows anyway, and says where to let it start them", async () => {
+  test("in a bot's own chat with no minions: the Minions tab shows anyway, and says where to let it spawn them", async () => {
     const page = await chat("dm-tracer");
     await page.eval(`bots.getState().setDetailsOpen(true)`);
     await page.until("!!document.querySelector('.bots-details-open .bots-tabs')");
     await page.finish();
     const labels = `[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`;
-    expect(await page.eval<unknown>(labels)).toEqual(["Instructions", "Routines", "Threads", "Advanced"]);
+    expect(await page.eval<unknown>(labels)).toEqual(["Instructions", "Routines", "Minions", "Advanced"]);
     await page.eval(`${TAB}.click()`);
     await page.until(`${TAB}.getAttribute('aria-selected') === 'true'`);
     await page.finish();
-    // tracer can't run coding agents: the hint says so, and its link opens Advanced, where the switch is.
-    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads running. To let it start them, turn on Run coding agents under Advanced.");
+    // tracer can't spawn minions: the hint says so, and its link opens Advanced, where the switch is.
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No minions yet. To let tracer spawn them, turn on Spawn minions under Advanced.");
+    // Its threads are all finished, so there's no Threads list under the minions.
+    expect(await page.eval<unknown>(`document.querySelectorAll('.bots-details .bots-pane-label').length`)).toBe(0);
     await shoot(page, "bot-threads-empty");
     await page.click(".bots-details .bots-hint button");
     await page.until(`[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent === 'Advanced').getAttribute('aria-selected') === 'true'`);
-    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details [aria-label="Run coding agents"]')`)).toBe(true);
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details [aria-label="Spawn minions"]')?.getAttribute('aria-checked')`)).toBe("false");
+    // Nothing of the access to the user's threads is left there.
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-details [aria-label="Run coding agents"]')`)).toBe(false);
+    // Turned on, the tab says a minion will show up.
+    await page.click('.bots-details [aria-label="Spawn minions"]');
+    await page.until(`document.querySelector('.bots-details [aria-label="Spawn minions"]')?.getAttribute('aria-checked') === 'true'`);
+    await page.eval(`${TAB}.click()`);
+    await page.until(`${TAB}.getAttribute('aria-selected') === 'true'`);
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No minions yet. When tracer hands a task to a minion, it shows up here.");
   }, 60_000);
 
   test("on a phone, a running thread opens on the details screen", async () => {
@@ -624,5 +639,101 @@ describe.skipIf(!browser)("a thread's pull request badge in the sidebar", () => 
     expect(await page.eval<unknown>("store.getState().activeChatId")).toBe("t-flaky");
     expect(await page.eval<unknown>("panel.getState().view")).not.toBe("pulls");
     expect(await page.eval<unknown>(`document.querySelector(${JSON.stringify(BADGE)}).title`)).toMatch(/^Pull request #42 open, checks running · (⌘|Ctrl)-click to open on GitHub$/);
+  }, 60_000);
+});
+
+describe.skipIf(!browser)("a bot's minions", () => {
+  /** OpenBots on `conversation`, with the sidebar open and the details closed. */
+  async function chat(conversation: string, width = 1280, height = 860) {
+    const page = await Page.open(chrome!.ws, `${server!.url.href}bots?theme=dark`, width, height, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+    await page.eval(`(() => {
+      store.getState().setBotsOpen(true);
+      store.getState().setBotsSidebarOpen(${width > 768});
+      bots.getState().select(${JSON.stringify(conversation)});
+      bots.getState().setDetailsOpen(false);
+    })()`);
+    await page.until("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()");
+    await page.finish();
+    return page;
+  }
+  const minionRows = `[...document.querySelectorAll('.bots-details .bots-member')].map((li) => ({ title: li.querySelector('.bots-routine-title').textContent, sub: li.querySelector('.bots-routine-when').textContent, mascot: !!li.querySelector('svg') }))`;
+  const section = (label: string) => `[...document.querySelectorAll('.bots-sidebar .history-group')].find((g) => g.querySelector('.history-heading')?.textContent.startsWith(${JSON.stringify(label)}))`;
+
+  test("a bot's Minions tab lists its open minions only, and a row opens the minion's chat", async () => {
+    const page = await chat("dm-outsider");
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open .bots-tabs')");
+    await page.eval(`${TAB}.click()`);
+    await page.until(`${TAB}.getAttribute('aria-selected') === 'true'`);
+    await page.finish();
+    // The open one, with its task under its name; the closed one is left out, as in the sidebar.
+    // Under them, the thread obsidian still has going from before, with a label of its own.
+    expect(await page.eval<unknown>(minionRows)).toEqual([
+      { title: "Changelog writer", sub: "Write the 2.4 changelog from the merged pull requests.", mascot: true },
+      { title: "Tidy the vault", sub: "obsidian · notes", mascot: true },
+    ]);
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-pane-label')].map((l) => l.textContent)`)).toEqual(["Threads"]);
+    expect(await page.eval<unknown>(`document.querySelectorAll('.bots-details .bots-hint').length`)).toBe(0);
+    expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    await shoot(page, "bot-minions-tab");
+
+    await page.eval(`(() => { document.querySelector('[data-test-row]')?.removeAttribute('data-test-row'); ${row("Changelog writer")}.setAttribute('data-test-row', ''); })()`);
+    await page.click("[data-test-row]");
+    await page.until(`bots.getState().activeId === "chat-mn-notes"`);
+    await page.finish();
+    // Its chat: the task and the report to read, and nothing at the bottom to write in.
+    expect(await page.eval<unknown>(`document.querySelector('.bots-view .bots-messages').innerText.includes("Done: the list is in ~/notes.")`)).toBe(true);
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-view .bots-dock, .bots-view .bots-composer, .bots-view textarea')`)).toBe(false);
+    // Its details say whose it is; it has no tabs, name to edit or settings of its own.
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-details-name').textContent`)).toBe("Changelog writer · obsidian's");
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-details-sub').textContent`)).toBe("obsidian's minion");
+    expect(await page.eval<unknown>(`document.querySelectorAll('.bots-details .bots-tab').length`)).toBe(0);
+    await shoot(page, "minion-chat");
+  }, 60_000);
+
+  test("the sidebar has a Minions section with the open ones, each tagged with its owner, and the rail a Minions group", async () => {
+    const page = await chat("dev");
+    await page.until(`!!${section("Minions")}`);
+    const rowsOf = (label: string) => page.eval<unknown>(`[...${section(label)}.querySelectorAll('.bots-row')].map((r) => [r.querySelector('.bots-row-title').textContent, r.querySelector('.bots-row-tag')?.textContent ?? null, !!r.querySelector('.bots-row-time'), r.classList.contains('bots-row-minion')])`);
+    // The open one only: the closed minion's chat is in no list, pinned or hidden as it might have been.
+    expect(await rowsOf("Minions")).toEqual([["Changelog writer", "· obsidian's", false, true]]);
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-sidebar .bots-row-title')].map((t) => t.textContent).includes("Log reader")`)).toBe(false);
+    // A minion's chat isn't a chat between bots, and isn't one of the user's own rows.
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-sidebar .history-heading')].some((h) => /^(DMs|Meetings|Between bots)/.test(h.textContent))`)).toBe(false);
+    // Its mascot carries its owner's, small, at the corner.
+    expect(await page.eval<unknown>(`${section("Minions")}.querySelector('.bots-minion-owner')?.getAttribute('aria-label')`)).toBe("obsidian's minion");
+    // The menu has no Delete: its chat goes with the minion.
+    await page.eval(`${section("Minions")}.querySelector('.bots-row').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 80, clientY: 300 }))`);
+    await page.until(`!!document.querySelector('.bots-menu[data-state="open"]')`);
+    const items = await page.eval<string[]>(`[...document.querySelectorAll('.bots-menu > button')].map((b) => b.textContent.trim())`);
+    expect(items).toContain("Copy conversation ID");
+    expect(items.some((i) => /Delete|Retire|Rename|Make primary/.test(i))).toBe(false);
+    await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await shoot(page, "sidebar-minions");
+    // Collapsed to the rail: the minions are a group of their own, after the user's chats.
+    await page.eval(`store.getState().setBotsSidebarOpen(false)`);
+    await page.until(`!!document.querySelector('.bots-sidebar-rail .bots-rail-group[aria-label="Minions"]')`);
+    await page.finish();
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-rail-group[aria-label="Minions"] .bots-rail-item')].map((b) => b.getAttribute('aria-label'))`)).toEqual(["Changelog writer · obsidian's"]);
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-rail-item')].map((b) => b.getAttribute('aria-label')).some((l) => l.startsWith("Log reader"))`)).toBe(false);
+    await shoot(page, "rail-minions");
+  }, 60_000);
+
+  test("a closed minion's chat still opens from a link, and says it's closed", async () => {
+    const page = await chat("chat-mn-log");
+    await page.finish();
+    // The header says so at a glance, and the chat's own line reads as it was written.
+    expect(await page.eval<unknown>(`document.querySelector('.bots-head .bots-head-retired')?.textContent`)).toBe("Closed");
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-view .bm-event-text')].map((e) => e.textContent).includes("Closed Log reader")`)).toBe(true);
+    expect(await page.eval<unknown>(`!!document.querySelector('.bots-view .bots-dock, .bots-view textarea')`)).toBe(false);
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open')");
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-details-sub').textContent`)).toBe("obsidian's minionClosed");
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-details-sub .bots-pill').textContent`)).toBe("Closed");
+    await shoot(page, "minion-closed");
+    // Reopened, it's back in the sidebar and in its owner's tab.
+    await page.eval(`bots.setState((s) => ({ bots: s.bots.map((b) => b.id === "mn-log" ? { ...b, minion: { owner: b.minion.owner, task: b.minion.task, chat: b.minion.chat } } : b) }))`);
+    await page.until(`!document.querySelector('.bots-head .bots-head-retired')`);
+    expect(await page.eval<string[]>(`[...${section("Minions")}.querySelectorAll('.bots-row-title')].map((t) => t.textContent)`)).toEqual(expect.arrayContaining(["Changelog writer", "Log reader"]));
   }, 60_000);
 });

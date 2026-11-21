@@ -38,6 +38,42 @@ const after = (order: string[], patches: [string, Partial<Conversation>][]) => {
 };
 
 describe("sorting", () => {
+  test("minions' chats are a list of their own, by their latest message, and a closed one's is in no list at all", () => {
+    const worker = (id: string, closedAt?: number): Bot => ({ ...bot(`m-${id}`), minion: { owner: "a", task: "t", chat: id, ...(closedAt ? { closedAt } : {}) } });
+    const minion = (id: string, updatedAt: number, more: Partial<Conversation> = {}) => chat(id, { kind: "side", botIds: ["a", `m-${id}`], minion: `m-${id}`, updatedAt, ...more });
+    const list = [
+      ...conversations, minion("first", 5), minion("new", 400), minion("gone", 1, { hidden: true }), minion("pin", 1, { pinnedAt: 30 }),
+      // Closed: listed, hidden and pinned, and the newest of all.
+      minion("shut", 900), minion("shut-hidden", 901, { hidden: true }), minion("shut-pin", 902, { pinnedAt: 40 }),
+    ];
+    const open = ["first", "new", "gone", "pin"].map((id) => worker(id));
+    const shut = ["shut", "shut-hidden", "shut-pin"];
+    const team = [...bots, ...open, ...shut.map((id) => worker(id, 7))];
+    const lists = sidebarLists(list, team, sections, []);
+    expect(ids(lists.minions)).toEqual(["new", "first"]);
+    // Not between bots, and never in the user's own lists; hidden or pinned, it's where those go.
+    expect(ids(lists.side)).toEqual(["side"]);
+    expect(ids(lists.rest)).toEqual(["b", "c", "d"]);
+    expect(ids(lists.hidden)).toEqual(["gone"]);
+    expect(ids(lists.pinned)).toEqual(["a", "crew", "pin"]);
+    expect(ids(lists.retired)).toEqual(["old"]);
+    // Only a pinned one can be dragged about: the Minions list isn't one to move chats in or out of.
+    expect([...movableLists(lists).values()].flat().some((c) => c.minion && !c.pinnedAt)).toBe(false);
+    const every = [...lists.pinned, ...lists.rest, ...lists.shared, ...lists.filed.flatMap(([, l]) => l), ...lists.side, ...lists.minions, ...lists.hidden, ...lists.retired];
+    expect(every.some((c) => c.id.startsWith("shut"))).toBe(false);
+    expect(list.filter((c) => leavesSidebar(c, team)).map((c) => c.id)).toEqual(shut);
+    // Reopened, it's back where it was.
+    const reopened = sidebarLists(list, [...bots, ...open, ...shut.map((id) => worker(id))], sections, []);
+    expect(ids(reopened.minions)).toEqual(["shut", "new", "first"]);
+    expect(ids(reopened.pinned)).toEqual(["a", "crew", "pin", "shut-pin"]);
+    // The rail has the open ones as a group of their own, unless Minions is folded shut in the list.
+    expect(ids(railLists(lists, [], false).minions)).toEqual(["new", "first"]);
+    expect(ids(railLists(lists, ["minions"], false).minions)).toEqual([]);
+    expect(ids(railLists(lists, ["minions"], false).side)).toEqual(["side"]);
+    // A chat whose minion is gone isn't closed: it's still there to read, and to delete.
+    expect(leavesSidebar(minion("orphan", 1), bots)).toBe(false);
+  });
+
   test("without an order, pins go as they were pinned and rows by their latest message", () => {
     const { lists } = layout();
     expect(ids(lists.pinned)).toEqual(["a", "crew"]);
@@ -71,7 +107,7 @@ describe("chats between bots", () => {
       side("shut-hidden", ["b", "c"], { huddle: closed, hidden: true }),
       side("open", ["a", "b", "c"], { huddle: { ...closed, closedAt: undefined } as Conversation["huddle"], updatedAt: 400 }),
     ];
-    expect(list.filter(leavesSidebar).map((c) => c.id)).toEqual(["shut", "shut-pin", "shut-hidden"]);
+    expect(list.filter((c) => leavesSidebar(c, bots)).map((c) => c.id)).toEqual(["shut", "shut-pin", "shut-hidden"]);
     const lists = sidebarLists(list, bots, sections, []);
     expect(ids(lists.side)).toEqual(["open", "side"]);
     expect(ids(lists.pinned)).toEqual(["a", "crew"]);
@@ -79,7 +115,7 @@ describe("chats between bots", () => {
     const every = [...lists.pinned, ...lists.rest, ...lists.shared, ...lists.filed.flatMap(([, l]) => l), ...lists.side, ...lists.hidden, ...lists.retired];
     expect(every.some((c) => c.id.startsWith("shut"))).toBe(false);
     // A group or a bot's own chat never leaves this way.
-    expect(conversations.some(leavesSidebar)).toBe(false);
+    expect(conversations.some((c) => leavesSidebar(c, bots))).toBe(false);
   });
 
   test("their heading says what they are: DMs, Meetings, or both", () => {

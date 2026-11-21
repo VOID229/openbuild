@@ -74,7 +74,8 @@ minions; deleting a bot deletes its minions.
     (`BotThreadAccess.merge`), so a bot that could merge before still can. Off, `gh pr merge` in
     `bash` and `process` is refused for the bot and for its minions (`agent.ts` `mergeSwitch`), as
     `openbuild merge` already was.
-- Settings → Bots → Harnesses is gone: it chose where bots may start threads, and they start none.
+- Settings → Bots → Harnesses stays (which harnesses the bots' `openbuild` tool offers), though with
+  no thread to start it now changes only what `openbuild options` lists.
 
 ## What stayed
 

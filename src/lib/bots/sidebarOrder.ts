@@ -25,6 +25,8 @@ export interface SidebarLists {
   shared: Conversation[];
   filed: (readonly [string, Conversation[]])[];
   side: Conversation[];
+  /** Minions' chats with their owners, by their latest message. A closed minion's chat is in no list at all. */
+  minions: Conversation[];
   hidden: Conversation[];
   retired: Conversation[];
 }
@@ -50,9 +52,12 @@ export const rankOf = (order: readonly string[]) => new Map(order.map((id, i) =>
 
 /**
  * Whether a chat is in no list of the sidebar, nor its search: a DM or meeting between bots that has
- * closed, pinned or hidden as it may be. A "Read along" link in the chat it came from still opens it.
+ * closed, and a closed minion's chat, pinned or hidden as either may be. A "Read along" link in the chat
+ * a DM came from still opens it; a minion's is back when the minion is reopened, and a link opens it too.
  */
-export const leavesSidebar = (c: Conversation): boolean => closedBotChat(c);
+export function leavesSidebar(c: Conversation, bots: Pick<Bot, "id" | "minion">[]): boolean {
+  return closedBotChat(c) || (!!c.minion && !!bots.find((b) => b.id === c.minion)?.minion?.closedAt);
+}
 
 /** Every list in the sidebar, each in its order, without the chats that leave it (leavesSidebar). */
 export function sidebarLists(conversations: Conversation[], bots: Bot[], sections: string[], order: readonly string[]): SidebarLists {
@@ -60,7 +65,7 @@ export function sidebarLists(conversations: Conversation[], bots: Bot[], section
   // A retired bot's chat is under Retired and nowhere else, pinned, filed or hidden as it may be: it's back where it was when it's rehired.
   const away = new Set(bots.filter((b) => b.retiredAt).map((b) => b.id));
   const isRetired = (c: Conversation) => c.kind === "direct" && away.has(c.botIds[0]!);
-  const kept = conversations.filter((c) => !leavesSidebar(c));
+  const kept = conversations.filter((c) => !leavesSidebar(c, bots));
   const current = kept.filter((c) => !isRetired(c));
   const shown = current.filter((c) => !c.hidden);
   const listed = shown.filter((c) => !c.pinnedAt && c.kind !== "side");
@@ -71,7 +76,8 @@ export function sidebarLists(conversations: Conversation[], bots: Bot[], section
     shared: rows(listed.filter((c) => c.friend && (!c.section || !sections.includes(c.section)))),
     rest: rows(listed.filter((c) => !c.friend && (!c.section || !sections.includes(c.section)))),
     filed: sections.map((name) => [name, rows(listed.filter((c) => c.section === name))] as const),
-    side: shown.filter((c) => !c.pinnedAt && c.kind === "side").sort(byRecent),
+    side: shown.filter((c) => !c.pinnedAt && c.kind === "side" && !c.minion).sort(byRecent),
+    minions: shown.filter((c) => !c.pinnedAt && c.minion).sort(byRecent),
     hidden: current.filter((c) => c.hidden).sort(byRecent),
     retired: kept.filter(isRetired).sort(byRecent),
   };
@@ -87,12 +93,13 @@ export function botChatsLabel(side: Conversation[]): string {
 export interface RailLists {
   pinned: Conversation[];
   rest: Conversation[];
+  minions: Conversation[];
   side: Conversation[];
 }
 
 /**
  * The lists as the rail shows them, with nothing from a section folded shut in the full list (`folded`,
- * by name: the user's own, "friends", "side"). The pinned tiles and the unfiled rows have no fold. The
+ * by name: the user's own, "friends", "minions", "side"). The pinned tiles and the unfiled rows have no fold. The
  * rows and the open sections' chats run together by their latest message; once some were put in place
  * by hand (`ordered`), as the list has them. Hidden and retired chats were never on the rail.
  */
@@ -103,6 +110,7 @@ export function railLists(lists: SidebarLists, folded: readonly string[], ordere
   return {
     pinned: lists.pinned,
     rest: ordered ? [...lists.rest, ...filed, ...shared] : [...lists.rest, ...shared, ...filed].sort(byRecent),
+    minions: open("minions") ? lists.minions : [],
     side: open("side") ? lists.side : [],
   };
 }

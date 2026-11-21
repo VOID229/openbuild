@@ -13,7 +13,7 @@ import { fallbackMode, validTarget, type ComputerTarget, type FallbackMode } fro
 import { cx } from "../../lib/ui";
 import { ModelMenu, OptionSelect } from "../ModelSelect";
 import { BrandIcon, IconButton, Popover } from "../primitives";
-import { BotThreads } from "./BotThreads";
+import { BotSwitches } from "./BotSwitches";
 
 /**
  * A model to run bots on, with an option on top for leaving it unset and following what's `inherited` (Pi's own default without one).
@@ -345,7 +345,7 @@ export function BotWorksIn({ bot }: { bot: Bot }) {
 
 /**
  * The details panel's Advanced tab: the same settings as Settings → Bots, in three groups (its model,
- * the machines it reaches, what it may do in OpenBuild). The model's settings stack, each label over a
+ * the machines it reaches, what it may do on its own). The model's settings stack, each label over a
  * full-width control; the others are one line each. The descriptions sit in tooltips on the labels.
  */
 export function BotAdvanced({ bot }: { bot: Bot }) {
@@ -388,8 +388,8 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
       <Group title="Machines" hint={MACHINES_DESC} card={false}>
         <BotMachines compact />
       </Group>
-      <Group title="Coding agents">
-        <BotThreads bot={bot} compact />
+      <Group title="Permissions">
+        <BotSwitches bot={bot} compact />
       </Group>
     </div>
   );

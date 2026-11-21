@@ -775,6 +775,23 @@
   flex: none;
 }
 
+/* A minion's chat: the minion, with the bot that owns it small at its corner, ringed in the sidebar's
+   colour like the primary star. */
+.bots-minion-owner {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  place-items: center;
+  width: var(--badge, 16px);
+  height: var(--badge, 16px);
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  background: var(--bg);
+  overflow: hidden;
+  pointer-events: none;
+}
+
 .bots-primary-badge {
   position: absolute;
   right: -3px;
@@ -1013,6 +1030,19 @@
   flex: none;
   color: var(--text-3);
   font-weight: 400;
+}
+
+/* A minion's owner gives way before its name does. */
+.bots-row-minion .bots-row-title {
+  flex: none;
+  max-width: 100%;
+}
+
+.bots-row-minion .bots-row-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Dragging chats in the sidebar (SidebarDrag.tsx). What's picked up fades where it was; a line shows
@@ -7257,4 +7287,18 @@ a.bots-btn.bots-btn-primary {
   .bots-todos-bar > span {
     transition: none;
   }
+}
+
+/* A minion's task, under its name in a Minions tab: two lines at most. Its chat has the whole of it. */
+.bots-minion-task {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+}
+
+/* A bot's threads, under its minions: ones it has from before that are still going. */
+.bots-threads-label {
+  margin: 16px 2px 8px;
 }

@@ -1,7 +1,8 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions, its tasks above its
-// routines, the threads it has going from its chat, and its model, computer and OpenBuild permissions
-// under Advanced; a group's members, goal (with its tasks) and routines; the working threads either started from its chat; who's in a
-// side chat.
+// routines, its minions (with any threads it still has going from its chat below them), and its
+// model, computer and its Spawn minions and Merge PRs switches under Advanced; a group's members, goal
+// (with its tasks), routines and its bots' minions, with the working threads started from its chat;
+// who's in a side chat, and whose minion a minion's chat is.
 import { Archive, ArchiveRestore, ChevronLeft, Maximize2, Minus, Pencil, Plus, Timer, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { runningThreads, threadActivity, threadBrands } from "../../lib/bots/activity";
@@ -10,7 +11,7 @@ import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THR
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Routine } from "../../lib/bots/types";
 import { countdown, formatRun } from "../../../shared/botSchedule";
-import { botChatKind, botNameError, cleanRole, ROLE_MAX } from "../../../shared/bots";
+import { botChatKind, botNameError, cleanRole, liveMinion, mayCreateMinions, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
@@ -296,8 +297,8 @@ function RoutineRow({ bot, routine: r, owner }: { bot: Bot; routine: Routine; ow
 export function Members({ conversation, bots }: { conversation: Conversation; bots: Bot[] }) {
   const st = useBots.getState();
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
-  // A retired bot can't be added: it comes back to the groups it left when it's rehired.
-  const others = bots.filter((b) => !conversation.botIds.includes(b.id) && !b.retiredAt);
+  // A retired bot can't be added: it comes back to the groups it left when it's rehired. Nor a minion: it talks only to its owner.
+  const others = bots.filter((b) => !conversation.botIds.includes(b.id) && !b.retiredAt && !b.minion);
   const away = conversation.kind === "group" ? bots.filter((b) => b.retiredAt && b.retiredFrom?.includes(conversation.id)) : [];
   const shared = conversation.friend;
   // A shared chat that stopped syncing is there to read; its members don't change anymore.
@@ -425,11 +426,73 @@ function ThreadBrands({ chat }: { chat: Chat }) {
   );
 }
 
-/** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
-function Threads({ threads, bots, open, empty }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void; empty: React.ReactNode }) {
-  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">{empty}</p></div>;
+/**
+ * Minions: the temporary workers bots spawn for their tasks, in place of the threads they used to
+ * start. A row opens the minion's chat with its owner, where the user reads what it does. Open ones
+ * only, newest first: a closed one is left out here as in the sidebar (minionsOf). `owners`: a group's
+ * tab, whose rows say whose minion each is.
+ */
+function Minions({ minions, bots, owners, empty }: { minions: Bot[]; bots: Bot[]; owners?: boolean; empty: React.ReactNode }) {
+  const conversations = useBots((s) => s.conversations);
+  const open = (minion: Bot) => {
+    const chat = conversations.find((c) => c.minion === minion.id);
+    if (!chat) return;
+    useBots.getState().select(chat.id);
+    // The details cover the chat on a phone, and the chat is what was asked for.
+    if (isPhone()) closeBotsLayer("details");
+  };
+  const sorted = [...minions].sort((a, b) => b.createdAt - a.createdAt);
   return (
     <div className="bots-pane">
+      {sorted.length ? (
+        <ul className="bots-cards">
+          {sorted.map((m) => {
+            const owner = owners ? bots.find((b) => b.id === m.minion?.owner)?.name.split(" · ")[0] : undefined;
+            return (
+              <li key={m.id} className="bots-card-row bots-member">
+                <button type="button" className="bots-member-main" aria-label={`Open ${m.name.split(" · ")[0]}'s chat`} onClick={() => open(m)}>
+                  <BotAvatar look={m.look} size={28} alive={false} />
+                  <span className="bots-card-text">
+                    <span className="bots-routine-title">{m.name.split(" · ")[0]}</span>
+                    <span className="bots-routine-when bots-minion-task">{[owner && `${owner}'s`, m.minion?.task].filter(Boolean).join(" · ")}</span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="bots-hint">{empty}</p>
+      )}
+    </div>
+  );
+}
+
+/** The open minions whose owners are among `owners`; a closed one is left out, as in the sidebar. */
+const minionsOf = (bots: Bot[], owners: readonly string[]) => bots.filter((b) => liveMinion(b) && owners.includes(b.minion!.owner));
+
+/** Whose minion a minion's chat is, and that it's closed when it is. */
+function MinionSub({ conversation, bots }: { conversation: Conversation; bots: Bot[] }) {
+  const minion = bots.find((b) => b.id === conversation.minion)?.minion;
+  const owner = bots.find((b) => b.id === minion?.owner);
+  return (
+    <>
+      {`${owner?.name.split(" · ")[0] ?? "A deleted bot"}'s minion`}
+      {minion?.closedAt && <span className="bots-pill bots-retired-pill">Closed</span>}
+    </>
+  );
+}
+
+/**
+ * A bot's or a group's threads, under its minions: the ones still going from its chat. Bots start none
+ * now, so this lists only what's left from before. A row opens its thread inside this panel
+ * (ThreadPane), with Back returning to this list.
+ */
+function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
+  if (!threads.length) return null;
+  return (
+    <div className="bots-pane">
+      <div className="bots-pane-label bots-threads-label">Threads</div>
       <ul className="bots-cards">
         {threads.map(({ chat, bot: id }) => {
           const bot = bots.find((b) => b.id === id);
@@ -543,7 +606,7 @@ function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: bo
   );
 }
 
-type DetailsTab = "instructions" | "routines" | "advanced" | "members" | "goal" | "threads";
+type DetailsTab = "instructions" | "routines" | "advanced" | "members" | "goal" | "minions";
 
 function LookEditor({ bot, onDone }: { bot: Bot; onDone: () => void }) {
   const before = useRef<BotLook>(bot.look);
@@ -614,21 +677,22 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   }
   // Asked for a tab: the header's task progress opens a bot's Routines, its list above them, or the
   // group's Goal, where its list is; a routine line in the chat opens the Routines, the bot's or the
-  // group's (EventLine); a link in the chat to a thread still running opens that thread, under Threads.
+  // group's (EventLine); a link in the chat to a thread still running opens that thread, under Minions,
+  // where the threads a bot still has are listed below them.
   const asked = useBots((s) => s.detailsTab);
   const [askedKey, setAskedKey] = useState(asked?.key);
   if (asked && asked.key !== askedKey) {
     setAskedKey(asked.key);
     setBefore(asked.tab === "threads" && asked.closes ? { tab, thread: threadId } : undefined);
     if (asked.tab === "threads") {
-      setTab("threads");
+      setTab("minions");
       setThreadId(asked.thread);
     } else if (asked.tab === "goal" ? conversation.kind === "group" : conversation.kind !== "side") setTab(asked.tab);
   }
   const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
   const panel = useRef<HTMLElement>(null);
   const size = useThreadWidth(panel, mounted);
-  const showing = !!threadChat && tab === "threads";
+  const showing = !!threadChat && tab === "minions";
   const back = () => {
     setBefore(undefined);
     setThreadId(undefined);
@@ -707,7 +771,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               )
             ) : (
               <div className="bots-details-sub">
-                {conversation.friend
+                {conversation.minion ? <MinionSub conversation={conversation} bots={bots} /> : conversation.friend
                   ? `Shared with ${conversation.friend.friendName}${conversation.friend.ended ? " · not syncing" : ""}`
                   : conversation.kind === "group"
                     ? `${conversation.botIds.length} bots`
@@ -721,7 +785,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["instructions", "Instructions"],
                   ["routines", "Routines"],
-                  ["threads", "Threads"],
+                  ["minions", "Minions"],
                   ["advanced", "Advanced"],
                 ]}
                 value={tab}
@@ -751,26 +815,29 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   <Routines bot={bot} />
                 ))}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
-              {tab === "threads" && (
-                <Threads
-                  threads={threads}
-                  bots={bots}
-                  open={openThread}
-                  empty={
-                    // Without "Run coding agents" it can't start any: say where that's turned on.
-                    bot.threads?.enabled ? (
-                      "No threads running. Threads it starts from this chat show up here until they finish."
-                    ) : (
-                      <>
-                        No threads running. To let it start them, turn on Run coding agents under{" "}
-                        <button type="button" className="link" onClick={() => setTab("advanced")}>
-                          Advanced
-                        </button>
-                        .
-                      </>
-                    )
-                  }
-                />
+              {tab === "minions" && (
+                <>
+                  <Minions
+                    minions={minionsOf(bots, [bot.id])}
+                    bots={bots}
+                    empty={
+                      // Without Spawn minions it can't make any: say where that's turned on.
+                      mayCreateMinions(bot) ? (
+                        `No minions yet. When ${bot.name} hands a task to a minion, it shows up here.`
+                      ) : (
+                        <>
+                          No minions yet. To let {bot.name} spawn them, turn on Spawn minions under{" "}
+                          <button type="button" className="link" onClick={() => setTab("advanced")}>
+                            Advanced
+                          </button>
+                          .
+                        </>
+                      )
+                    }
+                  />
+                  {/* Bots start no threads now; one it has from before that's still going opens here. */}
+                  <Threads threads={threads} bots={bots} open={openThread} />
+                </>
               )}
               {/* A bot is retired first; deleting it for good is only offered once it is. */}
               {bot.retiredAt ? (
@@ -803,14 +870,19 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   ["members", `Members ${conversation.botIds.length}`],
                   ["goal", "Goal"],
                   ["routines", "Routines"],
-                  ["threads", "Threads"],
+                  ["minions", "Minions"],
                 ]}
                 value={tab}
                 onChange={setTab}
               />
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
               {tab === "routines" && <GroupRoutines conversation={conversation} bots={bots} />}
-              {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} empty="No threads running. Threads the bots here start show up until they finish." />}
+              {tab === "minions" && (
+                <>
+                  <Minions minions={minionsOf(bots, conversation.botIds)} bots={bots} owners empty="No minions yet. Minions the bots here spawn for their tasks show up here." />
+                  <Threads threads={threads} bots={bots} open={openThread} />
+                </>
+              )}
               {tab === "goal" && (
                 <>
                   <Instructions

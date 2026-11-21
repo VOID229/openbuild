@@ -372,7 +372,7 @@ export function runningThreads(conversation: Pick<Conversation, "id" | "messages
 }
 
 /**
- * Where a link in a conversation to one of its threads opens it: in the details' Threads tab while it's
+ * Where a link in a conversation to one of its threads opens it: in the details' Minions tab (its threads, below the minions) while it's
  * listed there, else over OpenBots. A thread that hasn't reached this tab yet but that a bot here just
  * started (its "Started a thread" line came first) is still running, so it goes to the panel too.
  */
@@ -409,7 +409,7 @@ export function threadProvider(chat: Pick<Chat, "runtime" | "messages">): string
 }
 
 /**
- * What a thread runs on, for the two marks beside it in the details' Threads tab: its harness, named with
+ * What a thread runs on, for the two marks beside it in the details' Minions tab (its threads, below the minions): its harness, named with
  * the account it signed in as ("Codex · codex2"), and the provider behind its model with that one's name.
  */
 export function threadBrands(chat: Pick<Chat, "runtime" | "runtimeAccount" | "messages">): { runtime: ThreadRuntime; harness: string; provider?: { id: string; name: string } } {

@@ -2886,12 +2886,16 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const [openedAt] = useState(Date.now);
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
-  const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
+  // A minion's chat is the minion's: whose it is, and that it's closed once it is.
+  const minion = conversation.minion ? bots.find((b) => b.id === conversation.minion) : undefined;
+  const minionOwner = minion?.minion ? `${bots.find((b) => b.id === minion.minion!.owner)?.name.split(" ·")[0] ?? "A deleted bot"}'s minion` : undefined;
+  const closedMinion = !!minion?.minion?.closedAt;
+  const members = conversation.kind === "direct" ? "" : minionOwner ? minionOwner : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
   // Retired: its chat stays to read, marked so in the header, with the way back where the composer was.
   const retired = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0] && b.retiredAt) : undefined;
   // The user's own bot in a chat with it alone: its model sits under the box. Another device's bots are set up there.
   const directBot = conversation.kind === "direct" && !remote ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const sub = retired ? "Retired" : (activity ?? away?.[0] ?? members);
+  const sub = retired ? "Retired" : closedMinion ? "Closed" : (activity ?? away?.[0] ?? members);
   const repo = useStore((s) => conversationRepo(conversation, s.chats));
   return (
     <div className="bots-chat">
@@ -2930,6 +2934,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
               <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup still={!!retired} />
               {/* Always there, unlike the name: nobody should have to hover to learn why the chat takes no message. */}
               {retired && <span className="bots-pill bots-retired-pill bots-head-retired">Retired</span>}
+              {closedMinion && <span className="bots-pill bots-retired-pill bots-head-retired">Closed</span>}
               <span className="bots-head-reveal">
                 <span>
                   <span>
@@ -2969,6 +2974,9 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
             )}
           </div>
         </div>
+      ) : conversation.minion ? (
+        // A minion's chat: its work to watch, with nothing at the bottom, not even a note.
+        null
       ) : conversation.kind === "side" ? (
         <div className="bots-dock">
           <div className="bots-side-note">

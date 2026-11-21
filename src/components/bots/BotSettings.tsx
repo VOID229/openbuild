@@ -1,10 +1,10 @@
 // Settings → Bots: every bot and group in one list, each opening a page of its own (look, name,
 // instructions, routines, model, how often it checks in; a group's members and goal), making and
 // deleting them, and pages for what they share: their models, the Claude logins they run on, web
-// search, the harnesses they may start threads on, extra Pi extensions, and friends.
+// search, the harnesses their threads use, extra Pi extensions, and friends.
 import { Archive, ArchiveRestore, ChevronRight, MessageCircle, RotateCcw, Star, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { botNameError } from "../../../shared/bots";
+import { useEffect, useMemo, useState } from "react";
+import { botNameError, teamBots } from "../../../shared/bots";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
 import { modelLabel, useBotModels } from "../../lib/bots/models";
@@ -22,7 +22,7 @@ import { useBusyBots } from "./common";
 import { BotClaude } from "./BotClaude";
 import { BotExtensions, useExtensionsSummary } from "./BotExtensions";
 import { BotFriends } from "./BotFriends";
-import { BotHarnesses, BotThreads, useAllowedHarnesses } from "./BotThreads";
+import { BotHarnesses, BotSwitches, useAllowedHarnesses } from "./BotSwitches";
 import { BotWebSearch, useConfiguredProviders } from "./BotWebSearch";
 
 type Dialog = { kind: "delete"; conversationId: string } | { kind: "retire"; botId: string } | { kind: "reset" };
@@ -144,8 +144,8 @@ function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversat
         <BotMachines />
       </section>
       <section className="bots-set-block">
-        <Label>OpenBuild</Label>
-        <BotThreads bot={bot} />
+        <Label>Permissions</Label>
+        <BotSwitches bot={bot} />
       </section>
       <section className="bots-set-block">
         <Label>Usage</Label>
@@ -330,7 +330,9 @@ function BotModels({ bots }: { bots: Bot[] }) {
 }
 
 export function BotsSettingsSection() {
-  const bots = useBots((s) => s.bots);
+  // The team: minions are their owners' alone, with nothing of their own to set.
+  const everyBot = useBots((s) => s.bots);
+  const bots = useMemo(() => teamBots(everyBot), [everyBot]);
   const conversations = useBots((s) => s.conversations);
   const loaded = useBots((s) => s.loaded);
   const defaultModel = useBots((s) => s.defaultModel);
@@ -455,7 +457,7 @@ export function BotsSettingsSection() {
         <NavRow label="Models" value={modelName} to="models" />
         <NavRow label="Claude" desc="Run bots on your Claude plan." to="claude" />
         <NavRow label="Web search" value={searching.length ? searching.join(", ") : "No keys yet"} to="search" />
-        <NavRow label="Harnesses" desc="Where bots may start OpenBuild threads." value={harnesses.length ? harnesses.join(", ") : "None allowed"} to="harnesses" />
+        <NavRow label="Harnesses" desc="The harnesses bots may use in OpenBuild threads." value={harnesses.length ? harnesses.join(", ") : "None allowed"} to="harnesses" />
         <NavRow label="Custom extensions" value={extensions} to="extensions" />
         <NavRow label="Friends" desc="People who share group chats with you." to="friends" />
       </SettingsGroup>

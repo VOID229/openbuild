@@ -91,7 +91,7 @@ afterEach(() => {
 
 test("a group's details have Routines: those reporting there, each with its bot's mascot and name", async () => {
   await show("launch");
-  expect(tabs()).toEqual(["Members 3", "Goal", "Routines", "Threads"]);
+  expect(tabs()).toEqual(["Members 3", "Goal", "Routines", "Minions"]);
   await openTab("Routines");
   const list = rows();
   // Only the ones reporting to this group, oldest first, whoever's they are.

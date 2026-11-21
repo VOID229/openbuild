@@ -7,7 +7,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
-import type { Conversation } from "../../lib/bots/types";
+import type { Bot, Conversation } from "../../lib/bots/types";
 import { botChatKind, botNameError, TYPING } from "../../../shared/bots";
 import { awayAlone, waitingOnThreadsLine } from "../../lib/bots/activity";
 import type { FriendSummary } from "../../../shared/friends";
@@ -126,7 +126,9 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
         </span>
       </span>
-      {conversation.kind === "side" && conversation.name && (
+      {conversation.minion ? (
+        <span className="bots-peek-between">{minionOwner(conversation, bots)}'s minion</span>
+      ) : conversation.kind === "side" && conversation.name && (
         // Its name says who's in it (a DM, a meeting: conversationName); its topic is here.
         <span className="bots-peek-between">
           <DmMark size={14} />
@@ -205,7 +207,7 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
   const retired = conversation.kind === "direct" && !!bots.find((b) => b.id === conversation.botIds[0])?.retiredAt;
   return (
     <div
-      className={cx("bots-row", active && "bots-row-active", conversation.unread && "bots-row-unread", retired && "bots-row-retired")}
+      className={cx("bots-row", active && "bots-row-active", conversation.unread && "bots-row-unread", retired && "bots-row-retired", conversation.minion && "bots-row-minion")}
       data-drag-id={conversation.id}
       data-drag-kind="row"
       {...longPress.handlers}
@@ -232,7 +234,8 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
           )}
         </span>
         <span className="bots-row-side">
-          {retired ? <span className="bots-pill bots-retired-pill">Retired</span> : <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>}
+          {/* A minion's row has its name and its owner's to fit, and no time. A closed one isn't listed (sidebarLists). */}
+          {retired ? <span className="bots-pill bots-retired-pill">Retired</span> : !conversation.minion && <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>}
           {conversation.unread && <span className="unread-dot" aria-label="Unread" />}
         </span>
       </button>
@@ -472,6 +475,9 @@ function ConversationMenu({ state, moves, onMove, onClose, onDialog }: { state?:
         <button type="button" role="menuitem" className="menu-item" disabled={bot.primary} title={bot.primary ? "Make another bot primary first" : undefined} onClick={act(() => onDialog({ kind: "retire", id: conversation.id }))}>
           <Archive size={15} /> Retire bot
         </button>
+      ) : conversation.minion ? (
+        // A minion's chat isn't the user's to delete: it goes with the minion, a week after it's closed.
+        null
       ) : (
         <button type="button" role="menuitem" className="menu-item menu-item-danger" onClick={act(() => onDialog({ kind: "delete", id: conversation.id }))}>
           <Trash size={15} /> {retired ? "Delete permanently" : `Delete ${kind}`}
@@ -570,7 +576,13 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   );
 }
 
-function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: RailLists & { activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
+/** The bot a minion's chat belongs to, by its first name: whose minion it is. */
+const minionOwner = (c: Conversation, bots: Bot[]) => {
+  const owner = bots.find((b) => b.id === bots.find((m) => m.id === c.minion)?.minion?.owner);
+  return owner?.name.split(" · ")[0] ?? "A deleted bot";
+};
+
+function Rail({ pinned, rest, side, minions, activeId, onMenu, onDialog, peek }: RailLists & { activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
   const remote = !!useRemoteWorkspace();
   const avatar = useStore((s) => s.settings.profile.avatar);
@@ -594,7 +606,7 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: RailList
       el.removeEventListener("scroll", edges);
       resize.disconnect();
     };
-  }, [pinned.length, rest.length, side.length]);
+  }, [pinned.length, rest.length, side.length, minions.length]);
   const item = (c: Conversation) => (
     <button
       key={c.id}
@@ -630,8 +642,14 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: RailList
           {pinned.map(item)}
           {pinned.length > 0 && rest.length > 0 && <div className="bots-rail-sep" />}
           {rest.map(item)}
-          {/* As in the list, the chats between bots come last, apart from the user's own. */}
-          {side.length > 0 && pinned.length + rest.length > 0 && <div className="bots-rail-sep" />}
+          {/* As in the list, the minions and then the chats between bots come last, apart from the user's own. */}
+          {minions.length > 0 && pinned.length + rest.length > 0 && <div className="bots-rail-sep" />}
+          {minions.length > 0 && (
+            <div role="group" aria-label="Minions" className="bots-rail-group">
+              {minions.map(item)}
+            </div>
+          )}
+          {side.length > 0 && pinned.length + rest.length + minions.length > 0 && <div className="bots-rail-sep" />}
           {side.length > 0 && (
             <div role="group" aria-label={botChatsLabel(side)} className="bots-rail-group">
               {side.map(item)}
@@ -721,7 +739,7 @@ export function BotsSidebar() {
   const friends = useBots((s) => s.friends);
   const order = useBots((s) => s.order);
   const lists = useMemo(() => sidebarLists(conversations, bots, sections, order), [conversations, sections, bots, order]);
-  const { pinned, rest, filed, side, hidden, shared, retired } = lists;
+  const { pinned, rest, filed, side, minions, hidden, shared, retired } = lists;
   // The rail leaves out what's in a section folded shut here, and runs the rest together (railLists).
   const folded = useBots((s) => s.folded);
   const onRail = useMemo(() => railLists(lists, folded, order.length > 0), [lists, folded, order]);
@@ -797,7 +815,7 @@ export function BotsSidebar() {
   useScrollRestore(listRef, rail || q ? undefined : "bots:list");
   const results = useMemo(
     // A DM or meeting is found by its topic too, which its name (who's in it) doesn't show.
-    () => (q ? conversations.filter((c) => !leavesSidebar(c) && (conversationName(c, bots).toLowerCase().includes(q) || (c.kind === "side" && !!c.name?.toLowerCase().includes(q)) || c.messages.some((m) => m.text.toLowerCase().includes(q)))) : []),
+    () => (q ? conversations.filter((c) => !leavesSidebar(c, bots) && (conversationName(c, bots).toLowerCase().includes(q) || (c.kind === "side" && !!c.name?.toLowerCase().includes(q)) || c.messages.some((m) => m.text.toLowerCase().includes(q)))) : []),
     [q, conversations, bots],
   );
 
@@ -885,6 +903,11 @@ export function BotsSidebar() {
                       <Section name="friends" label="With friends" count={shared.length} drop="friends">
                         {shared.map(row)}
                         <FriendsLine friends={friends} />
+                      </Section>
+                    )}
+                    {minions.length > 0 && (
+                      <Section name="minions" label="Minions" count={minions.length}>
+                        {minions.map(row)}
                       </Section>
                     )}
                     {side.length > 0 && (

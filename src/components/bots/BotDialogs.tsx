@@ -167,9 +167,9 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
 export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose: () => void; onCreated?: (conversationId: string) => void; preset?: string[] }) {
   const touch = useMediaQuery("(pointer: coarse)");
   const modal = useModal(onClose);
-  // A retired bot isn't one to pick: it can't be in a chat until it's rehired.
+  // A retired bot isn't one to pick: it can't be in a chat until it's rehired. Nor a minion: it talks only to its owner.
   const all = useBots((s) => s.bots);
-  const bots = all.filter((b) => !b.retiredAt);
+  const bots = all.filter((b) => !b.retiredAt && !b.minion);
   const [picked, setPicked] = useState<string[]>(() => preset.filter((id) => !all.find((b) => b.id === id)?.retiredAt));
   const [name, setName] = useState("");
   const members = bots.filter((b) => picked.includes(b.id));
