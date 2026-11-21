@@ -1,3 +1,5 @@
+OpenBuild is on a little break right now. Working on KodBot [@Dkod-ai](https://github.com/dkod-ai) mostly.
+
 # OpenBuild
 
 OpenBuild is the bigger brother of [OpenChat](https://openchat.shade-io.com)
