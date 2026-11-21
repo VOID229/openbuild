@@ -1015,7 +1015,7 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
         </span>
       </div>
       <span className="pi-row-actions">
-        <IconButton label={`Rename ${project.name}`} tooltip="Rename" tooltipSide="top" className="key-icon-btn" onClick={() => setRenaming(true)}>
+        <IconButton label={`Rename ${project.name}`} tooltip={false} className="key-icon-btn" onClick={() => setRenaming(true)}>
           <Pencil size={14} />
         </IconButton>
         <IconButton

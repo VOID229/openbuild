@@ -24,7 +24,6 @@ export function LookPicker({ look, onChange }: { look: BotLook; onChange: (look:
             role="radio"
             aria-checked={shapeOf(look).id === s.id}
             aria-label={s.label}
-            data-tooltip={s.label}
             className={cx("bots-shape", shapeOf(look).id === s.id && "bots-shape-on")}
             onClick={() => onChange({ ...look, shape: s.id })}
           >

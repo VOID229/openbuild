@@ -230,7 +230,7 @@ function FullScreen({ html, title, open, onClose }: { html: string; title: strin
         <div className="html-render-full-bar">
           <PanelTop size={14} />
           <span className="html-render-full-title">{title}</span>
-          <IconButton label="Close" tooltipSide="left" onClick={onClose}>
+          <IconButton label="Close" tooltip={false} onClick={onClose}>
             <X size={16} />
           </IconButton>
         </div>
@@ -355,7 +355,7 @@ export const HtmlRender = memo(function HtmlRender({ part, block, old = false }:
           <Maximize2 size={14} />
         </IconButton>
         {/* aria-expanded: a disclosure, so the thread holds the reader's place as it closes (ChatView). */}
-        <IconButton ref={close} label="Close preview" tooltipSide="top" className="html-render-action" aria-expanded onClick={(e) => toggle(false, e.currentTarget)}>
+        <IconButton ref={close} label="Close preview" tooltip={false} className="html-render-action" aria-expanded onClick={(e) => toggle(false, e.currentTarget)}>
           <X size={14} />
         </IconButton>
       </figcaption>

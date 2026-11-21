@@ -130,7 +130,7 @@ export function CopyLine({ value, label }: { value: string; label: string }) {
         <span className="app-copy-status" aria-live="polite">
           {copied === "yes" && "Copied"}
         </span>
-        <IconButton label={copied === "yes" ? "Copied" : label} onClick={() => void copy()}>
+        <IconButton label={copied === "yes" ? "Copied" : label} tooltip={false} onClick={() => void copy()}>
           {copied === "yes" ? <Check size={14} className="ok" /> : <Copy size={14} />}
         </IconButton>
       </div>

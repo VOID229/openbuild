@@ -1712,6 +1712,7 @@ export function Sidebar() {
             <ModeSwitch />
             <IconButton
               label="Search"
+              tooltip={false}
               aria-pressed={searching}
               className={cx(searching && "filter-active")}
               // Keeps focus in the field, so pressing this to close it isn't first a blur that closes

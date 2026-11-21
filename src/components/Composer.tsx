@@ -102,10 +102,10 @@ function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete,
         ))}
       <span className="queued-text">{item.text || file?.name}</span>
       {more > 0 && <span className="queued-more">+{more}</span>}
-      <IconButton label="Delete queued message" tooltipSide="top" className="queued-btn" onClick={onDelete}>
+      <IconButton label="Delete queued message" tooltip={false} className="queued-btn" onClick={onDelete}>
         <Trash2 size={15} />
       </IconButton>
-      <IconButton label="Edit queued message" tooltipSide="top" className="queued-btn" onClick={onEdit}>
+      <IconButton label="Edit queued message" tooltip={false} className="queued-btn" onClick={onEdit}>
         <Pencil size={15} />
       </IconButton>
       {onSteer && (

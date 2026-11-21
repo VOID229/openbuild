@@ -141,13 +141,13 @@ export function BrowserView({ tab, folder, active = true }: { tab: BrowserTab; f
           input.current?.blur();
         }}
       >
-        <IconButton label="Back" className="fv-tool" disabled={history.at <= 0} onClick={() => step(-1)}>
+        <IconButton label="Back" tooltip={false} className="fv-tool" disabled={history.at <= 0} onClick={() => step(-1)}>
           <ArrowLeft size={14} />
         </IconButton>
-        <IconButton label="Forward" className="fv-tool" disabled={history.at >= history.list.length - 1} onClick={() => step(1)}>
+        <IconButton label="Forward" tooltip={false} className="fv-tool" disabled={history.at >= history.list.length - 1} onClick={() => step(1)}>
           <ArrowRight size={14} />
         </IconButton>
-        <IconButton label="Reload" className="fv-tool" disabled={!tab.url} onClick={() => setReloads((n) => n + 1)}>
+        <IconButton label="Reload" tooltip={false} className="fv-tool" disabled={!tab.url} onClick={() => setReloads((n) => n + 1)}>
           <RotateCw size={13} />
         </IconButton>
         <input

@@ -329,14 +329,14 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         {shared && !members.length && <li className="bots-hint">None of your bots yet. Add one below; it answers when mentioned.</li>}
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
-            <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
+            <button type="button" className="bots-member-main" onClick={() => open(b)}>
               <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} reading={readers[conversation.botIds.indexOf(b.id)]} asleep={!working.includes(b.id)} zzz />
               <span className="bots-card-text">{b.name}</span>
             </button>
             {editable && removable && (
               <IconButton
                 label="Remove from group"
-                tooltipSide="left"
+                tooltip={false}
                 className="bots-card-x"
                 onClick={() => {
                   st.updateConversation(conversation.id, { botIds: conversation.botIds.filter((id) => id !== b.id) });
@@ -350,7 +350,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         ))}
         {away.map((b) => (
           <li key={b.id} className="bots-card-row bots-member bots-member-retired">
-            <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
+            <button type="button" className="bots-member-main" onClick={() => open(b)}>
               <BotAvatar look={b.look} size={28} alive={false} />
               <span className="bots-card-text">{b.name}</span>
             </button>
@@ -370,7 +370,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
                 </span>
                 <IconButton
                   label="Add to group"
-                  tooltipSide="left"
+                  tooltip={false}
                   className="bots-card-x bots-card-add"
                   onClick={() => {
                     st.updateConversation(conversation.id, { botIds: [...conversation.botIds, b.id] });
@@ -428,7 +428,7 @@ function Threads({ threads, bots, open, empty }: { threads: { chat: Chat; bot: s
           const activity = threadActivity(chat);
           return (
             <li key={chat.id} className="bots-card-row bots-member">
-              <button type="button" className="bots-member-main" onClick={() => open(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
+              <button type="button" className="bots-member-main" onClick={() => open(chat.id)}>
                 {/* Only whose thread it is: a still mascot, whatever its bot is doing. */}
                 {bot && <BotAvatar look={bot.look} size={28} alive={false} />}
                 <span className="bots-card-text">
@@ -510,11 +510,11 @@ function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: bo
       {!phone && <ThreadGrip {...size} />}
       <div className="bots-details-top bots-details-thread-top">
         {closes ? (
-          <IconButton label="Close thread" tooltipSide="right" onClick={closes}>
+          <IconButton label="Close thread" tooltip={false} onClick={closes}>
             <X size={phone ? 24 : 18} />
           </IconButton>
         ) : (
-          <IconButton label="Back to threads" tooltipSide="right" onClick={back}>
+          <IconButton label="Back to threads" tooltip={false} onClick={back}>
             <ChevronLeft size={phone ? 26 : 18} />
           </IconButton>
         )}
@@ -664,7 +664,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
       {showing && <ThreadPane chat={threadChat} phone={phone} back={back} closes={closes} size={size} />}
       <div className="bots-details-inner" hidden={showing}>
         <div className="bots-details-top">
-          <IconButton label="Close details" tooltipSide="left" onClick={close}>
+          <IconButton label="Close details" tooltip={false} onClick={close}>
             {phone ? <ChevronLeft size={26} /> : <X size={18} />}
           </IconButton>
         </div>

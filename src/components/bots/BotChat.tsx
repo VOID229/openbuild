@@ -2702,7 +2702,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         <div className="bots-composer-row">
           {textOnly ? null : (
             <>
-              <IconButton label="Add files" tooltip="Add files" tooltipSide="top" className="bots-composer-btn" onClick={() => file.current?.click()}>
+              <IconButton label="Add files" tooltip={false} className="bots-composer-btn" onClick={() => file.current?.click()}>
                 <Paperclip size={18} />
               </IconButton>
               {conversation.kind === "group" && (

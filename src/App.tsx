@@ -424,7 +424,7 @@ function Main() {
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
               <>
-                <IconButton label="Back to chat" tooltipSide="right" onClick={closeBotsThread}>
+                <IconButton label="Back to chat" tooltip={false} onClick={closeBotsThread}>
                   <ArrowLeft size={18} />
                 </IconButton>
                 <IconButton label="Open in OpenBuild" tooltipSide="right" onClick={expandBotsThread}>

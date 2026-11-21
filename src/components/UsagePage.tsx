@@ -127,7 +127,7 @@ export function UsagePage() {
               </button>
             ))}
           </div>
-          <IconButton label="Refresh" tooltip="Refresh" onClick={() => void refresh()} disabled={busy} className={cx("ustats-refresh", busy && "ustats-spinning")}>
+          <IconButton label="Refresh" tooltip={false} onClick={() => void refresh()} disabled={busy} className={cx("ustats-refresh", busy && "ustats-spinning")}>
             <RefreshCw size={15} />
           </IconButton>
         </div>

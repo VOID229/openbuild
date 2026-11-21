@@ -448,7 +448,7 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
                   })}
                 </div>
               </Fold>
-              <button type="button" className="ask-review-toggle" aria-expanded={review} aria-label={review ? "Hide the question" : "Show the question"} title={review ? "Hide the question" : "Show the question"} onClick={() => setReview((v) => !v)}>
+              <button type="button" className="ask-review-toggle" aria-expanded={review} aria-label={review ? "Hide the question" : "Show the question"} onClick={() => setReview((v) => !v)}>
                 <ChevronDown size={14} />
               </button>
             </>

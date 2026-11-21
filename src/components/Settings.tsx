@@ -93,7 +93,7 @@ function ProfileSection() {
       <Heading>Profile</Heading>
       <div className="avatar-edit">
         <Avatar src={profile.avatar} name={profile.name} size={72} />
-        <button type="button" className="avatar-pencil" aria-label="Change photo" data-tooltip="Change photo" onClick={() => file.current?.click()}>
+        <button type="button" className="avatar-pencil" aria-label="Change photo" onClick={() => file.current?.click()}>
           <Pencil size={13} />
         </button>
         {profile.avatar && (
@@ -379,7 +379,7 @@ function TextGeneration() {
                     <ArrowUp size={14} />
                   </IconButton>
                 )}
-                <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
+                <IconButton label="Remove" tooltip={false} className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
                   <Trash2 size={14} />
                 </IconButton>
               </span>

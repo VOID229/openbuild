@@ -280,7 +280,7 @@ export function FileTree({ folder }: { folder: TerminalFolder }) {
           <IconButton label={hide ? "Show hidden and ignored files" : "Hide hidden and ignored files"} className={cx("ft-tool", !hide && "ft-tool-on")} onClick={() => setHide(!hide)}>
             {hide ? <EyeOff size={15} /> : <Eye size={15} />}
           </IconButton>
-          <IconButton label="Refresh" className="ft-tool" onClick={reload}>
+          <IconButton label="Refresh" tooltip={false} className="ft-tool" onClick={reload}>
             <RefreshCw size={14} />
           </IconButton>
         </div>

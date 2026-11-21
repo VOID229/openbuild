@@ -187,7 +187,7 @@ export function FallbackList({ list, onChange: set }: { list: string[]; onChange
                 <ArrowUp size={14} />
               </IconButton>
             )}
-            <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => set(list.filter((_, j) => j !== i))}>
+            <IconButton label="Remove" tooltip={false} className="key-icon-btn key-remove" onClick={() => set(list.filter((_, j) => j !== i))}>
               <Trash2 size={14} />
             </IconButton>
           </span>
