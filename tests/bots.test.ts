@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnScript } from "./spawnScript";
-import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, matchMentionBots, mentionBroadcastAt, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
+import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, matchMentionBots, mentionBroadcastAt, mentionQuery, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -48,6 +48,26 @@ test("@all and @everyone tag the whole conversation, among the bots' own mention
   expect(found("@all")).toEqual([["@all", undefined]]);
   expect(found("@all stars")).toEqual([["@all stars", "All Stars"]]);
   expect(found("me@all.com @allison @all-hands")).toEqual([]);
+});
+
+test("an @mention inside parentheses, quotes or brackets tags the bot", () => {
+  const bots = [{ name: "harness optimizer" }, { name: "Dr Eggbot" }];
+  const found = (text: string) => findTags(text, bots).map((t) => [text.slice(t.start, t.end), t.bot?.name]);
+  expect(found("ask him (@harness optimizer) later")).toEqual([["@harness optimizer", "harness optimizer"]]);
+  expect(found('"@Dr Eggbot", [@Dr Eggbot] {@all} \u201c@Dr Eggbot\u201d')).toEqual([["@Dr Eggbot", "Dr Eggbot"], ["@Dr Eggbot", "Dr Eggbot"], ["@all", undefined], ["@Dr Eggbot", "Dr Eggbot"]]);
+  expect(found("line one\n@Dr Eggbot")).toEqual([["@Dr Eggbot", "Dr Eggbot"]]);
+});
+
+test("the @mention being typed starts after a space, a newline or punctuation, never inside a word", () => {
+  expect(mentionQuery("@")).toEqual({ at: 0, query: "" });
+  expect(mentionQuery("you're welcome\" (@")).toEqual({ at: 17, query: "" });
+  expect(mentionQuery("(@harn")).toEqual({ at: 1, query: "harn" });
+  for (const before of ['"@Dr Eg', "'@Dr", "[@Dr", "{@Dr", "\u201c@Dr", "one\n@Dr", "hi @Dr", "\u00ab@Dr", "\u2014@Dr"]) expect(mentionQuery(before)?.query).toBe(before.endsWith("Eg") ? "Dr Eg" : "Dr");
+  expect(mentionQuery("me@harness")).toBeUndefined();
+  expect(mentionQuery("x_@harness")).toBeUndefined();
+  expect(mentionQuery("9@harness")).toBeUndefined();
+  // A query never runs back over a line break.
+  expect(mentionQuery("(@harness\nmore")).toBeUndefined();
 });
 
 test("polls letter their options and keep one vote per voter", () => {

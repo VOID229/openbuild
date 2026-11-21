@@ -1337,6 +1337,17 @@ export function findMentions<B extends Pick<Bot, "name">>(text: string, bots: B[
 }
 
 /**
+ * The @mention being typed at the end of `before` (the text up to the caret): where its "@" is and what
+ * follows it, or undefined. An "@" starts one wherever findMentions would tag it: after a space, a
+ * newline, the start, or punctuation such as "(" and quotes; not after a letter or digit, which is an
+ * email address. The query can run over spaces ("@Dr Eg"); the caller decides whether it still names anyone.
+ */
+export function mentionQuery(before: string): { at: number; query: string } | undefined {
+  const m = /(?<![\p{L}\d_])@([^@\n]*)$/u.exec(before);
+  return m ? { at: m.index, query: m[1]! } : undefined;
+}
+
+/**
  * Every @mention in some text, in order: bots as findMentions finds them, and "@all" or "@everyone",
  * which have no `bot` because they name the whole conversation. They beat a bot called "All", but
  * "@All Stars" is still that bot.

@@ -8060,6 +8060,14 @@ p.key-status svg {
   max-height: min(340px, 45dvh);
 }
 
+/* Off a phone the list opens at the "@" it was typed at (lib/caretAnchor.ts), as wide as a path needs. */
+@media (min-width: 769px) {
+  .mention-menu {
+    right: auto;
+    width: min(440px, calc(100% - 16px));
+  }
+}
+
 .mention-item {
   gap: 9px;
 }

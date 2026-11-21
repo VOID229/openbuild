@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING } from "../../../shared/bots";
+import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, mentionQuery, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -24,6 +24,7 @@ import { LinkText, Linkify } from "../Linkify";
 import { ChatText } from "../ChatText";
 import { draftMarks, type DraftMarkKind } from "../../lib/chatText";
 import { continueList, renumberAfter, unlist, withoutOpenItem, type Edit } from "../../lib/smartInput";
+import { useCharAnchor } from "../../lib/caretAnchor";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
@@ -2285,10 +2286,11 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   /** What's in the box. A send empties it here at once, so a second Enter before the next render sends nothing. */
   const box = useRef<Unsent>({ text, images });
   box.current = { text, images };
-  const [mention, setMention] = useState<{ query: string; index: number }>();
+  const [mention, setMention] = useState<{ query: string; at: number; index: number }>();
   const [notice, setNotice] = useState<string>();
   const input = useRef<HTMLTextAreaElement>(null);
   const backdrop = useRef<HTMLDivElement>(null);
+  const mentionList = useRef<HTMLDivElement>(null);
   const dictation = useFieldDictation({ value: text, setValue: setText, field: input, onError: setNotice, fallback: true });
   const file = useRef<HTMLInputElement>(null);
   const touch = useMediaQuery("(pointer: coarse)");
@@ -2304,6 +2306,8 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const everyoneAt = query !== undefined && conversation.kind === "group" && members.length > 1 ? mentionBroadcastAt(ranked, query) : -1;
   const matches = ranked.map((b) => ({ id: b.id, tag: mentionName(b.name), label: b.name, bots: [b] }));
   if (everyoneAt >= 0) matches.splice(everyoneAt, 0, { id: "all", tag: "all", label: "All bots", bots: members });
+  // The picker opens at the "@" it was typed at, not at the box's corner.
+  useCharAnchor(mentionList, input, matches.length ? mention?.at : undefined);
   const stash = botStashOf(useStore((s) => s.settings.crossStash));
   const stashed = stash.use((s) => s.items);
   const [stashOpen, setStashOpen] = useState(false);
@@ -2565,11 +2569,11 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);
   }, []);
   const findMention = (value: string, caret: number) => {
-    // The query can run over spaces ("@Dr Eg") for as long as it still starts someone's name.
-    const m = /(?:^|\s)@([^@\n]*)$/u.exec(value.slice(0, caret));
-    const query = m?.[1];
-    const open = query !== undefined && (/^[\p{L}\d_-]*$/u.test(query) || matchMentionBots(members, query).length > 0);
-    setMention(open ? { query, index: 0 } : undefined);
+    // After a space or punctuation ("(@"), as a sent message tags it. The query can run over spaces
+    // ("@Dr Eg") for as long as it still starts someone's name.
+    const m = mentionQuery(value.slice(0, caret));
+    const open = !!m && (/^[\p{L}\d_-]*$/u.test(m.query) || matchMentionBots(members, m.query).length > 0);
+    setMention(open ? { query: m.query, at: m.at, index: 0 } : undefined);
   };
   /** The field's text changed: typed, or put in by `edit`. */
   const changed = (el: HTMLTextAreaElement) => {
@@ -2607,9 +2611,11 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     const el = input.current!;
     const caret = el.selectionStart;
     const after = text.slice(caret);
-    // Step over a space that's already there rather than doubling it.
+    // Step over a space that's already there rather than doubling it, and leave none before a closing
+    // mark: "(@Dr Eggbot)", not "(@Dr Eggbot )".
     const spaced = /^\s/.test(after);
-    const before = text.slice(0, caret).replace(/@([^@\n]*)$/u, () => `@${tag}${spaced ? after[0] : " "}`);
+    const closed = /^[)\]}"'\u201d\u2019\u00bb,.;:!?]/u.test(after);
+    const before = text.slice(0, caret).replace(/@([^@\n]*)$/u, () => `@${tag}${spaced ? after[0] : closed ? "" : " "}`);
     const next = before + (spaced ? after.slice(1) : after);
     setText(next);
     setMention(undefined);
@@ -2641,7 +2647,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         }}
       >
         {matches.length > 0 && (
-          <div className="bots-mentions" role="listbox" aria-label="Mention a bot">
+          <div ref={mentionList} className="bots-mentions" role="listbox" aria-label="Mention a bot">
             {matches.map((m, i) => (
               <button
                 key={m.id}

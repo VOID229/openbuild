@@ -14,6 +14,7 @@ import { hasHeldFile, holdFile } from "../lib/localFiles";
 import { MAX_ATTACHMENT_BYTES } from "../../shared/attachments";
 import { FileChip } from "./FileChip";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
+import { useCharAnchor } from "../lib/caretAnchor";
 import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../lib/shortcuts";
@@ -252,9 +253,10 @@ function FileGlyph({ entry }: { entry: WorkspaceEntry }) {
   );
 }
 
-/** The "@" file and folder list, above (in a thread) or below (new thread) the composer. */
-function MentionMenu({ entries, active, dropUp, onPick, onHover }: { entries: WorkspaceEntry[]; active: number; dropUp: boolean; onPick: (entry: WorkspaceEntry) => void; onHover: (i: number) => void }) {
+/** The "@" file and folder list, at the "@" it was typed at (`at`, in `field`): above its line (in a thread) or below it (new thread). */
+function MentionMenu({ entries, active, dropUp, field, at, onPick, onHover }: { entries: WorkspaceEntry[]; active: number; dropUp: boolean; field: React.RefObject<HTMLTextAreaElement | null>; at: number; onPick: (entry: WorkspaceEntry) => void; onHover: (i: number) => void }) {
   const list = useRef<HTMLDivElement>(null);
+  useCharAnchor(list, field, at, !dropUp);
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
@@ -528,8 +530,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
     const upto = value.slice(0, caret);
     const at = upto.lastIndexOf("@");
     if (at === -1) return setMention(undefined);
-    // Only at a word boundary: not inside an email address or a path.
-    if (at > 0 && !/[\s([{]/.test(upto[at - 1]!)) return setMention(undefined);
+    // Only at a word boundary: after a space, a bracket or a quote; not inside an email address or a path.
+    if (at > 0 && !/[\s([{"'`\u201c\u2018\u00ab]/u.test(upto[at - 1]!)) return setMention(undefined);
     const query = upto.slice(at + 1);
     if (query.length > 200 || /\s/.test(query)) return setMention(undefined);
     setMention({ start: at, end: caret, query });
@@ -569,7 +571,11 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   // Deleting a mention from the text also drops the file it had attached (even if it arrives later).
   useEffect(() => {
-    const tokens = new Set(text.split(/\s+/));
+    // A mention in brackets or quotes ("(@notes.md)") is still one.
+    const tokens = new Set(text.split(/\s+/).flatMap((t) => {
+      const opened = t.replace(/^[([{"'`\u201c\u2018\u00ab]+/u, "");
+      return [opened, opened.replace(/[)\]}"'`\u201d\u2019\u00bb,.;:!?]+$/u, "")];
+    }));
     setFiles((all) => {
       const stale = all.some((f) => f.mention && !tokens.has(`@${f.name}`));
       return stale ? all.filter((f) => !f.mention || tokens.has(`@${f.name}`)) : all;
@@ -902,7 +908,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
       )}
       {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
-      {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
+      {mentionMatches.length > 0 && mention && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} field={textarea} at={mention.start} onPick={pickMention} onHover={setMentionIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
       <div
         className={cx("composer", dragging && "composer-drag", shellMode && "composer-shell")}
