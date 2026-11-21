@@ -2147,6 +2147,143 @@
   font-size: 0.86em;
 }
 
+/* A message's blocks (ChatText.tsx, lib/chatText.ts): paragraphs, list items and code blocks. */
+.chat-code {
+  max-width: 100%;
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0;
+  white-space: pre;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.chat-p,
+.chat-item {
+  display: block;
+}
+
+.chat-item {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-item-mark {
+  flex: none;
+  min-width: 10px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chat-item-body {
+  min-width: 0;
+}
+
+.chat-p + .chat-item,
+.chat-item + .chat-p,
+.chat-p + .chat-p {
+  margin-top: 8px;
+}
+
+.chat-item + .chat-item {
+  margin-top: 3px;
+}
+
+.chat-code:first-child {
+  margin-top: 2px;
+}
+
+.chat-code:last-child {
+  margin-bottom: 2px;
+}
+
+.bm-text .chat-code code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.bm-mine .chat-code {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+/* Headings, quotes, dividers and tables (lib/chatText.ts). A heading is bold text, as its draft shows it. */
+.chat-h,
+.chat-quote,
+.chat-rule,
+.chat-table-wrap {
+  margin: 8px 0;
+}
+
+.chat-h:first-child,
+.chat-quote:first-child,
+.chat-rule:first-child,
+.chat-table-wrap:first-child {
+  margin-top: 0;
+}
+
+.chat-h:last-child,
+.chat-quote:last-child,
+.chat-rule:last-child,
+.chat-table-wrap:last-child {
+  margin-bottom: 0;
+}
+
+.chat-h {
+  font-weight: 600;
+}
+
+/* A quote has a rule down its side, in the colour of its own text, so it reads on either side. */
+.chat-quote {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 12px;
+  border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.chat-rule {
+  height: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+/* A table wider than its bubble scrolls sideways inside it, rather than stretching the bubble. The
+   pixel under it is room for its last line, which a wrap ending part-way through a pixel cuts off. */
+.chat-table-wrap {
+  max-width: 100%;
+  padding-bottom: 1px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.chat-table {
+  width: max-content;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.chat-table th,
+.chat-table td {
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  vertical-align: top;
+  text-align: left;
+}
+
+.chat-table th {
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
 /* Links in a message are blue as well as underlined, so they read as clickable at a glance. */
 .bm-text .link {
   color: var(--file-link);
@@ -3711,6 +3848,13 @@
      the page's, or the drawn text runs short of the caret, further each character and line. */
   letter-spacing: inherit;
   word-spacing: inherit;
+  /* Italic in a draft is the upright face slanted, which a browser lays out without font hinting. On
+     a screen that hints (some Linux desktops) upright text is a little wider or narrower than that,
+     and the caret would drift from the drawn text. So both lay all of it out unhinted. And without
+     kerning: a slanted word and the upright "*" beside it are two runs of text, with no kerning
+     between them, where the textarea has one run and kerns the pair. */
+  text-rendering: geometricPrecision;
+  font-kerning: none;
 }
 
 .bots-composer-textarea {
@@ -3728,6 +3872,63 @@
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* The draft as its message will show it (lib/chatText.ts). The caret is the textarea's, so nothing
+   here may change a character's width: bold is a stroke rather than a heavier face, italic the
+   slant the browser makes of the upright face (no italic face is loaded), and code keeps the font. */
+.bots-draft-number {
+  color: var(--text-3);
+}
+
+.bots-draft-bold {
+  -webkit-text-stroke: 0.55px currentColor;
+}
+
+.bots-draft-italic {
+  font-style: italic;
+}
+
+.bots-draft-code {
+  border-radius: 3px;
+  background: var(--code-bg);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.bots-draft-fence {
+  color: var(--text-2);
+}
+
+.bots-draft-link {
+  color: var(--file-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+/* Markdown's own characters ("**", a backtick, a link's address) stay, quiet and upright, whatever they are in. */
+.bots-draft-mark {
+  color: var(--text-3);
+  font-style: normal;
+  -webkit-text-stroke: 0;
+  text-decoration: none;
+}
+
+/* A list's "-" is drawn as the bullet its message shows, over the dash and as wide as it. */
+.bots-draft-bullet {
+  position: relative;
+  color: transparent;
+  -webkit-text-stroke: 0;
+}
+
+.bots-draft-bullet::after {
+  content: "•";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  color: var(--text-3);
+  font-style: normal;
+  transform: translateX(-50%);
 }
 
 .bots-draft-mention {

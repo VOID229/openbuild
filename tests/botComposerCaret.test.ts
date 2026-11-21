@@ -204,10 +204,12 @@ describe.skipIf(!browser)("an OpenBots draft's caret", () => {
       // Where the textarea's caret is: the end of the same text laid out with the textarea's own styles.
       const mirror = document.createElement('div');
       const cs = getComputedStyle(el);
-      for (const p of ["font", "letterSpacing", "wordSpacing", "fontVariantLigatures", "whiteSpace", "overflowWrap", "wordBreak", "padding", "boxSizing", "lineHeight"]) mirror.style[p] = cs[p];
+      for (const p of ["font", "letterSpacing", "wordSpacing", "fontVariantLigatures", "fontKerning", "textRendering", "whiteSpace", "overflowWrap", "wordBreak", "padding", "boxSizing", "lineHeight"]) mirror.style[p] = cs[p];
       mirror.style.cssText += ";position:absolute;visibility:hidden;width:" + el.clientWidth + "px";
       const mark = document.createElement('span');
-      mark.textContent = "|";
+      // Zero-width: a caret takes no room, and a visible mark on a line that's nearly full would push
+      // the last word onto a line of its own, which the field doesn't do.
+      mark.textContent = "\u200b";
       mirror.append(el.value, mark);
       el.parentElement.append(mirror);
       const caret = mark.getBoundingClientRect().left - mirror.getBoundingClientRect().left;

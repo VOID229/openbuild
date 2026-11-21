@@ -20,7 +20,10 @@ import { PULL_REF_RE, conversationRepo, pullRefHref, pullRefUrl } from "../../li
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
-import { LinkText, Linkify, WebLink } from "../Linkify";
+import { LinkText, Linkify } from "../Linkify";
+import { ChatText } from "../ChatText";
+import { draftMarks, type DraftMarkKind } from "../../lib/chatText";
+import { continueList, renumberAfter, unlist, withoutOpenItem, type Edit } from "../../lib/smartInput";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
@@ -381,25 +384,16 @@ function WithMentions({ text, bots, everyone, fileHref }: { text: string; bots: 
   return <>{parts}</>;
 }
 
-/** Bold, inline code, [Markdown](https://links), bare links and @mentions (in the mentioned bot's colour). */
+/**
+ * A message's Markdown (ChatText: bold, italic, code, lists, quotes, tables, links), with bare links
+ * and @mentions (in the mentioned bot's colour). Code, inline or in a block, shows as it was written,
+ * with no "#n" in it linked.
+ */
 const RichText = memo(function RichText({ text, bots, everyone, botId }: { text: string; bots: Bot[]; everyone: Bot[]; botId?: string }) {
   // A bot's files are on its own workspace's computer, so they're fetched from that workspace.
   const workspace = useBots((s) => s.workspace);
   const fileHref = botId && workspace ? (url: string) => workspacePath(workspace, `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}`) : undefined;
-  const parts: React.ReactNode[] = [];
-  let last = 0;
-  // A fenced block shows as it was written, with no "#n" in it linked, as in inline code.
-  for (const m of text.matchAll(/```[\s\S]*?(?:```|$)|`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
-    const start = m.index ?? 0;
-    if (start > last) parts.push(<WithMentions key={last} text={text.slice(last, start)} bots={bots} everyone={everyone} fileHref={fileHref} />);
-    if (m[0].startsWith("```")) parts.push(<ThreadReferences key={start} text={m[0]} fileHref={fileHref} pulls={false} />);
-    else if (m[1]) parts.push(<code key={start}><ThreadReferences text={m[1]} fileHref={fileHref} pulls={false} /></code>);
-    else if (m[2]) parts.push(<strong key={start}><WithMentions text={m[2]} bots={bots} everyone={everyone} fileHref={fileHref} /></strong>);
-    else parts.push(<WebLink key={start} url={m[4]!}>{m[3]}</WebLink>);
-    last = start + m[0].length;
-  }
-  if (last < text.length) parts.push(<WithMentions key={last} text={text.slice(last)} bots={bots} everyone={everyone} fileHref={fileHref} />);
-  return <>{parts}</>;
+  return <ChatText text={text} plain={(t) => <WithMentions text={t} bots={bots} everyone={everyone} fileHref={fileHref} />} code={(t) => <ThreadReferences text={t} fileHref={fileHref} pulls={false} />} />;
 });
 
 type Block = { kind: "divider"; at: number; key: string } | { kind: "events"; messages: BotMessage[] } | { kind: "group"; author: string; messages: BotMessage[] };
@@ -2196,30 +2190,44 @@ const EventRun = memo(function EventRun({ messages, bots, since }: { messages: B
   );
 });
 
-/** The draft drawn behind the (transparent) textarea, so @mentions show as tags while you type. */
+/** Marks a mention can be inside of and still be a tag: the others are code, or Markdown's own characters. */
+const AROUND_MENTION = new Set<DraftMarkKind>(["bold", "italic"]);
+
+/**
+ * The draft drawn behind the (transparent) textarea, as its message will show it: bold, italic,
+ * code and lists (lib/chatText.ts, the parser the bubble uses), and @mentions as tags. Every
+ * character stays where the textarea has it, so nothing here may change how wide the text is.
+ */
 function DraftBackdrop({ text, bots, everyone, scroll }: { text: string; bots: Bot[]; everyone: Bot[]; scroll: React.RefObject<HTMLDivElement | null> }) {
+  const marks = useMemo(() => draftMarks(text), [text]);
+  // A mention is a tag where it is whole: not in code, and not cut by a mark.
+  const tags = tagsIn(text, bots, everyone).filter((t) => marks.every((m) => m.end <= t.start || m.at >= t.end || (AROUND_MENTION.has(m.kind) && m.at <= t.start && m.end >= t.end)));
+  const cuts = [...new Set([0, text.length, ...marks.flatMap((m) => [m.at, m.end]), ...tags.flatMap((t) => [t.start, t.end])])].sort((a, b) => a - b);
   const parts: React.ReactNode[] = [];
-  let last = 0;
-  for (const { start, end, bot } of tagsIn(text, bots, everyone)) {
-    if (start > last) parts.push(text.slice(last, start));
-    parts.push(
-      bot ? (
-        <span key={start} className="bots-draft-mention" style={{ "--mention": colorOf(bot.look).hex } as React.CSSProperties}>
-          <MentionAt bot={bot} />
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const start = cuts[i]!;
+    const end = cuts[i + 1]!;
+    const drawn = cx(...new Set(marks.filter((m) => m.at <= start && m.end >= end).map((m) => `bots-draft-${m.kind}`)));
+    const tag = tags.find((t) => t.start === start);
+    if (!tag) parts.push(drawn ? <span key={start} className={drawn}>{text.slice(start, end)}</span> : text.slice(start, end));
+    else if (tag.bot)
+      parts.push(
+        <span key={start} className={cx("bots-draft-mention", drawn)} style={{ "--mention": colorOf(tag.bot.look).hex } as React.CSSProperties}>
+          <MentionAt bot={tag.bot} />
           {text.slice(start + 1, end)}
-        </span>
-      ) : (
+        </span>,
+      );
+    else
+      parts.push(
         // The textarea's caret needs the tag exactly as wide as its text, so the mascots squeeze into that.
         <span key={start} className="bots-draft-mention bots-draft-all">
           {text.slice(start, end)}
           <Mascots bots={everyone} size={12} />
-        </span>
-      ),
-    );
-    last = end;
+        </span>,
+      );
   }
   // A trailing newline needs something after it to take up its line.
-  parts.push(text.slice(last) + "\u200b");
+  parts.push("\u200b");
   return (
     <div ref={scroll} className="bots-composer-input bots-draft" aria-hidden>
       {parts}
@@ -2416,7 +2424,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const send = () => {
     const sent = box.current;
     const { images } = sent;
-    const body = sent.text.trim();
+    const body = withoutOpenItem(sent.text);
     if (!body && !images.length) return;
     const pictures = images.filter((item) => !parseFileRef(item));
     const files = images.flatMap((item) => parseFileRef(item) ?? []);
@@ -2563,6 +2571,38 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     const open = query !== undefined && (/^[\p{L}\d_-]*$/u.test(query) || matchMentionBots(members, query).length > 0);
     setMention(open ? { query, index: 0 } : undefined);
   };
+  /** The field's text changed: typed, or put in by `edit`. */
+  const changed = (el: HTMLTextAreaElement) => {
+    lastTyped.current = Date.now();
+    keepPlace(el);
+    setText(el.value);
+    setStashOpen(false);
+    findMention(el.value, el.selectionStart);
+  };
+  /**
+   * A list's own edit (lib/smartInput.ts) goes into the field the way typing does, only what
+   * differs, so the browser's undo takes it back like anything typed.
+   */
+  const edit = (el: HTMLTextAreaElement, next: Edit) => {
+    const old = el.value;
+    let from = 0;
+    while (from < old.length && old[from] === next.text[from]) from++;
+    let kept = 0;
+    while (kept < old.length - from && kept < next.text.length - from && old[old.length - 1 - kept] === next.text[next.text.length - 1 - kept]) kept++;
+    const put = next.text.slice(from, next.text.length - kept);
+    el.setSelectionRange(from, old.length - kept);
+    const typed = put ? document.execCommand("insertText", false, put) : document.execCommand("delete");
+    // Typed, the field has said so itself (onChange). A browser that won't type for us: the text
+    // is set, and only this one step can't be undone.
+    const set = !typed || el.value !== next.text;
+    if (set) el.value = next.text;
+    el.setSelectionRange(next.start, next.end);
+    if (set) changed(el);
+    else {
+      keepPlace(el);
+      findMention(el.value, next.start);
+    }
+  };
   const insertMention = (tag: string) => {
     const el = input.current!;
     const caret = el.selectionStart;
@@ -2691,11 +2731,18 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             enterKeyHint={touch ? "enter" : "send"}
             {...dictation.fieldProps}
             onChange={(e) => {
-              lastTyped.current = Date.now();
-              keepPlace(e.currentTarget);
-              setText(e.target.value);
-              setStashOpen(false);
-              findMention(e.target.value, e.target.selectionStart);
+              const el = e.currentTarget;
+              const before = text;
+              changed(el);
+              // Any other edit that adds or takes away a numbered item (a selection deleted or typed
+              // over, Delete, a word or line deleted at once, a cut, a paste): the numbers below
+              // follow (lib/smartInput.ts). Not on undo, which would only put them back again.
+              const { inputType, isComposing } = e.nativeEvent as InputEvent;
+              if (isComposing || inputType?.startsWith("history")) return;
+              const after = el.value;
+              const fixed = renumberAfter(before, after, el.selectionStart, el.selectionEnd);
+              // Once the field's own input is over, so the numbers are typed as a step of their own.
+              if (fixed) queueMicrotask(() => el.value === after && document.activeElement === el && edit(el, fixed));
             }}
             onSelect={(e) => keepPlace(e.currentTarget)}
             onScroll={(e) => {
@@ -2741,6 +2788,15 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
                   setMention(undefined);
                   return;
                 }
+              }
+              // A new line in a list starts its next item, or ends the list on an empty one. Backspace
+              // on an item's mark takes the mark away whole. The numbers below follow (lib/smartInput.ts).
+              const listKey = e.altKey || e.metaKey || e.ctrlKey ? undefined : e.key === "Backspace" ? unlist : e.key === "Enter" && (e.shiftKey || touch) ? continueList : undefined;
+              const listed = listKey?.(e.currentTarget.value, e.currentTarget.selectionStart, e.currentTarget.selectionEnd);
+              if (listed) {
+                e.preventDefault();
+                edit(e.currentTarget, listed);
+                return;
               }
               // A mention goes as one piece: backspacing into it selects the whole tag, and the native delete removes it.
               if (e.key === "Backspace" && !e.altKey && !e.metaKey && !e.ctrlKey) {

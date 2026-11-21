@@ -896,14 +896,46 @@ export function isStopRequest(text: string): boolean {
   return said.length <= 60 && STOP_REQUEST.test(said);
 }
 
-/** A bot's plain reply as chat bubbles, one per paragraph. */
-export const replyBubbles = (text: string) =>
-  text
-    .split(/\n{2,}/)
-    // The marker closing a paragraph ("Done.[silent]", a reply and then silence run together) goes; the words stay.
-    .map((s) => s.replace(/(?:\s*\[\s*silent\s*\])+\s*$/i, "").trim())
-    .filter((s) => s && !onlySilent(s))
-    .slice(0, 6);
+/** A list line, as the chat draws it: a dash, a star, a dot or a number, and its "." or ")". */
+const LIST_LINE = /^ {0,3}(?:[-*•]|\d{1,3}[.)])[ \t]+/;
+/** Code, as the chat draws it (lib/chatText.ts): from a fence to the next one, or to the end when it is never closed. */
+const CODE = /```[\s\S]*?(?:```|$)/g;
+
+/**
+ * A reply's bubbles: its paragraphs, split at blank lines. A blank line inside a code block stays in
+ * the block, and so does one between two items of a list, so neither is cut in two.
+ */
+export const replyBubbles = (text: string) => {
+  const code = [...text.matchAll(CODE)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const);
+  const lines = text.split("\n");
+  const starts: number[] = [];
+  lines.reduce((at, l) => (starts.push(at), at + l.length + 1), 0);
+  const inCode = (at: number) => code.some(([from, to]) => at > from && at < to);
+  // The next line that isn't blank, and the last one already in the bubble.
+  const nextText = (from: number) => lines.slice(from).find((l) => l !== "");
+  const parts: string[][] = [[]];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const bubble = parts.at(-1)!;
+    if (line === "" && !inCode(starts[i]!)) {
+      const before = [...bubble].reverse().find((l) => l !== "");
+      const next = nextText(i + 1);
+      if (!(before !== undefined && LIST_LINE.test(before) && next !== undefined && LIST_LINE.test(next))) {
+        parts.push([]);
+        continue;
+      }
+    }
+    bubble.push(line);
+  }
+  return (
+    parts
+      .map((p) => p.join("\n"))
+      // The marker closing a paragraph ("Done.[silent]", a reply and then silence run together) goes; the words stay.
+      .map((s) => s.replace(/(?:\s*\[\s*silent\s*\])+\s*$/i, "").trim())
+      .filter((s) => s && !onlySilent(s))
+      .slice(0, 6)
+  );
+};
 
 export const DEFAULT_SETTINGS: BotsSettings = { quietHours: { from: 22, to: 8 }, sections: [] };
 

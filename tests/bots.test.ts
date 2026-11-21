@@ -13,6 +13,19 @@ test("[silent] never becomes a bubble", () => {
   expect(replyBubbles("One\n\nTwo")).toEqual(["One", "Two"]);
 });
 
+test("a reply's blank lines split it into bubbles, but never inside a code block or a list", () => {
+  // A code block keeps its blank lines, so the block is whole in its bubble.
+  expect(replyBubbles("Try:\n\n```sh\nls\n\npwd\n```\n\nDone.")).toEqual(["Try:", "```sh\nls\n\npwd\n```", "Done."]);
+  // An unclosed block runs to the end of the reply, as the chat draws it.
+  expect(replyBubbles("a\n```\nx\n\ny")).toEqual(["a\n```\nx\n\ny"]);
+  // A one-line block is closed on its own line.
+  expect(replyBubbles("```ls```\n\nafter")).toEqual(["```ls```", "after"]);
+  // Items of one list stay together; text after the list is a bubble of its own.
+  expect(replyBubbles("- one\n\n- two\n\nAfter")).toEqual(["- one\n\n- two", "After"]);
+  expect(replyBubbles("1. a\n\n2. b")).toEqual(["1. a\n\n2. b"]);
+  expect(replyBubbles("x\n\n\n\ny")).toEqual(["x", "y"]);
+});
+
 test("@mentions match a bot's whole name, spaces and all", () => {
   const bots = [{ name: "Dr Eggbot" }, { name: "Dr" }, { name: "helper · notes" }];
   const found = (text: string) => findMentions(text, bots).map((m) => [text.slice(m.start, m.end), m.bot.name]);

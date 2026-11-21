@@ -155,8 +155,8 @@ const slow = (what: string, started: number) => {
   if (seconds > 2) console.log(`[chromePage] ${what} took ${seconds.toFixed(1)} s`);
 };
 
-/** Starts Chrome; `close` stops it and removes its profile. */
-export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
+/** Starts Chrome, with `flags` after the usual ones; `close` stops it and removes its profile. */
+export async function launchChrome(flags: string[] = []): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
   const started = performance.now();
   const profile = await mkdtemp(join(tmpdir(), "openbuild-chrome-"));
   const env = { ...process.env };
@@ -168,6 +168,7 @@ export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Prom
     "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync",
     "--hide-scrollbars", `--user-data-dir=${profile}`, "--remote-debugging-port=0",
     ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+    ...flags,
   ], { detached: true, stdio: ["ignore", "ignore", "pipe"], env });
   const url = await new Promise<string>((resolve, reject) => {
     let err = "";

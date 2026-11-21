@@ -9,6 +9,7 @@ import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
 import { eventDetail, eventText } from "../../../shared/bots";
 import type { FriendFrom } from "../../../shared/friends";
 import { accountName } from "../../lib/models";
+import { oneLine } from "../../lib/chatText";
 import { BotAvatar, BotHuddle, BotLineup } from "./BotAvatar";
 import { clock } from "../../lib/clock";
 
@@ -67,7 +68,8 @@ export function messageText(m: BotMessage): string {
     const detail = eventDetail(m.event);
     return [eventText(m.event), detail && m.event.kind === "model" ? `(${accountName(detail)})` : detail].filter(Boolean).join(" ");
   }
-  const text = m.text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+  // Without Markdown's own marks ("**", a list's "-", a heading's "#"): a line that names the message.
+  const text = oneLine(m.text);
   if (text) return text;
   if (m.files?.length) return m.files.length === 1 ? `📎 ${m.files[0]!.name}` : `📎 ${m.files.length + (m.images?.length ?? 0)} files`;
   return m.images?.length ? (m.images.length === 1 ? "📷 Photo" : `📷 ${m.images.length} photos`) : "";
