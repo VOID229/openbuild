@@ -257,6 +257,34 @@ describe.skipIf(!browser)("the composer's Markdown", () => {
     expect(await page.posts()).toEqual([]);
   }, 60_000);
 
+  // One quote a mark ran the browser's stack out, and the chat with it: a friend's message can be
+  // thousands of ">" and nothing else. Sixteen nest; the rest is text, as it was written.
+  test("5,000 quote marks leave the chat standing, as a message and as a draft", async () => {
+    const page = await open();
+    const standing = () => page.eval<{ field: boolean; rows: number; quotes: number; rest: number }>(`({
+      field: !!${FIELD},
+      rows: document.querySelectorAll('.bm-row').length,
+      quotes: document.querySelectorAll('.bm-row blockquote').length,
+      rest: [...document.querySelectorAll('.bm-row blockquote .chat-p')].at(-1)?.textContent.length ?? 0,
+    })`);
+    const before = (await standing()).rows;
+    await page.eval(`(() => {
+      const s = window.bots.getState();
+      window.bots.setState({ conversations: s.conversations.map((c) => ({ ...c, messages: [...c.messages, { id: "deep", author: "manager", at: Date.now(), text: ">".repeat(5000) }] })) });
+      return true;
+    })()`);
+    await page.until(`!${FIELD} || document.querySelectorAll('.bm-row blockquote').length > 0`);
+    expect(await standing()).toEqual({ field: true, rows: before + 1, quotes: 16, rest: 4984 });
+
+    await page.type(">".repeat(5000));
+    await page.until(`!${FIELD} || document.querySelectorAll('.bots-draft-mark').length > 0`);
+    expect((await standing()).field).toBe(true);
+    const drawn = await page.drawn();
+    expect(drawn.slice(0, 16)).toEqual(Array.from({ length: 16 }, () => ["mark", ">"]));
+    expect(drawn.slice(16).map(([how, text]) => [how, text.length])).toEqual([["", 4984]]);
+    expect(await page.eval<number>(`${FIELD}.value.length`)).toBe(5000);
+  }, 60_000);
+
   // The caret and the selection are the textarea's, whose text is all one face. What the backdrop
   // draws over it may be bold, slanted or boxed, but never wider or narrower, or the caret would
   // drift from the text, further along each line. (A heavier face is wider: bold is a stroke.)

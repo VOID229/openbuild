@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatText } from "../src/components/ChatText";
-import { chatBlocks, chatTokens, draftMarks, oneLine, unmarked, type ChatToken } from "../src/lib/chatText";
+import { chatBlocks, chatTokens, draftMarks, MAX_QUOTE_DEPTH, oneLine, unmarked, type ChatBlock, type ChatToken } from "../src/lib/chatText";
 
 /** Tokens by kind and text, with what is inside bold and italic. */
 const shape = (tokens: ChatToken[]): unknown[] => tokens.map((t) => (t.kind === "bold" || t.kind === "italic" ? [t.kind, shape(t.tokens)] : [t.kind, t.text]));
@@ -168,4 +168,44 @@ test("a bubble lays out its blocks: bold headings, quotes, dividers and tables, 
   expect(html).toContain('<th style="text-align:left">[a]</th>');
   expect(html).toContain('<a class="link" href="https://dkod.ai"');
   expect(html).toContain("[@Ann]");
+});
+
+/** How many quotes are open inside one another, at the deepest. */
+const quoteDepth = (blocks: ChatBlock[]): number => Math.max(0, ...blocks.map((b) => (b.kind === "quote" ? 1 + quoteDepth(b.blocks) : 0)));
+/** The blocks inside the innermost quote. */
+const innermost = (blocks: ChatBlock[]): ChatBlock[] => (blocks[0]?.kind === "quote" ? innermost(blocks[0].blocks) : blocks);
+
+test("quotes nest sixteen deep, and a quote mark deeper than that is text", () => {
+  expect(MAX_QUOTE_DEPTH).toBe(16);
+  const full = chatBlocks(`${"> ".repeat(16)}deep`);
+  expect(quoteDepth(full)).toBe(16);
+  expect(innermost(full)).toMatchObject([{ kind: "text", tokens: [{ kind: "text", text: "deep" }] }]);
+  // One more: the seventeenth mark is the innermost quote's own words, at its place in the message.
+  const over = chatBlocks(`${"> ".repeat(16)}> deep`);
+  expect(quoteDepth(over)).toBe(16);
+  expect(innermost(over)).toMatchObject([{ kind: "text", at: 32, tokens: [{ kind: "text", at: 32, end: 38, text: "> deep" }] }]);
+  // Past the limit a ">" line starts no block, so it doesn't end a table either.
+  const table = innermost(chatBlocks(["| a |", "| - |", "> b"].map((l) => "> ".repeat(16) + l).join("\n")));
+  expect(table).toMatchObject([{ kind: "table", rows: [[[{ kind: "text", text: "> b" }]]] }]);
+});
+
+// A friend's message can be thousands of ">" and nothing else. One level a mark ran the stack out in
+// a browser, in the bubble that lays the message out and in the composer that draws a draft.
+test("a message of 5,000 quote marks is sixteen quotes around the rest as text, in a bubble", () => {
+  const text = ">".repeat(5000);
+  const blocks = chatBlocks(text);
+  expect(quoteDepth(blocks)).toBe(MAX_QUOTE_DEPTH);
+  expect(innermost(blocks)).toEqual([{ kind: "text", at: 16, tokens: [{ kind: "text", at: 16, end: 5000, text: ">".repeat(4984) }] }]);
+  const html = renderToStaticMarkup(createElement(ChatText, { text }));
+  expect(html.match(/<blockquote/g)).toHaveLength(MAX_QUOTE_DEPTH);
+  expect(html).toContain(`<span class="chat-p">${"&gt;".repeat(4984)}</span>`);
+  // Each on a line of its own, and with a space after each, are the same message to the limit.
+  expect(quoteDepth(chatBlocks("> ".repeat(5000)))).toBe(MAX_QUOTE_DEPTH);
+  expect(quoteDepth(chatBlocks(Array.from({ length: 40 }, () => `${">".repeat(200)} x`).join("\n")))).toBe(MAX_QUOTE_DEPTH);
+});
+
+test("a draft of 5,000 quote marks draws sixteen of them as marks and the rest as it was typed", () => {
+  const marks = draftMarks(">".repeat(5000));
+  expect(marks).toEqual(Array.from({ length: MAX_QUOTE_DEPTH }, (_, at) => ({ at, end: at + 1, kind: "mark" as const })));
+  expect(draftMarks("> ".repeat(5000))).toHaveLength(MAX_QUOTE_DEPTH);
 });

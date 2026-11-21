@@ -38,6 +38,12 @@ const RULE = /^ {0,3}-{3,}[ \t]*$/;
 const HEADING = /^( {0,3})(#{1,3})([ \t]+)(\S.*?)[ \t]*$/;
 /** A quote line: ">" and one space after it, if there is one. */
 const QUOTE = /^( {0,3})>( ?)/;
+/**
+ * How deep a quote nests. Each level is a call deeper here, in the draft's marks and in the bubble
+ * that lays it out, so a message of nothing but ">" (a friend's can be thousands) would run the
+ * stack out and take the chat down. A ">" deeper than this is text, as it was written.
+ */
+export const MAX_QUOTE_DEPTH = 16;
 /** A table's delimiter cell: dashes, with a colon on either end for the alignment. */
 const DELIMITER_CELL = /^:?-+:?$/;
 
@@ -135,7 +141,7 @@ function cellsOf(line: Line): Line[] {
 const isDelimiter = (line: Line, columns: number) => line.text.includes("|") && cellsOf(line).length === columns && cellsOf(line).every((c) => DELIMITER_CELL.test(c.text));
 
 /** A line that starts a block of its own (a list item, divider, heading or quote), so it isn't a table row. */
-const startsBlock = (text: string) => ITEM.test(text) || RULE.test(text) || HEADING.test(text) || QUOTE.test(text);
+const startsBlock = (text: string, quotes: boolean) => ITEM.test(text) || RULE.test(text) || HEADING.test(text) || (quotes && QUOTE.test(text));
 
 const alignOf = (cell: string): ChatAlign => {
   const left = cell.startsWith(":");
@@ -144,7 +150,9 @@ const alignOf = (cell: string): ChatAlign => {
 };
 
 /** Lines as blocks: lists, headings, dividers, quotes and tables, and the text between them. */
-function blocksOf(lines: Line[]): ChatBlock[] {
+function blocksOf(lines: Line[], depth = 0): ChatBlock[] {
+  // `depth` quotes are already open around these lines: at the limit, a ">" starts no more.
+  const quotes = depth < MAX_QUOTE_DEPTH;
   const out: ChatBlock[] = [];
   let run: Line[] = [];
   const flush = () => {
@@ -189,7 +197,7 @@ function blocksOf(lines: Line[]): ChatBlock[] {
       out.push({ kind: "heading", at, end: contentAt + body.length, mark: [at + indent.length, contentAt], tokens: chatTokens(body, contentAt) });
       continue;
     }
-    if (QUOTE.test(text)) {
+    if (quotes && QUOTE.test(text)) {
       flush();
       const group: Line[] = [];
       while (i < lines.length && QUOTE.test(lines[i]!.text)) group.push(lines[i++]!);
@@ -201,7 +209,7 @@ function blocksOf(lines: Line[]): ChatBlock[] {
         return { at: l.at + prefix.length, text: l.text.slice(prefix.length) };
       });
       const last = group[group.length - 1]!;
-      out.push({ kind: "quote", at, end: last.at + last.text.length, bars, blocks: blocksOf(inner) });
+      out.push({ kind: "quote", at, end: last.at + last.text.length, bars, blocks: blocksOf(inner, depth + 1) });
       continue;
     }
     const next = lines[i + 1];
@@ -211,7 +219,7 @@ function blocksOf(lines: Line[]): ChatBlock[] {
       const rows: Line[][] = [];
       let j = i + 2;
       // Rows go on until a blank line or the start of another block, as in GitHub's Markdown.
-      while (j < lines.length && lines[j]!.text.trim() && !startsBlock(lines[j]!.text)) rows.push(cellsOf(lines[j++]!));
+      while (j < lines.length && lines[j]!.text.trim() && !startsBlock(lines[j]!.text, quotes)) rows.push(cellsOf(lines[j++]!));
       const last = j > i + 2 ? lines[j - 1]! : next;
       // A row has as many cells as the header: more are left out, fewer are empty.
       const fit = (cells: Line[]) => head.map((_, c) => (cells[c] ? chatTokens(cells[c]!.text, cells[c]!.at) : []));
