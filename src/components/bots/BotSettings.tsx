@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 import { botNameError } from "../../../shared/bots";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
-import { useBotModels } from "../../lib/bots/models";
+import { modelLabel, useBotModels } from "../../lib/bots/models";
 import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
@@ -339,7 +339,7 @@ export function BotsSettingsSection() {
   const searching = useConfiguredProviders();
   const harnesses = useAllowedHarnesses();
   const extensions = useExtensionsSummary();
-  const { listing } = useBotModels();
+  const models = useBotModels();
   // Saves show no progress; only a failed one is worth interrupting for.
   const syncStatus = error && <div className="bots-sync-status" role="alert">
     <span>{error}</span>
@@ -425,7 +425,8 @@ export function BotsSettingsSection() {
       </>
     );
 
-  const modelName = defaultModel ? (listing?.models.find((m) => m.id === defaultModel)?.name ?? defaultModel) : "Pi's default";
+  // Not named yet: a quiet space, never the raw id (BotModelSelect does the same).
+  const modelName = defaultModel ? (modelLabel(defaultModel, models) ?? <span className="model-name-pending" aria-label="Loading model" />) : "Pi's default";
   return (
     <>
       <SettingsHeading>Bots</SettingsHeading>

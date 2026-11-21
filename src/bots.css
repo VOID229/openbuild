@@ -3729,6 +3729,19 @@
   margin: 0 auto;
 }
 
+/* A model's name before the first listing ever came (BotModelSelect, Settings → Bots): a quiet bar in
+   the text's own colour, about a name's width, so nothing moves when the name takes its place. */
+.model-name-pending {
+  display: inline-block;
+  width: 6em;
+  max-width: 100%;
+  height: 0.7em;
+  border-radius: var(--radius-sm);
+  background: currentColor;
+  opacity: 0.14;
+  vertical-align: -0.05em;
+}
+
 /* Like the thread composer: flat on the pane, drawn by a faint hairline alone, its tools in
    monochrome on either side of the text, the send button and the files button each `--bots-pad` in
    from the hairline. Its corners stay that size as a long draft or attachments make it taller. */

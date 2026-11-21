@@ -8,6 +8,7 @@
 // under its own id: it isn't moved, merged, deleted or sent here.
 import { create } from "zustand";
 import { config } from "../runtime";
+import { claimBotModels } from "./modelsCache";
 import { useStore } from "../store";
 
 export const WORKSPACE_PARAM = "workspace";
@@ -30,7 +31,11 @@ export const useWorkspace = create<WorkspaceState>(() => ({}));
 /** This server's id and name, from /api/config. */
 export async function localWorkspace(): Promise<{ id?: string; name?: string }> {
   const c = await config;
-  if (c.serverId) useWorkspace.setState({ localId: c.serverId, localName: c.machine });
+  if (c.serverId) {
+    useWorkspace.setState({ localId: c.serverId, localName: c.machine });
+    // The model listing kept in this browser is this server's, or it goes (modelsCache.ts).
+    claimBotModels(c.serverId);
+  }
   const { localId, localName } = useWorkspace.getState();
   return { id: localId, name: localName };
 }

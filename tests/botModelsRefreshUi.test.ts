@@ -19,6 +19,7 @@ const { useWorkspace } = await import("../src/lib/bots/workspace");
 useWorkspace.setState({ localId: "srv", localName: "Studio" });
 enterWorkspace("srv");
 const { BotModelSelect } = await import("../src/components/bots/BotAdvanced");
+const { resetBotModels } = await import("../src/lib/bots/models");
 const { BotExtensions, useExtensionsSummary } = await import("../src/components/bots/BotExtensions");
 type Bot = import("../src/lib/bots/types").Bot;
 
@@ -31,6 +32,9 @@ let host: HTMLElement;
 let root: ReturnType<typeof createRoot>;
 
 beforeEach(() => {
+  // The listing is one for the page, kept in the browser: each test starts as a first visit.
+  win.localStorage.clear();
+  resetBotModels();
   asked = [];
   loaded = ["extensions/bridge.ts"];
   globalThis.fetch = (async (path: string, init?: RequestInit) => {
@@ -85,9 +89,11 @@ test("switching an extension off refreshes an open picker and names the bot left
 
   await click(document.querySelector('[role="switch"][aria-label="Load Bridge"]')!);
   await frames();
-  // The picker already on screen took the fresh listing, without being remounted.
+  // The picker already on screen took the fresh listing, without being remounted. The model it's
+  // left on reads by the name it had, never its raw id.
   expect(asked.at(-1)).toBe("/api/bots/models?fresh=1");
-  expect(picker().textContent).toContain("bridge/x (unavailable)");
+  expect(picker().textContent).toContain("Bridged X (unavailable)");
+  expect(picker().textContent).not.toContain("bridge/x");
   expect(alert()).toContain("Bots can't use bridge/x (Scout) with the extensions loaded now");
   expect(host.querySelector(".extensions-summary")!.textContent).toBe("1 model unavailable");
 
@@ -103,6 +109,35 @@ test("switching every custom extension off at once does the same", async () => {
   await click(document.querySelector('[role="switch"][aria-label="Load my Pi extensions too"]')!);
   await frames();
   expect(useBots.getState().customExtensions).toEqual({ enabled: false, ids: ["extensions/bridge.ts"] });
-  expect(picker().textContent).toContain("bridge/x (unavailable)");
+  expect(picker().textContent).toContain("Bridged X (unavailable)");
   expect(alert()).toContain("Bots can't use bridge/x (Scout)");
+});
+
+// Last: once this server's id is known, it stays known for the rest of the file.
+test("a listing kept from another server at this address goes once this one is known, and the open picker asks again", async () => {
+  const { claimBotModels } = await import("../src/lib/bots/modelsCache");
+  win.localStorage.setItem("openbuild:bot-models:v1", JSON.stringify({ owner: "elsewhere", listing: { models: [{ ...bridged, name: "Another server's X" }], checkedAt: 1 } }));
+  resetBotModels();
+  const answer = globalThis.fetch;
+  const waiting: (() => void)[] = [];
+  globalThis.fetch = (async (path: string, init?: RequestInit) => {
+    if (path.startsWith("/api/bots/models")) await new Promise<void>((r) => waiting.push(r));
+    return answer(path, init);
+  }) as unknown as typeof fetch;
+  await mount();
+  // Until /api/config has answered there's no telling whose copy it is: it names the model.
+  expect(picker().textContent).toContain("Another server's X");
+  expect(waiting).toHaveLength(1);
+
+  await act(async () => claimBotModels("srv"));
+  expect(win.localStorage.getItem("openbuild:bot-models:v1")).toBeNull();
+  expect(picker().textContent).not.toContain("Another server's X");
+  expect(picker().textContent).not.toContain("bridge/x");
+  expect(picker().querySelector(".model-name-pending")).not.toBeNull();
+  // The ask already on its way counts for nothing now; the picker on screen asked again.
+  expect(waiting).toHaveLength(2);
+  waiting.forEach((release) => release());
+  await frames();
+  expect(picker().textContent).toContain("Bridged X");
+  expect(JSON.parse(win.localStorage.getItem("openbuild:bot-models:v1")!).owner).toBe("srv");
 });
