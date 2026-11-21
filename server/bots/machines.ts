@@ -10,6 +10,7 @@ import type { BotToolGrants } from "../../shared/types";
 import { computerApi, computerTargets } from "../computers/api";
 import { engines } from "../computers/index";
 import * as devices from "../devices";
+import * as db from "./db";
 import { BotsError, getSettings, updateSettings } from "./service";
 
 /** The isolation the user chose for a machine in Settings → Devices, if they chose one. */
@@ -72,7 +73,11 @@ export function resolveMachine(value: unknown): { device: string; name: string }
 }
 
 /** A bot's computer on the machine a call names, started if need be. A paired device's runs there or not at all. */
-export async function computerOn(botId: string, machine: unknown) {
+export async function computerOn(asked: string, machine: unknown) {
+  // A minion works on its owner's computers: what it makes is there for its owner, and nothing of its own is left to remove.
+  const minion = db.getBot(asked)?.minion;
+  if (minion && !db.getBot(minion.owner)) throw new BotsError("The bot you work for no longer exists.", 404);
+  const botId = minion?.owner ?? asked;
   const { device, name } = resolveMachine(machine);
   const api = computerApi(device);
   // Nothing chosen for a paired device: the host if its owner allows it, as Settings → Devices shows.

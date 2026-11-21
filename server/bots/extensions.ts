@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { HELPER_TOOLS, type BotExtension } from "../../shared/bots";
+import { HELPER_TOOLS, MINION_TOOLS, type BotExtension } from "../../shared/bots";
 import { FRIEND_TOOLS } from "../../shared/friends";
 import { agentDir } from "../pi/install";
 import * as resources from "../pi/resources";
@@ -15,7 +15,7 @@ import { BRIDGE_PACKAGE, bridgeExtension } from "./claude";
 import * as svc from "./service";
 
 const OWN = join(import.meta.dir, "extension.ts");
-const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "html_render", "todo", "memory", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "background", "jobs", "side_chat", "manage_bot", "openbuild", "plugins", "load_tools"].join(",");
+const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "html_render", "todo", "memory", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "background", "jobs", "side_chat", "manage_bot", "minion", "openbuild", "plugins", "load_tools"].join(",");
 const PACKAGE = "package:";
 
 const isLocal = (source: string) => !/^[a-z+]+:/i.test(source);
@@ -104,12 +104,13 @@ export function helperFlags(tools: boolean): string[] {
   return [...base(HELPER_SYSTEM_PROMPT), ...(tools ? ["--tools", HELPER_TOOLS.join(","), "-e", OWN] : ["--no-tools"]), ...bridge(extra), ...extra.flatMap((target) => ["-e", target])];
 }
 
-export function piFlags(): string[] {
+/** Pi for a bot's own turns. `minion`: a minion's, with a minion's tools (extension.ts registers no others for it). */
+export function piFlags(minion = false): string[] {
   const extra = selected();
   return [
     ...BASE,
     // The list keeps a bot to its own tools. An extension the user switched on brings tools of its own, so it goes.
-    ...(extra.length ? [] : ["--tools", TOOLS]),
+    ...(extra.length ? [] : ["--tools", minion ? MINION_TOOLS.join(",") : TOOLS]),
     "-e", OWN,
     ...bridge(extra),
     ...extra.flatMap((target) => ["-e", target]),

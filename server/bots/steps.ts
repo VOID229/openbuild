@@ -104,6 +104,7 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "poll") return "Starting a poll";
   if (tool === "react") return "Reacting";
   if (tool === "bash") return "Running a command";
+  if (tool === "minion") return a.action === "start" ? "Starting a minion" : a.action === "send" ? "Writing to a minion" : a.action === "close" || a.action === "retire" ? "Closing a minion" : a.action === "reopen" ? "Reopening a minion" : "Checking on minions";
   if (tool === "openbuild") return a.action === "start" ? "Starting a thread" : a.action === "merge" ? "Merging a pull request" : "Checking on threads";
   if (tool === "process") return a.action === "start" ? "Starting a program" : "Checking on a program";
   if (tool === "browser") {
