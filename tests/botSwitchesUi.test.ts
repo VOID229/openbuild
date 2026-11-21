@@ -43,6 +43,18 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+/**
+ * Waits, inside act, until `ok` holds: as long as it takes and no longer, so a slow runner isn't
+ * raced by a fixed sleep. It fails saying what never came.
+ */
+async function until(ok: () => boolean, what: string, timeout = 5000) {
+  const deadline = Date.now() + timeout;
+  while (!ok()) {
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}.`);
+    await act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+  }
+}
+
 async function mount(surface: "settings" | "advanced", extra?: Partial<Bot>) {
   useBots.setState({ bots: [bot(extra)] });
   const View = () => {
@@ -50,7 +62,8 @@ async function mount(surface: "settings" | "advanced", extra?: Partial<Bot>) {
     return surface === "advanced" ? createElement(BotAdvanced, { bot: current }) : createElement("section", null, createElement(BotSwitches, { bot: current }));
   };
   await act(async () => root.render(createElement(View)));
-  await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
+  // Both switches are there, each showing a state.
+  await until(() => ["Spawn minions", "Merge PRs"].every((label) => host.querySelector(`[role="switch"][aria-label="${label}"]`)?.hasAttribute("aria-checked")), "the two switches");
 }
 
 const rowLabels = () => [...host.querySelectorAll(".setting-row .setting-label")].map((el) => el.textContent);
@@ -116,8 +129,13 @@ test("opening a dropdown with the mouse leaves focus where it was", async () => 
   await act(async () => root.render(createElement(OptionSelect, { label: "Pick one", value: "a", options, onChange: () => {} })));
   const trigger = document.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!;
   await act(async () => { trigger.dispatchEvent(new win.MouseEvent("click", { bubbles: true, detail: 1 }) as any); });
-  await act(async () => { await new Promise((r) => setTimeout(r, 40)); });
-  const listed = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Pick one"] [role="option"]')];
+  const shown = () => [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Pick one"] [role="option"]')];
+  await until(() => shown().length === 3, "the dropdown's three options");
+  // Shown, two frames after it opened: the same two frames after which a keyboard open moves focus into
+  // the list (useSelectKeys), so by now a mouse open would have moved it too if it were going to.
+  await until(() => document.querySelector('[role="listbox"][aria-label="Pick one"]')?.getAttribute("data-state") === "open", "the dropdown to show");
+  await act(async () => { await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); });
+  const listed = shown();
   expect(listed).toHaveLength(3);
   expect(document.activeElement).not.toBe(listed[0]!);
 });
