@@ -46,7 +46,7 @@ for (const safe of [false, true]) test(`bot plugin boundaries and truthful toggl
     await a.rejects(call(primary.id, 'list'), /require access/);
     grant(primary.id, [project.id]); grant(other.id, [project.id]);
     const before = JSON.stringify(db.getBot(other.id));
-    a.match(guide(db.getBot(other.id)), /coding thread/);
+    a.match(guide(db.getBot(other.id)), /hand the work to a minion/);
     a.match((await call(other.id, 'guide')).guidance, /not sandboxed/);
     a.equal(JSON.stringify(db.getBot(other.id)), before);
     a.match(agent.contextFor(other.id), /plugins action guide/);

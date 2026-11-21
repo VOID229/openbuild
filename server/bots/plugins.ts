@@ -28,17 +28,17 @@ function authoringProject(bot: Pick<Bot, "threads">) {
 
 export function guide(bot: Pick<Bot, "threads" | "primary">): string {
   if (!authoringProject(bot)) return "";
-  return `For OpenBuild plugin authoring, call plugins action guide, then use an ordinary openbuild coding thread in your granted OpenBuild project. This gives no additional computer, host or file access. ${bot.primary ? "You alone can use plugins list, set (id, enabled), and system (enabled)." : "Only the primary bot can list plugins or change their switches."}`;
+  return `For OpenBuild plugin authoring, call plugins action guide, then hand the work to a minion, in your granted OpenBuild project's folder. This gives no additional computer, host or file access. ${bot.primary ? "You alone can use plugins list, set (id, enabled), and system (enabled)." : "Only the primary bot can list plugins or change their switches."}`;
 }
 
 export async function handle(botId: string, params: Record<string, unknown>) {
   const bot = db.getBot(botId);
   if (!bot) throw new BotsError("This bot no longer exists.", 404);
   const project = authoringProject(bot);
-  if (!project) throw new BotsError("Plugin tools require access to this installation's OpenBuild project in Settings → Bots.", 403);
+  if (!project) throw new BotsError("Plugin tools require access to this installation's OpenBuild project.", 403);
   if (params.action === "guide") return {
     project: { id: project.id, name: project.name },
-    guidance: `${PLUGIN_GUIDANCE_NOTE}Plugins are trusted executable code, not sandboxed. Use openbuild options, then start a normal coding thread in the project above. Ask it to read docs/plugins.md, implement and test the plugin in its worktree with defaultEnabled: false, and report the artifact and review instructions. Use openbuild read/send/answer to follow up. Keep existing harness permissions and approval boundaries. Do not install into the live plugins directory or activate code unless the user asked and the thread's existing permissions allow it. If installation needs access it lacks, leave the reviewed artifact for the user; do not change project grants or computer isolation. The primary can inspect the live directory and switches with plugins list. Toggles can execute trusted code immediately.`,
+    guidance: `${PLUGIN_GUIDANCE_NOTE}Plugins are trusted executable code, not sandboxed. Hand the authoring to a minion (minion start), with the project above's folder in its task. Ask it to read docs/plugins.md there, implement and test the plugin in a git worktree of its own with defaultEnabled: false, and report the artifact and review instructions. Use minion send to follow up. Do not install into the live plugins directory or activate code unless the user asked. If installation needs access it lacks, leave the reviewed artifact for the user; do not change project grants or computer isolation. The primary can inspect the live directory and switches with plugins list. Toggles can execute trusted code immediately.`,
   };
   if (!bot.primary) throw new BotsError("Only the primary bot can list plugins or change their switches.", 403);
   if (params.action === "list") return pluginControlInfo();

@@ -45,7 +45,7 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
     const patch = (before, after) => Object.keys(after).filter((k) => before[k] !== after[k]);
 
     const first = await turn();
-    a.deepEqual(Object.keys(first.sections), ['openbots', 'openbots_instructions', 'openbots_team', 'openbots_machines', 'openbots_routines', 'openbots_memory']);
+    a.deepEqual(Object.keys(first.sections), ['openbots', 'openbots_instructions', 'openbots_team', 'openbots_machines', 'openbots_minions', 'openbots_routines', 'openbots_memory']);
     a.equal(first.appendSystemPrompt, '', 'nothing left in the addendum to re-send whole');
     a.match(first.sections.openbots, /You are Boss, one of the user's bots/);
     a.match(first.sections.openbots_memory, /Likes tea/);

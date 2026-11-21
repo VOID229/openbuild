@@ -187,7 +187,8 @@ function ProfileCard({ id, bot, anchor, card, onPlaced, onDone, ...handlers }: {
   onBlur: (e: React.FocusEvent) => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
 }) {
-  const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
+  // A minion has one chat, the one with its owner.
+  const thread = useBots((s) => (directOf(s.conversations, bot.id) ?? (bot.minion ? s.conversations.find((c) => c.minion === bot.id) : undefined))?.id);
   // A bot is set up in its details panel, which another device's workspace keeps to itself.
   const remote = !!useRemoteWorkspace();
   const [pos, setPos] = useState<Pos>();

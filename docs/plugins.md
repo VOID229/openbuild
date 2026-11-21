@@ -186,8 +186,9 @@ The safe escape hatch is `OPENBUILD_SAFE=1` (or `?safe`): the app starts with no
 
 ## Bots authoring and controlling plugins
 
-A bot needs Run coding agents turned on and a grant to this installation's registered OpenBuild
-project (or a worktree of the same repository). An unrelated project, even one named OpenBuild,
+A bot needs its saved grant over OpenBuild projects to cover this installation's registered OpenBuild
+project (or a worktree of the same repository); every bot gets one that covers all projects. It hands
+the authoring itself to a minion (`docs/bot-minions.md`), since bots no longer start threads. An unrelated project, even one named OpenBuild,
 does not qualify. The existing “all projects” grant includes it only while it is registered.
 Grants are checked on every tool call, including after a grant is removed.
 

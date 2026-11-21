@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mentionName, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, looseMention, onlySilent, isStepStatus, mayMergePrs, mentionName, mergesPullRequest, resolveMentions, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type MissedMention, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -18,6 +18,7 @@ import * as db from "./db";
 import * as svc from "./service";
 import * as threads from "./threads";
 import * as plugins from "./plugins";
+import * as minions from "./minions";
 import { FRIEND_TOOLS } from "../../shared/friends";
 import { formatBytes, MAX_IMAGE_DATA_URL } from "../../shared/attachments";
 import { JobCancelled, runHelper, startJob } from "./helpers";
@@ -108,6 +109,9 @@ export const seams = { handle };
 export async function dispatch(botId: string, lane: string, method: string, params: Record<string, unknown>): Promise<unknown> {
   if (lane === "helper") return handleHelper(botId, method, params);
   if (lane !== "main") return handleFriend(botId, lane, method, params);
+  // A minion has its own few tools and its one chat (minions.ts), and a closed one has nothing.
+  const refused = minions.refusal(db.getBot(botId), method, params);
+  if (refused) throw new svc.BotsError(refused, 403);
   if (!DETACHABLE.has(method)) return seams.handle(botId, method, params);
   const conversationId = focus.get(botId);
   return runCall(botId, method, params, (signal) => pinned.run({ botId, conversationId }, () => seams.handle(botId, method, params, signal)), { conversationId });
@@ -121,8 +125,9 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
       const bot = requireBot(botId);
       const session = sessionKey(botId);
       const fresh = p.fresh === true;
-      sections.openbots_memory = steady(`${session}:memory`, sections.openbots_memory ?? "", new Map(bot.memory.map((m) => [m.id, memoryMark(m)])), fresh);
-      sections.openbots_routines = steady(`${session}:routines`, sections.openbots_routines ?? "", new Map(bot.routines.map((r) => [r.id, routineMark(r)])), fresh);
+      // A minion has no memory or routines of its own to keep steady: the rest is as any bot's.
+      if (!bot.minion) sections.openbots_memory = steady(`${session}:memory`, sections.openbots_memory ?? "", new Map(bot.memory.map((m) => [m.id, memoryMark(m)])), fresh);
+      if (!bot.minion) sections.openbots_routines = steady(`${session}:routines`, sections.openbots_routines ?? "", new Map(bot.routines.map((r) => [r.id, routineMark(r)])), fresh);
       // How to search the web and how to use apps ride with their tools: a bot that hasn't loaded
       // them gets a line saying what's there, and the rest when it loads one (tool_notes). A Pi that
       // doesn't say what it has loaded gets it all, as before.
@@ -172,7 +177,12 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
       return manage(botId, p);
     case "plugins":
       return plugins.handle(botId, p);
+    case "minion":
+      return minions.tool(botId, p, getFocus(botId));
     case "openbuild":
+      // A bot no longer starts a coding agent thread: a minion takes that work, and Build is the
+      // user's own. The threads it has from before stay its to follow, write to and close.
+      if (p.action === "start") throw new svc.BotsError(minions.NO_THREAD_START);
       return threads.handle(botId, p);
     case "bash":
       return bash(botId, p, signal);
@@ -368,9 +378,12 @@ export const ASKING =
  */
 export function contextSections(botId: string): Record<string, string> {
   const bot = requireBot(botId);
+  // A minion's context is its own: one owner, one task (minions.ts).
+  if (bot.minion) return minions.sections(bot);
   const settings = svc.getSettings();
   const user = settings.user?.name || "the user";
-  const everyone = db.listBots().filter((b) => b.id !== botId);
+  // Minions are their owners' alone: no other bot sees one in its team.
+  const everyone = db.listBots().filter((b) => b.id !== botId && !b.minion);
   const others = everyone.filter((b) => !b.retiredAt);
   // Only the primary can rehire one, so only it carries who's retired.
   const away = bot.primary ? everyone.filter((b) => b.retiredAt) : [];
@@ -427,6 +440,8 @@ export function contextSections(botId: string): Record<string, string> {
     openbots_instructions: join(instructions),
     openbots_team: join(team),
     openbots_machines: "You have a computer on each machine you can reach: a home folder, a terminal (bash), files (read, write, edit) and a browser. They stay around between chats.",
+    // The minions it has now, in a section of their own: making or closing one re-sends only this.
+    openbots_minions: minions.brief(bot),
     openbots_routines: routines,
     openbots_memory: memory,
   };
@@ -455,7 +470,7 @@ function conversationLine(c: db.StoredConversation, user: string): string {
 /** manage_bot team: the other bots' roles and full instructions, or one bot's. Read-only, for any bot: it's what their context used to carry. */
 function teamDetails(botId: string, which: unknown) {
   // The team is who can be asked: a retired bot is listed only for the primary, which can rehire it, or when named.
-  const all = db.listBots().filter((b) => !b.retiredAt || db.getBot(botId)?.primary);
+  const all = db.listBots().filter((b) => !b.minion && (!b.retiredAt || db.getBot(botId)?.primary));
   const picked = typeof which === "string" && which.trim() ? [db.getBot(resolveBot(which.trim(), true))!] : all.filter((b) => b.id !== botId);
   return picked.map((b) => ({ id: b.id.slice(0, 8), name: b.name, ...(b.primary ? { primary: true } : {}), ...(b.retiredAt ? { retired: true } : {}), ...(b.role ? { role: b.role } : {}), instructions: b.instructions || "no instructions yet" }));
 }
@@ -541,7 +556,7 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
 export function exactMentions(botId: string, conversationId: string, text: string): { text: string; missed: MissedMention[] } {
   const c = db.getConversation(conversationId);
   if (!c || c.kind !== "group" || c.friend || !text.includes("@")) return { text, missed: [] };
-  const all = db.listBots().filter((b) => !b.retiredAt);
+  const all = db.listBots().filter((b) => !b.retiredAt && !b.minion);
   const here = all.filter((b) => b.id !== botId && c.botIds.includes(b.id));
   const exact = resolveMentions(text, here, all.filter((b) => b.id !== botId && !c.botIds.includes(b.id)), [svc.getSettings().user?.name ?? "", mentionName(requireBot(botId).name)]);
   // A tag that reached nobody may name a retired bot: the sender hears that, not that there's no such bot.
@@ -1063,14 +1078,15 @@ export function sideChat(botId: string, p: Record<string, unknown>) {
  * naming one is refused unless `retired` is set: to rehire or delete it, read about it or change it.
  * A name an active bot and a retired one share means the active one.
  */
+/** A bot on the team, by name or id. Never a minion: only its owner reaches one, with the minion tool. */
 function resolveBot(prefix: string, retired = false): string {
   const refuse = (bot: db.StoredBot) => new svc.BotsError(`${bot.name} is retired: it can't be asked, messaged or added to a chat until it's rehired.`);
   const exact = db.getBot(prefix);
-  if (exact) {
+  if (exact && !exact.minion) {
     if (exact.retiredAt && !retired) throw refuse(exact);
     return prefix;
   }
-  const hits = db.listBots().filter((b) => b.id === prefix || b.id.startsWith(prefix) || [firstName(b.name), mentionName(b.name)].some((n) => n.toLowerCase() === prefix.toLowerCase()));
+  const hits = db.listBots().filter((b) => !b.minion && (b.id === prefix || b.id.startsWith(prefix) || [firstName(b.name), mentionName(b.name)].some((n) => n.toLowerCase() === prefix.toLowerCase())));
   const working = hits.filter((b) => !b.retiredAt);
   const pool = retired && working.length !== 1 ? hits : working;
   if (pool.length === 1) return pool[0]!.id;
@@ -1439,9 +1455,24 @@ async function keepOutput(api: { call: (id: string, op: string, body?: Record<st
   }
 }
 
+/** The bot whose Merge PRs switch holds for `botId`: its own, or a minion's owner's. */
+function mergeSwitchOf(botId: string): db.StoredBot | undefined {
+  const bot = db.getBot(botId);
+  return bot?.minion ? db.getBot(bot.minion.owner) : bot;
+}
+
+export const MERGE_OFF = "Merge PRs is turned off for you, so gh pr merge did not run. Leave the pull request open and tell the user it's ready for them to merge. They can turn Merge PRs on in your details, under Advanced.";
+
+/** Merge PRs off (shared/bots.ts mayMergePrs): a command that merges a pull request is refused, for the bot and for its minions. */
+export function mergeSwitch(botId: string, command: string) {
+  if (mergesPullRequest(command) && !mayMergePrs(mergeSwitchOf(botId))) throw new svc.BotsError(MERGE_OFF, 403);
+}
+
 async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSignal) {
-  const { api, id, on } = await computerOn(botId, p.machine);
   const command = String(p.command ?? "");
+  // Before the computer: getting one can take long enough that the call goes on as a background job.
+  mergeSwitch(botId, command);
+  const { api, id, on } = await computerOn(botId, p.machine);
   if (!command.trim()) throw new svc.BotsError("Give a command.");
   const chunks: Buffer[] = [];
   let size = 0;
@@ -1531,8 +1562,10 @@ async function browser(botId: string, p: Record<string, unknown>) {
 }
 
 async function processTool(botId: string, p: Record<string, unknown>) {
-  const { api, id, on } = await computerOn(botId, p.machine);
   const op = String(p.action ?? "list");
+  // A process runs a shell command; input to a running one can be a command too (a shell). Before the computer, as in bash.
+  for (const command of [op === "start" ? p.command : undefined, op === "read" ? p.input : undefined]) if (typeof command === "string") mergeSwitch(botId, command);
+  const { api, id, on } = await computerOn(botId, p.machine);
   const result = await api.call(id, "proc", { op: op === "start" ? "start" : op, command: p.command, name: p.name, id: p.id, input: p.input, all: p.all, notify: true });
   // Exits are told by the machine a process runs on, which only reaches bots on that machine.
   if (on && op === "start") return { ...result, ranOn: on, note: `It runs on ${on}, which can't tell you when it exits. Check on it with read, on machine ${on}.` };

@@ -18,7 +18,7 @@ import { botModels } from "../pi";
 import { useStore } from "../store";
 import { trackShown, type Shown } from "./activity";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { answerText, botChatName, botChatNames, castVote, cleanRole, marksUnread, toggleReactionIn, type ArrangeRequest, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
+import { answerText, botChatName, botChatNames, castVote, cleanRole, marksUnread, minionChatName, toggleReactionIn, type ArrangeRequest, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import type { Arrangement } from "./sidebarOrder";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
@@ -519,8 +519,10 @@ useBots.subscribe((state, prev) => {
   if (shown !== state.shown) useBots.setState({ shown });
 });
 
-/** A conversation's name as people read it: the group's, the bot's, or who's in it for a chat between bots. Bots read conversationTitle (shared/bots.ts), which keeps a side chat's topic. */
+/** A conversation's name as people read it: the group's, the bot's, a minion's tagged with its owner's ("Dashboard maker · Scout's"), or who's in it for a chat between bots. Bots read conversationTitle (shared/bots.ts), which keeps a side chat's topic. */
 export function conversationName(c: Conversation, bots: Bot[]): string {
+  const minion = minionChatName(c, bots);
+  if (minion) return minion;
   // A shared chat carries its friend's name as the tag the sidebar shows after a " · ".
   if (c.kind === "group" && c.friend) return `${c.name || "Shared chat"} · ${c.friend.friendName}`;
   if (c.kind === "group") return c.name || "Untitled group";

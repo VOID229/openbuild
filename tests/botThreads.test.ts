@@ -139,7 +139,7 @@ const ask = (over: object = {}) => ({ t: "ask" as const, id: "a1", method: "sele
 
 test("a bot has no access until the user gives it some, and can't give itself any", async () => {
   svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
-  await expect(call("options")).rejects.toThrow(/hasn't turned on Run coding agents/);
+  await expect(call("options")).rejects.toThrow(/You have no access to the user's coding agent threads/);
   expect(guide({ threads: undefined })).toBe("");
   expect(brief({ threads: undefined })).toBe("");
   const { manage } = await import("../server/bots/agent");
@@ -311,9 +311,9 @@ test("Run coding agents answers permission prompts; a bot that has lost it is to
   grant({ enabled: false });
   await settle();
   const off = wakes.find((w) => w.text.includes("Allow push"));
-  expect(off.text).toContain("Run coding agents is off for you now, so only the user");
+  expect(off.text).toContain("You have no access to the user's threads now, so only the user");
   expect(off.text).not.toContain("question p2");
-  await expect(call("answer", { thread: threadId, question: "p2", answer: "Allow once" })).rejects.toThrow(/hasn't turned on Run coding agents/);
+  await expect(call("answer", { thread: threadId, question: "p2", answer: "Allow once" })).rejects.toThrow(/You have no access to the user's coding agent threads/);
   expect(answers).toEqual([]);
 });
 
@@ -547,7 +547,7 @@ test("its status names a thread it waits on by its few words for what it does, o
   tool({ on() {}, registerTool(t: any) { tools.push(t); } } as any);
   const openbuild = tools.find((t) => t.name === "openbuild");
   expect(openbuild.parameters.properties.about.description).toContain("Waiting on <about>");
-  expect(openbuild.description).toContain("branch_name, about)");
+  expect(openbuild.description).toContain("send (thread, text, about,");
 
   // Without its words, the whole title: no "dele…".
   await as("start", { project: project.name, prompt: "Notify the primary", title });
@@ -691,7 +691,7 @@ test("a bot's message queued or steered for a thread keeps it open through its p
 
 test("merging needs the grant and every check green", async () => {
   view = { number: 7, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "failing" }], canWrite: true, methods: ["squash", "merge"], headSha: "abc" };
-  await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/aren't allowed/);
+  await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/Merge PRs is off for you/);
   grant({ merge: true });
   await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/every check/);
   view.checkList = [{ name: "ci", state: "passing" }];
@@ -720,7 +720,7 @@ test("Run coding agents controls threads it didn't start too: the user's and oth
   view = { number: 9, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "passing" }], canWrite: true, methods: ["squash"], headSha: "def" };
   storage.putChat({ ...(storage.getChat(theirs.id) as any), workspace: { ...theirs.workspace, worktree: true }, pullRequest: { number: 9 } } as never);
   // Merging is still its own grant, even for its own threads.
-  await expect(call("merge", { thread: theirs.id })).rejects.toThrow(/aren't allowed/);
+  await expect(call("merge", { thread: theirs.id })).rejects.toThrow(/Merge PRs is off for you/);
   grant({ merge: true });
   expect((await call("options")).you_may).toEqual({ control_any_thread_in_your_projects: true, choose_permissions: true, answer_permission_prompts: true, merge_pull_requests: true });
   expect(guide(svc.fullBot(bot.id)!)).toContain("including ones the user or other bots started");
@@ -1307,7 +1307,7 @@ test("the primary adds a project and starts a thread in it; other bots and stray
     svc.updateBot(other.id, { threads: { enabled: true, scope: "all", projects: [] } });
     await expect(handle(other.id, { action: "add_project", path: folder })).rejects.toThrow(/Only the primary/);
     svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
-    await expect(call("add_project", { path: folder })).rejects.toThrow(/hasn't turned on Run coding agents/);
+    await expect(call("add_project", { path: folder })).rejects.toThrow(/You have no access to the user's coding agent threads/);
     svc.retireBot(other.id);
     await svc.deleteBot(other.id);
     expect(guide({ threads: { enabled: true, scope: "all", projects: [] }, primary: true })).toContain("add_project");
@@ -1441,7 +1441,7 @@ test("how recent a thread is reads as a person would say it", () => {
 test("the guide and the tool's description give a way to judge, with numbers as rough guides", async () => {
   const text = guide(svc.fullBot(bot.id)!);
   const source = await Bun.file(join(import.meta.dir, "../server/bots/extension.ts")).text();
-  const description = source.split("\n").find((line) => line.includes("Run coding agents in the user's OpenBuild"))!;
+  const description = source.split("\n").find((line) => line.includes("The coding agent threads in the user's OpenBuild"))!;
   for (const words of [text, description]) {
     // What to weigh: relatedness, size against room, help or distraction, and a finished pull request.
     for (const factor of [/how related/i, /same files or feature/, /follow-up on its pull request/, /how big/i, /room left/, /distract/, /merged or closed/, /rough guides/, /unknown/]) expect(words).toMatch(factor);

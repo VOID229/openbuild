@@ -9,8 +9,16 @@ import type { Chat } from "../../../src/lib/types";
 const ID = "fixture";
 const start = Date.now() - 3_600_000;
 const bot = (id: string, name: string, shape: Bot["look"]["shape"], color: string): Bot => ({ id, name, look: { shape, color } as Bot["look"], instructions: "", memory: [], routines: [], createdAt: 1 });
-// manager may run coding agents, tracer not: their Threads tabs say different things while empty.
-const bots = [{ ...bot("manager", "manager", "ghost", "orange"), threads: DEFAULT_THREAD_ACCESS }, bot("tracer", "tracer", "pill", "blue"), bot("outsider", "obsidian", "pill", "purple")];
+// manager may spawn minions, tracer not: their Minions tabs say different things while empty. obsidian
+// has two minions, one open and one closed, each with its chat.
+const minion = (id: string, name: string, task: string, closedAt?: number): Bot => ({ ...bot(id, name, "pill", "green"), createdAt: closedAt ? 2 : 3, minion: { owner: "outsider", task, chat: `chat-${id}`, ...(closedAt ? { closedAt } : {}) } });
+const bots = [
+  { ...bot("manager", "manager", "ghost", "orange"), threads: DEFAULT_THREAD_ACCESS },
+  { ...bot("tracer", "tracer", "pill", "blue"), spawnMinions: false },
+  bot("outsider", "obsidian", "pill", "purple"),
+  minion("mn-log", "Log reader", "Read the last day of server logs and list each error once.", start),
+  minion("mn-notes", "Changelog writer", "Write the 2.4 changelog from the merged pull requests."),
+];
 const conversation = (id: string, kind: "direct" | "group", botIds: string[], messages: BotMessage[] = []): Conversation => ({
   id, kind, botIds, createdAt: start, updatedAt: start, messages, ...(kind === "group" ? { name: "OpenBuild Dev" } : {}),
 });
@@ -28,6 +36,16 @@ const conversations = [
   conversation("dm-manager", "direct", ["manager"], [started("e3", "manager", "t-direct", "Rename the config loader", start + 4000)]),
   conversation("dm-tracer", "direct", ["tracer"]),
   conversation("dm-outsider", "direct", ["outsider"]),
+  // Each minion's chat with its owner: a side chat of the two, with the task and its report.
+  ...["mn-log", "mn-notes"].map((id) => ({
+    ...conversation(`chat-${id}`, "direct", ["outsider", id], [
+      { id: `${id}-0`, author: "outsider", at: start + 5000, text: bots.find((b) => b.id === id)!.minion!.task },
+      { id: `${id}-1`, author: id, at: start + 6000, text: "Done: the list is in ~/notes." },
+      ...(id === "mn-log" ? [{ id: `${id}-2`, author: "outsider", at: start + 7000, text: "", event: { kind: "changed" as const, text: "Closed Log reader" } }] : []),
+    ]),
+    kind: "side" as const,
+    minion: id,
+  })),
 ];
 
 const SETTINGS = { quietHours: { from: 0, to: 0 }, sections: [], onboarding: "done" };

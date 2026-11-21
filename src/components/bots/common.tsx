@@ -98,6 +98,8 @@ export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
   if (!last) return "Say hi";
   const text = messageLine(last);
   if (last.author === "me") return <>You: {text}</>;
+  // A minion's chat is the minion's: its own words go unnamed, as a bot's do in its own chat; its owner's are named.
+  if (c.minion && last.author === c.minion) return text;
   if (c.kind !== "direct") return <>{authorName(last.author, bots, last.from).split(" ·")[0]}: {text}</>;
   return text;
 }
@@ -288,6 +290,22 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
   if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} away={away} dots={dots} reading={reads} track={track} />;
+  // A minion's chat with its owner is the minion's: its mascot, with its owner's small at its corner.
+  const mine = conversation.minion ? conversation.botIds.indexOf(conversation.minion) : -1;
+  if (mine >= 0) {
+    const minion = members[mine];
+    const owner = members[1 - mine];
+    return (
+      <span className="bots-avatar-wrap bots-avatar-minion">
+        <BotAvatar look={minion?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} away={away?.[mine]} reading={reads[mine]} mood={mood} dots={dots[mine]} pulse={minion && !still ? pulses[minion.id] : undefined} label={minion?.name} />
+        {badge && (
+          <span className="bots-minion-owner" role="img" aria-label={`${owner?.name.split(" · ")[0] ?? "A deleted bot"}'s minion`} style={{ "--badge": `${Math.max(14, Math.round(size * 0.46))}px` } as React.CSSProperties}>
+            <BotAvatar look={owner?.look ?? MISSING} size={Math.max(10, Math.round(size * 0.46) - 4)} alive={false} />
+          </span>
+        )}
+      </span>
+    );
+  }
   if (conversation.kind === "side")
     return (
       <span className="bots-avatar-wrap bots-avatar-side">

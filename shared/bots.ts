@@ -210,10 +210,13 @@ export function statusLine(status: Pick<BotStatus, "activity"> | undefined): str
 export type BotProjectScope = "all" | "choose" | "exclude";
 
 /**
- * What a bot may do with the user's OpenBuild threads. Only the user can change this. `enabled` is the
- * one "Run coding agents" switch: in the projects it covers, the bot starts, reads, writes to, answers,
- * stops and closes any thread (its own, the user's and other bots'), picks each thread's permission
- * mode, and answers permission prompts. Merging pull requests is the only thing granted apart.
+ * What a bot may do with the user's OpenBuild threads. Only the user can change this. `enabled` was the
+ * "Run coding agents" switch: in the projects it covers, the bot reads, writes to, answers, stops and
+ * closes any thread (its own, the user's and other bots'), and answers permission prompts. A bot no
+ * longer starts threads (it hands work to minions, see Minion), and the app no longer shows this
+ * grant: a bot's switches are Spawn minions and Merge PRs. What's saved still covers the `openbuild`
+ * tool's remaining actions, so the threads a bot has from before can be followed and closed.
+ * `merge` is the Merge PRs switch (mayMergePrs), which holds whatever `enabled` says.
  */
 export interface BotThreadAccess {
   enabled: boolean;
@@ -223,7 +226,7 @@ export interface BotThreadAccess {
   projects: string[];
   /** "exclude": the projects it can't work in, by id. */
   excluded?: string[];
-  /** It can merge pull requests. */
+  /** It can merge pull requests: the Merge PRs switch, for `openbuild merge` and `gh pr merge` in its terminal, its minions' included. */
   merge?: boolean;
 }
 
@@ -284,6 +287,8 @@ export interface Bot {
   computer?: ComputerConfig;
   /** Off when unset. Every bot has one: new ones get DEFAULT_THREAD_ACCESS, and so did older ones without one (server/bots/db.ts). */
   threads?: BotThreadAccess;
+  /** Spawn minions: false when the user turned it off; saved unset when on. See mayCreateMinions. */
+  spawnMinions?: boolean;
   /** Who made it: "me", or the primary bot's id. */
   by?: string;
   /**
@@ -305,7 +310,74 @@ export interface Bot {
    * Unset: its own chat, as ever. Only one of its groups, never one shared with a friend (validTarget).
    */
   target?: string;
+  /** A minion: a temporary worker bot another bot made for one task. See Minion. */
+  minion?: Minion;
 }
+
+/**
+ * A minion: a temporary worker bot that a bot makes for one task, in place of a coding agent thread.
+ * It runs as any bot does (the same runner, session and tool calls) and differs by its prompt alone:
+ * do the task, sum up the result, send it back. The bot that made it is its owner: the only one it
+ * talks to. Its owner or the primary bot closes it when the work is done, and can reopen it when it's
+ * needed again; one closed for MINION_KEEP_CLOSED_MS is deleted, with its chat. A closed minion is in
+ * no sidebar list. ("Closed", not "retired": a retired bot is a team member that's paused, Bot.retiredAt.)
+ */
+export interface Minion {
+  /** The bot that made it and owns it, by id. */
+  owner: string;
+  /** The task it was made for, as its owner wrote it. */
+  task: string;
+  /** Its chat with its owner: a side chat of the two, which the user reads along. */
+  chat: string;
+  /** The owner's chat the task came from: what the minion writes wakes its owner there. */
+  from?: string;
+  /** When it was closed. Closed, it runs nothing until it's reopened. */
+  closedAt?: number;
+}
+
+/** How many minions one bot has open at a time, closed ones aside. Internal, with no setting: change it here. */
+export const MINION_LIMIT = 5;
+/** How long a minion's task may be. */
+export const MINION_TASK_MAX = 8000;
+/** A minion's name is a name for what it does ("Dashboard maker"), not its task: this many words at most. */
+export const MINION_NAME_WORDS = 4;
+/** And this many characters. */
+export const MINION_NAME_MAX = 32;
+/** How long a closed minion is kept to be reopened. Then it's deleted, with its chat and its session. */
+export const MINION_KEEP_CLOSED_MS = 7 * 24 * 60 * 60_000;
+
+/**
+ * A minion's tools: it writes to its owner, works on its owner's computers (commands and files), looks
+ * things up (the web, the user's connected apps) and reads its own background jobs. Nothing that
+ * reaches the user or another bot, keeps anything (memory, routines), touches the user's threads, or
+ * makes bots or minions. No browser and no process: each computer has one of each, and they are its owner's.
+ */
+export const MINION_TOOLS: readonly string[] = ["send_message", "load_tools", "bash", "read", "write", "edit", "bot_web_search", "apps", "use_app", "jobs"];
+
+/**
+ * Whether a bot may make minions: its Spawn minions switch (in its details, under Advanced), on unless
+ * the user turned it off. A minion never may, nor a retired bot.
+ */
+export const mayCreateMinions = (bot: Pick<Bot, "spawnMinions" | "minion" | "retiredAt">): boolean => !bot.minion && !bot.retiredAt && bot.spawnMinions !== false;
+
+/**
+ * Whether a bot may merge pull requests: its Merge PRs switch, off until the user turns it on
+ * (BotThreadAccess.merge, where the grant has always been kept). It covers `openbuild merge` and
+ * `gh pr merge` in its terminal. A minion has its owner's (pass the owner).
+ */
+export const mayMergePrs = (bot: Pick<Bot, "threads"> | undefined): boolean => bot?.threads?.merge === true;
+
+/**
+ * Does a shell command merge a pull request? `gh pr merge` is what is looked for, anywhere in the text
+ * (an alias or a script it writes counts too). `gh --repo o/r pr merge 5` and `gh pr --repo o/r merge` both are.
+ */
+export const mergesPullRequest = (command: string): boolean => /\bgh\b[^\n;&|]*?\bpr\s+(?:--?[\w-]+(?:=\S*|\s+(?!merge\b)[^-\s]\S*)?\s+)*merge\b/.test(command);
+
+/** A minion that's open: not closed. */
+export const liveMinion = (bot: Pick<Bot, "minion">): boolean => !!bot.minion && !bot.minion.closedAt;
+
+/** The bots on the team: every bot but the minions, which are their owners' alone. */
+export const teamBots = <B extends Pick<Bot, "minion">>(bots: readonly B[]): B[] => bots.filter((b) => !b.minion);
 
 /**
  * Whether a bot can be pointed at this conversation (Bot.target): one of its groups, and not one shared
@@ -709,6 +781,8 @@ export interface Conversation {
   huddle?: SideHuddle;
   /** Its to-do list, which the server keeps apart from the record (db.ts) and adds to what it sends. */
   todos?: TodoItem[];
+  /** A minion's chat with its owner: the minion, by id. Only those two write in it, and the user only reads. */
+  minion?: string;
 }
 
 /**
@@ -1534,6 +1608,17 @@ export const botChatNames = (c: Pick<Conversation, "botIds">, bots: Pick<Bot, "i
 
 /** A chat between bots that has closed (a side chat a bot opened and wrapped up): it leaves the sidebar. */
 export const closedBotChat = (c: Pick<Conversation, "kind" | "huddle">): boolean => c.kind === "side" && !!c.huddle?.closedAt;
+
+/**
+ * A conversation's name as the user reads it: a minion's chat goes by the minion's name tagged with
+ * its owner's ("Dashboard maker · Scout's"), anything else by conversationTitle.
+ */
+export function minionChatName(c: Pick<Conversation, "minion">, bots: Pick<Bot, "id" | "name" | "minion">[]): string | undefined {
+  if (!c.minion) return undefined;
+  const minion = bots.find((b) => b.id === c.minion);
+  const owner = bots.find((b) => b.id === minion?.minion?.owner);
+  return `${minion?.name.split(" · ")[0] ?? "Deleted minion"} · ${owner ? `${owner.name.split(" · ")[0]}'s` : "a deleted bot's"}`;
+}
 
 /** A conversation's name for a bot to read: the group's, the bot's, or its bots' for a side chat (a huddle goes by its topic). People read conversationName (the app's store), where a side chat goes by who's in it. */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {

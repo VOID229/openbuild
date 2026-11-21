@@ -314,7 +314,7 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
 test("bots can only be let use the harnesses installed on this server", async () => {
   const originalFetch = globalThis.fetch;
   const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
-  const { BotHarnesses, useAllowedHarnesses } = await import("../src/components/bots/BotThreads");
+  const { BotHarnesses, useAllowedHarnesses } = await import("../src/components/bots/BotSwitches");
   globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok", "hermes"].map((id) => [id, {
     installed: ["pi", "codex"].includes(id), updateAvailable: false, install: "",
   }])) })) as unknown as typeof fetch;

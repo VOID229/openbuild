@@ -95,7 +95,7 @@ test("Run coding agents names its projects and the switches that changed", async
     a.deepEqual(db.getBot(helper.id).threads, { enabled: true, scope: 'all', projects: [site.id], excluded: [], merge: true });
     a.deepEqual(texts(helper), [
       \`Juniper's OpenBuild projects: all → \${site.name}\`,
-      "Juniper's merge pull requests: off → on",
+      "Juniper's merge PRs: off → on",
       \`Juniper's OpenBuild projects: \${site.name} → all\`,
       "Juniper's run coding agents: on → off",
       "Juniper's run coding agents: off → on",

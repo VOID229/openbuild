@@ -1,4 +1,4 @@
-// The mascots beside a group's coding threads (its details panel's Threads tab), and the "zzz" over
+// The mascots beside a group's coding threads (its details panel's Minions tab, where they're listed under the minions), and the "zzz" over
 // dozing bots, in a real Chrome: a thread's mascot only says whose thread it is, held still whatever its
 // bot is doing; each row shows its harness and its model's provider; a finished thread leaves the
 // list; and dozing bots and huddles in the sidebars
@@ -89,7 +89,7 @@ const THREADS = `[
 
 const openThreads = async (page: Page) => {
   await page.eval(`store.setState({ chats: ${THREADS} })`);
-  await page.eval(`[...document.querySelectorAll('.bots-details button')].find((b) => b.textContent.startsWith('Threads')).click()`);
+  await page.eval(`[...document.querySelectorAll('.bots-details button')].find((b) => b.textContent.startsWith('Minions')).click()`);
   await page.until("document.querySelectorAll('.bots-details .bots-member .bot').length === 2");
   await page.settle();
 };
@@ -97,7 +97,7 @@ const openThreads = async (page: Page) => {
 /** The mascot on the thread row titled `title`. */
 const rowBot = (title: string) => `[...document.querySelectorAll('.bots-details .bots-member')].find((r) => r.textContent.includes(${JSON.stringify(title)})).querySelector('.bot')`;
 
-describe.skipIf(!browser)("mascots in the Threads tab", () => {
+describe.skipIf(!browser)("mascots beside the threads in the Minions tab", () => {
   test("lists the threads at work or waiting, each with its bot's mascot", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
     await openThreads(page);
