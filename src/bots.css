@@ -1137,7 +1137,7 @@
   gap: 7px;
   max-width: 220px;
   padding: 4px 11px 4px 5px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
   font-size: 13px;
@@ -1349,7 +1349,7 @@
   place-items: center;
   width: 58px;
   height: 58px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -2417,7 +2417,7 @@
 .bm-image {
   display: block;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   cursor: zoom-in;
 }
 
@@ -2623,7 +2623,7 @@
   gap: 4px;
   height: var(--bm-chip-h, 24px);
   padding: 0 8px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface);
   font-size: 13px;
@@ -2666,7 +2666,7 @@
   width: 20px;
   height: 20px;
   margin-left: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   color: var(--text-3);
   transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
@@ -2682,7 +2682,6 @@
   }
 
   .bm-reaction-reply:hover {
-    background: var(--hover);
     color: var(--text);
   }
 }
@@ -2806,7 +2805,7 @@
 .bm-event-times {
   flex: none;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-2);
   font-size: 11px;
@@ -2957,7 +2956,6 @@
 
 @media (hover: hover) {
   .bm-events-toggle:hover {
-    background: var(--hover);
     color: var(--text-2);
   }
 }
@@ -3291,7 +3289,7 @@
   width: 32px;
   height: 32px;
   margin: -46px 4px 0 0;
-  border-radius: 50%;
+  border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
   box-shadow: var(--shadow-md);
@@ -3760,19 +3758,18 @@
 }
 
 /* Like the thread composer: flat on the pane, drawn by a faint hairline alone, its tools in
-   monochrome on either side of the text. A pill: one line of it has round ends, centred on the send
-   button and the files button, each `--bots-pad` in from the hairline. Its corners stay that size
-   as a long draft or attachments make it taller, so they never cut into the text. */
+   monochrome on either side of the text, the send button and the files button each `--bots-pad` in
+   from the hairline. Its corners stay that size as a long draft or attachments make it taller. */
 .bots-composer {
   /* The row's tallest control (the send button) and the room around it. */
   --bots-ctl: 36px;
   --bots-pad: 6px;
-  --bots-composer-r: calc(var(--bots-ctl) / 2 + var(--bots-pad) + 1px);
+  /* Concentric with the buttons inside: their corner plus the room around them. */
+  --bots-composer-r: calc(var(--radius) + var(--bots-pad));
   position: relative;
   max-width: var(--bots-composer-w);
   margin: 0 auto;
   border-radius: var(--bots-composer-r);
-  corner-shape: round;
   border: 1px solid var(--composer-border);
   background: var(--surface);
   transition: border-color var(--fast) var(--ease);
@@ -3789,12 +3786,12 @@
   padding: var(--bots-pad);
 }
 
-/* Round, to sit concentric in the pill's ends; on one line, centred on the send button beside them. */
+/* On one line, centred on the send button beside them. */
 .bots-composer-btn {
   width: 34px;
   height: 34px;
   margin-bottom: calc((var(--bots-ctl) - 34px) / 2);
-  border-radius: 50%;
+  border-radius: var(--radius);
   color: var(--text-2);
 }
 
@@ -3809,7 +3806,7 @@
   animation: bots-fade var(--fast) var(--ease-out) both;
 }
 
-/* As tall as the send button on one line, so its text sits on the pill's middle. */
+/* As tall as the send button on one line, so its text sits on the box's middle. */
 .bots-composer-input {
   flex: 1;
   min-width: 0;
@@ -3971,7 +3968,7 @@
   width: 36px;
   height: 36px;
   margin-left: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease), transform var(--fast) var(--ease);
@@ -4034,7 +4031,7 @@
 .bots-reply-x {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
 }
 
 .bots-composer-images {
@@ -4088,7 +4085,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   border: 2px solid var(--surface);
   background: var(--ink);
   color: var(--ink-fg);
@@ -5891,7 +5888,7 @@ a.bots-btn.bots-btn-primary {
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--text-2);
 }
 
@@ -6377,7 +6374,7 @@ a.bots-btn.bots-btn-primary {
   margin: 32px auto 8px;
   padding: 22px 22px 16px;
   border: 1px solid var(--bm-them-border);
-  border-radius: 22px;
+  border-radius: var(--radius-xl);
   background: var(--bm-them);
   text-align: center;
 }
@@ -7161,7 +7158,6 @@ a.bots-btn.bots-btn-primary {
 
 @media (hover: hover) {
   .bots-head-tasks:hover {
-    background: var(--hover);
     color: var(--text-2);
   }
 }

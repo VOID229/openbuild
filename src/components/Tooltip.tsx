@@ -14,7 +14,10 @@ interface Tip {
 export const GAP = 8;
 /** Kept clear at the window's edges. */
 export const MARGIN = 8;
-const DELAY = 450;
+/** How long the pointer rests on a control before its tooltip shows. */
+export const DELAY = 800;
+/** Within this long of one tooltip closing, the next one shows at once: sliding along a toolbar reads each label. */
+export const HANDOFF = 300;
 
 /** Where a floating box of `w`×`h` goes beside `rect`, flipped and clamped to stay on screen. */
 export function place(tip: Pick<Tip, "side" | "rect">, w: number, h: number) {
@@ -53,6 +56,8 @@ export function TooltipLayer() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let current: HTMLElement | null = null;
     let observer: MutationObserver | undefined;
+    let shown = false;
+    let closedAt = -Infinity;
 
     const read = (el: HTMLElement): Tip | null => {
       const text = el.dataset.tooltip;
@@ -62,6 +67,8 @@ export function TooltipLayer() {
     const hide = () => {
       clearTimeout(timer);
       observer?.disconnect();
+      if (shown) closedAt = performance.now();
+      shown = false;
       current = null;
       setTip(null);
     };
@@ -73,7 +80,11 @@ export function TooltipLayer() {
         if (current === el) setTip(el.dataset.tooltip ? read(el) : null);
       });
       observer.observe(el, { attributes: true, attributeFilter: ["data-tooltip"] });
-      timer = setTimeout(() => current === el && setTip(read(el)), delay);
+      timer = setTimeout(() => {
+        if (current !== el) return;
+        shown = true;
+        setTip(read(el));
+      }, delay);
     };
 
     const target = (e: Event) => (e.target instanceof Element ? (e.target.closest("[data-tooltip]") as HTMLElement | null) : null);
@@ -81,7 +92,7 @@ export function TooltipLayer() {
       if (e.pointerType === "touch") return;
       const el = target(e);
       if (el === current) return;
-      if (el) show(el, DELAY);
+      if (el) show(el, performance.now() - closedAt < HANDOFF ? 0 : DELAY);
       else hide();
     };
     const onOut = (e: PointerEvent) => {
@@ -95,7 +106,11 @@ export function TooltipLayer() {
 
     document.addEventListener("pointerover", onOver);
     document.addEventListener("pointerout", onOut);
-    document.addEventListener("pointerdown", hide, true);
+    const onDown = () => {
+      hide();
+      closedAt = -Infinity;
+    };
+    document.addEventListener("pointerdown", onDown, true);
     document.addEventListener("focusin", onFocus);
     document.addEventListener("focusout", hide);
     document.addEventListener("keydown", onKey);
@@ -105,7 +120,7 @@ export function TooltipLayer() {
       hide();
       document.removeEventListener("pointerover", onOver);
       document.removeEventListener("pointerout", onOut);
-      document.removeEventListener("pointerdown", hide, true);
+      document.removeEventListener("pointerdown", onDown, true);
       document.removeEventListener("focusin", onFocus);
       document.removeEventListener("focusout", hide);
       document.removeEventListener("keydown", onKey);
