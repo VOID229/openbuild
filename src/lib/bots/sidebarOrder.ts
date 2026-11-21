@@ -7,6 +7,7 @@
 // after the others (in the order they were pinned), rows above the ones placed by hand, by their
 // latest message. A move writes the whole of each list it touched into the order, so those keep
 // their places from then on.
+import { botChatKind, closedBotChat } from "../../../shared/bots";
 import type { Bot, Conversation } from "./types";
 
 /** "pinned", "rest" (rows not filed anywhere), "friends" (chats shared with friends), or `section:<name>`. */
@@ -47,13 +48,20 @@ export function sortList(list: Conversation[], rank: Map<string, number>, unrank
 
 export const rankOf = (order: readonly string[]) => new Map(order.map((id, i) => [id, i]));
 
-/** Every list in the sidebar, each in its order. */
+/**
+ * Whether a chat is in no list of the sidebar, nor its search: a DM or meeting between bots that has
+ * closed, pinned or hidden as it may be. A "Read along" link in the chat it came from still opens it.
+ */
+export const leavesSidebar = (c: Conversation): boolean => closedBotChat(c);
+
+/** Every list in the sidebar, each in its order, without the chats that leave it (leavesSidebar). */
 export function sidebarLists(conversations: Conversation[], bots: Bot[], sections: string[], order: readonly string[]): SidebarLists {
   const rank = rankOf(order);
   // A retired bot's chat is under Retired and nowhere else, pinned, filed or hidden as it may be: it's back where it was when it's rehired.
   const away = new Set(bots.filter((b) => b.retiredAt).map((b) => b.id));
   const isRetired = (c: Conversation) => c.kind === "direct" && away.has(c.botIds[0]!);
-  const current = conversations.filter((c) => !isRetired(c));
+  const kept = conversations.filter((c) => !leavesSidebar(c));
+  const current = kept.filter((c) => !isRetired(c));
   const shown = current.filter((c) => !c.hidden);
   const listed = shown.filter((c) => !c.pinnedAt && c.kind !== "side");
   const rows = (list: Conversation[]) => sortList(list, rank, "first", byRecent);
@@ -65,8 +73,14 @@ export function sidebarLists(conversations: Conversation[], bots: Bot[], section
     filed: sections.map((name) => [name, rows(listed.filter((c) => c.section === name))] as const),
     side: shown.filter((c) => !c.pinnedAt && c.kind === "side").sort(byRecent),
     hidden: current.filter((c) => c.hidden).sort(byRecent),
-    retired: conversations.filter(isRetired).sort(byRecent),
+    retired: kept.filter(isRetired).sort(byRecent),
   };
+}
+
+/** The heading over the chats between bots: "DMs", "Meetings", or "DMs and meetings" with both. */
+export function botChatsLabel(side: Conversation[]): string {
+  const kinds = new Set(side.map((c) => botChatKind(c.botIds)));
+  return kinds.size > 1 ? "DMs and meetings" : kinds.has("meeting") ? "Meetings" : "DMs";
 }
 
 /** The lists a chat can be dragged in and out of, by key, each in its order. */

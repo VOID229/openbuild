@@ -10,7 +10,7 @@ import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THR
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Routine } from "../../lib/bots/types";
 import { countdown, formatRun } from "../../../shared/botSchedule";
-import { botNameError, cleanRole, ROLE_MAX } from "../../../shared/bots";
+import { botChatKind, botNameError, cleanRole, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
@@ -711,7 +711,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   ? `Shared with ${conversation.friend.friendName}${conversation.friend.ended ? " · not syncing" : ""}`
                   : conversation.kind === "group"
                     ? `${conversation.botIds.length} bots`
-                    : "Side chat between bots"}
+                    : (conversation.name ?? `${botChatKind(conversation.botIds) === "DM" ? "DM" : "Meeting"} between bots`)}
               </div>
             )}
           </div>

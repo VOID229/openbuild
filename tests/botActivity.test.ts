@@ -175,14 +175,15 @@ test("work that came from the chat being looked at says so: posting about this, 
   expect(awayLines("release", "scout", at("dev", { activity: "Writing a reply", from: "dm" }), known)[0]).toBe("posting in the OpenBuild Dev group");
 });
 
-test("between bots: messaging the one it's asking, talking with the several in a side chat, about this when it was opened from here", () => {
-  expect(awayLines("dm", "scout", at("ask", { activity: "Writing a reply" }), known)).toEqual(["messaging Pip", "talking with Pip", "in a side chat", "busy elsewhere"]);
+test("between bots: messaging the one it's asking in a DM, talking with the several in a meeting, about this when it was opened from here", () => {
+  expect(awayLines("dm", "scout", at("ask", { activity: "Writing a reply" }), known)).toEqual(["messaging Pip", "talking with Pip", "in a DM", "busy elsewhere"]);
   expect(awayLines("dev", "scout", at("ask", { activity: "Writing a reply", from: "dev" }), known).slice(0, 2)).toEqual(["messaging Pip about this", "talking with Pip about this"]);
   expect(awayLines("dm", "scout", at("ask", { activity: "Running a command" }), known)[0]).toBe("running a command in its chat with Pip");
   // A side chat opened from the group says so in the group, from the side chat's own record too.
   expect(awayLines("dev", "scout", at("huddle", { activity: "Working on it" }), known)[0]).toBe("talking with Pip and Tally about this");
-  expect(awayLines("dev", "scout", at("huddle", { activity: "Searching the web" }), known).slice(0, 2)).toEqual(["searching the web for this in a side chat with Pip and Tally", "talking with Pip and Tally about this"]);
+  expect(awayLines("dev", "scout", at("huddle", { activity: "Searching the web" }), known).slice(0, 2)).toEqual(["searching the web for this in a meeting with Pip and Tally", "talking with Pip and Tally about this"]);
   expect(awayLines("dm", "scout", at("huddle", { activity: "Writing a reply" }), known)[0]).toBe("talking with Pip and Tally");
+  expect(awayLines("dm", "scout", at("huddle", { activity: "Writing a reply" }), known).slice(-2)).toEqual(["in a meeting", "busy elsewhere"]);
   expect(awayLines("dm", "scout", at("big", { activity: "Writing a reply" }), known).slice(0, 2)).toEqual(["talking with Pip, Tally and Rex", "talking with 3 bots"]);
 });
 

@@ -43,8 +43,8 @@ const lines = () => [...document.querySelectorAll(".bm-event")];
 const line = (id: string) => document.querySelector<HTMLElement>(`.bm-event[data-id="${id}"]`)!;
 const lead = (id: string) => line(id).querySelector(".bm-event-text")!;
 
-async function show(messages: any[], bots: any[] = [scout, juniper], status: Record<string, unknown> = {}) {
-  snapshot = { bots, conversations: [{ id: "chat", kind: "direct", botIds: ["scout"], createdAt: 1, updatedAt: 1, messages }], settings: { sections: [] }, typing: {}, drafts: [], status };
+async function show(messages: any[], bots: any[] = [scout, juniper], status: Record<string, unknown> = {}, chat: Record<string, unknown> = {}) {
+  snapshot = { bots, conversations: [{ id: "chat", kind: "direct", botIds: ["scout"], createdAt: 1, updatedAt: 1, messages, ...chat }], settings: { sections: [] }, typing: {}, drafts: [], status };
   await act(async () => void (await switchWorkspace("srv")));
   await frames();
   useBots.setState({ activeId: "chat" });
@@ -236,6 +236,21 @@ test("a side chat's line says who asked whom what on one line, with Read along; 
   // What was asked is in the sentence, not on a second line under it.
   for (const id of ["e1", "e2"]) expect(line(id).querySelector(".bm-event-detail")).toBeNull();
 });
+
+for (const [kind, members, name] of [["DM", ["scout", "juniper"], "Scout and Juniper DM"], ["meeting", ["scout", "juniper", "tally"], "Scout, Juniper and Tally meeting"]] as const) {
+  test(`a chat between ${members.length} bots that closed says so as a ${kind}, in its name, its last line and its note`, async () => {
+    const tally = { ...scout, id: "tally", name: "Tally" };
+    // Saved as the bots read it ("Side chat closed"); people read it by how many bots the chat has.
+    const closing = event("e1", "scout", { kind: "changed", text: "Side chat closed", detail: "They agreed on Friday." });
+    const huddle = { by: "scout", from: "dm", topic: "When do we ship?", limit: 6, closedAt: 5 };
+    await show([closing], [scout, juniper, tally], {}, { kind: "side", botIds: [...members], name: "When do we ship?", huddle });
+    expect(lead("e1").textContent).toBe(kind === "DM" ? "DM closed" : "Meeting closed");
+    expect(document.querySelector(".bots-side-note")!.textContent).toBe(`This ${kind} has closed. Scout reports back.`);
+    // Named for who's in it; nothing for the user to type into.
+    expect(document.querySelector(".bots-head-name")!.textContent).toBe(name);
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+}
 
 test("failed replies show provider diagnostics on old and new lines", async () => {
   await show([

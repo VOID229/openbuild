@@ -7,8 +7,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
-import type { Bot, Conversation } from "../../lib/bots/types";
-import { botNameError, TYPING } from "../../../shared/bots";
+import type { Conversation } from "../../lib/bots/types";
+import { botChatKind, botNameError, TYPING } from "../../../shared/bots";
 import { awayAlone, waitingOnThreadsLine } from "../../lib/bots/activity";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
@@ -21,9 +21,9 @@ import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
-import { betweenNames, ConversationAvatar, DmMark, FitText, previewOf, shortTime, useAwayLines, useBusyBots } from "./common";
+import { ConversationAvatar, DmMark, FitText, previewOf, shortTime, useAwayLines, useBusyBots } from "./common";
 import { SwitchKeyBadge, useBotSwitchKeys } from "./switchKeys";
-import { canJoin, movableLists, planMove, planStep, sidebarLists, type ListKey } from "../../lib/bots/sidebarOrder";
+import { botChatsLabel, canJoin, leavesSidebar, movableLists, planMove, planStep, sidebarLists, type ListKey } from "../../lib/bots/sidebarOrder";
 import { DragGhost, GroupDropMenu, isDragging, useSidebarDrag, type GroupDropState, type Hit } from "./SidebarDrag";
 
 type Dialog =
@@ -61,7 +61,7 @@ type Peek = (id: string, side: Side) => {
 
 const PEEK_DELAY = 450;
 
-/** A hover card for rows and rail avatars, whose names and messages get cut short: the full name, who a side chat is between, and the latest message. */
+/** A hover card for rows and rail avatars, whose names and messages get cut short: the full name, a DM or meeting's topic, and the latest message. */
 function usePeek() {
   const [peek, setPeek] = useState<PeekState>();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -126,10 +126,11 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
         </span>
       </span>
-      {conversation.kind === "side" && (
+      {conversation.kind === "side" && conversation.name && (
+        // Its name says who's in it (a DM, a meeting: conversationName); its topic is here.
         <span className="bots-peek-between">
           <DmMark size={14} />
-          Between {betweenNames(conversation, bots)}
+          {conversation.name}
         </span>
       )}
       {/* Busy elsewhere: as much of what it's doing as its two lines hold, a long name left out whole (FitText). */}
@@ -353,7 +354,7 @@ function ConversationMenu({ state, moves, onMove, onClose, onDialog }: { state?:
     fn();
     onClose();
   };
-  const kind = conversation.kind === "direct" ? "bot" : conversation.kind === "group" ? "group" : "side chat";
+  const kind = conversation.kind === "direct" ? "bot" : conversation.kind === "group" ? "group" : botChatKind(conversation.botIds);
   const retired = !!bot?.retiredAt;
   return (
     <div
@@ -569,12 +570,6 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   );
 }
 
-/** A rail item's name for a screen reader: a side chat's says who it's between, as its mark and hover card show. */
-const railLabel = (c: Conversation, bots: Bot[]) => {
-  const name = conversationName(c, bots);
-  return c.kind === "side" ? `${name}, between ${betweenNames(c, bots)}` : name;
-};
-
 function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned: Conversation[]; rest: Conversation[]; side: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
   const remote = !!useRemoteWorkspace();
@@ -605,7 +600,7 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned
       key={c.id}
       type="button"
       className={cx("bots-rail-item", c.id === activeId && "bots-rail-item-active")}
-      aria-label={railLabel(c, bots)}
+      aria-label={conversationName(c, bots)}
       aria-current={c.id === activeId ? "page" : undefined}
       data-bot-slot={c.id}
       data-pinned={pinned.includes(c) || undefined}
@@ -638,7 +633,7 @@ function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned
           {/* As in the list, the chats between bots come last, apart from the user's own. */}
           {side.length > 0 && pinned.length + rest.length > 0 && <div className="bots-rail-sep" />}
           {side.length > 0 && (
-            <div role="group" aria-label="Between bots" className="bots-rail-group">
+            <div role="group" aria-label={botChatsLabel(side)} className="bots-rail-group">
               {side.map(item)}
             </div>
           )}
@@ -800,7 +795,8 @@ export function BotsSidebar() {
   // A reload keeps the list where it was (search results start at the top).
   useScrollRestore(listRef, rail || q ? undefined : "bots:list");
   const results = useMemo(
-    () => (q ? conversations.filter((c) => conversationName(c, bots).toLowerCase().includes(q) || c.messages.some((m) => m.text.toLowerCase().includes(q))) : []),
+    // A DM or meeting is found by its topic too, which its name (who's in it) doesn't show.
+    () => (q ? conversations.filter((c) => !leavesSidebar(c) && (conversationName(c, bots).toLowerCase().includes(q) || (c.kind === "side" && !!c.name?.toLowerCase().includes(q)) || c.messages.some((m) => m.text.toLowerCase().includes(q)))) : []),
     [q, conversations, bots],
   );
 
@@ -891,7 +887,7 @@ export function BotsSidebar() {
                       </Section>
                     )}
                     {side.length > 0 && (
-                      <Section name="side" label="Between bots" count={side.length}>
+                      <Section name="side" label={botChatsLabel(side)} count={side.length}>
                         {side.map(row)}
                       </Section>
                     )}

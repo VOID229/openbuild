@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, mentionQuery, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING, sideChatAsk, sideChatAsked } from "../../../shared/bots";
+import { answerLabel, answersText, closedReason, type Question, type QuestionStep, capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, mentionQuery, pollVotesVisible, pollWaitingOn, reactionId, routineSet, runLabel, TYPING, sideChatAsk, sideChatAsked, botChatKind, SIDE_CHAT_CLOSED } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -2038,6 +2038,9 @@ const lowerFirst = (text: string) => (/^\p{Lu}\p{Ll}/u.test(text) ? text.charAt(
 /** One activity line: who did what, and what it was about. */
 const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, index, times = 1, folded }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number; folded?: boolean }) {
   const event = m.event!;
+  // A chat between bots' closing line reads by how many bots its chat has: "DM closed", "Meeting closed" (eventText).
+  const closing = event.kind === "changed" && event.text === SIDE_CHAT_CLOSED;
+  const members = useBots((s) => (closing ? s.conversations.find((c) => c.messages.some((x) => x.id === m.id))?.botIds.length : undefined));
   // A folded line (foldsDetail) shows its detail only once it's opened, by a click on it or its chevron.
   const [open, setOpen] = useState(false);
   // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
@@ -2073,7 +2076,7 @@ const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, ind
       onClick={(e) => (folds ? setOpen(!open) : e.currentTarget.classList.toggle("bm-event-open"))}
     >
       <span className="bm-event-text">
-        {set ? <>At {clock(m.at)}, <BotLink bot={author!} /> <RoutinesLink bot={author!}>{set.followUp ? "set a follow-up" : "set routine"}</RoutinesLink> “<WithBotLinks text={set.title} bots={bots} />” for {lowerFirst(set.schedule)}</> : authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={sideChatAsked(eventText(event))} bots={bots} />{detail && <> <WithBotLinks text={sideChatAsk(detail)} bots={bots} /></>} · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
+        {set ? <>At {clock(m.at)}, <BotLink bot={author!} /> <RoutinesLink bot={author!}>{set.followUp ? "set a follow-up" : "set routine"}</RoutinesLink> “<WithBotLinks text={set.title} bots={bots} />” for {lowerFirst(set.schedule)}</> : authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={sideChatAsked(eventText(event))} bots={bots} />{detail && <> <WithBotLinks text={sideChatAsk(detail)} bots={bots} /></>} · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event, { members })} bots={bots} />}
       </span>
       {/* The chevron is what a keyboard opens it with; a click anywhere on the line bubbles to the same toggle. */}
       {folds && (
@@ -2965,7 +2968,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
         <div className="bots-dock">
           <div className="bots-side-note">
             {conversation.huddle?.closedAt
-              ? `This side chat has closed. ${sideBots[conversation.botIds.indexOf(conversation.huddle.by)] ?? "The bot that opened it"} reports back.`
+              ? `This ${botChatKind(sideBots)} has closed. ${sideBots[conversation.botIds.indexOf(conversation.huddle.by)] ?? "The bot that opened it"} reports back.`
               : `${sideBots.length > 2 ? `${sideBots.slice(0, -1).join(", ")} and ${sideBots.at(-1)}` : sideBots.join(" and ")} are talking between themselves. You can read along; they'll bring anything you need to decide back to you.`}
           </div>
         </div>

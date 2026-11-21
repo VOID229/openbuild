@@ -18,7 +18,7 @@ import { botModels } from "../pi";
 import { useStore } from "../store";
 import { trackShown, type Shown } from "./activity";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { answerText, castVote, cleanRole, marksUnread, toggleReactionIn, type ArrangeRequest, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
+import { answerText, botChatName, botChatNames, castVote, cleanRole, marksUnread, toggleReactionIn, type ArrangeRequest, type BotHarnessSettings, type BotsHello, type Question } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import type { Arrangement } from "./sidebarOrder";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
@@ -519,16 +519,15 @@ useBots.subscribe((state, prev) => {
   if (shown !== state.shown) useBots.setState({ shown });
 });
 
-/** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
+/** A conversation's name as people read it: the group's, the bot's, or who's in it for a chat between bots. Bots read conversationTitle (shared/bots.ts), which keeps a side chat's topic. */
 export function conversationName(c: Conversation, bots: Bot[]): string {
   // A shared chat carries its friend's name as the tag the sidebar shows after a " · ".
   if (c.kind === "group" && c.friend) return `${c.name || "Shared chat"} · ${c.friend.friendName}`;
   if (c.kind === "group") return c.name || "Untitled group";
-  // A huddle goes by its topic.
-  if (c.kind === "side" && c.name) return c.name;
-  const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name ?? "Deleted bot");
-  // A side chat goes by its bots' first names ("Scout & Tally"), without their " · tags".
-  return c.kind === "side" ? names.map((n) => n.split(" · ")[0]).join(" & ") : (names[0] ?? "Bot");
+  // A chat between bots goes by who's in it: "Scout and Tally DM", "Pip, Scout and Tally meeting". Its
+  // topic (c.name) is in its hover card and its details.
+  if (c.kind === "side") return botChatName(botChatNames(c, bots));
+  return bots.find((b) => b.id === c.botIds[0])?.name ?? (c.botIds.length ? "Deleted bot" : "Bot");
 }
 
 const openable = (conversations: Conversation[], activeId?: string) =>

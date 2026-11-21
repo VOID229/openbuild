@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { ArrangeRequest, Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { answersCard, answerText, applyTodo, botNameClash, botNameTaken, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, sideChatAsk, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, botNameClash, botNameTaken, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, sideChatAsk, SIDE_CHAT_CLOSED, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1947,7 +1947,7 @@ export function closeHuddle(id: string, why: string, author: string) {
   const huddle = { ...c.huddle, closedAt: Date.now() };
   db.putConversation({ ...c, huddle });
   emitConversation(id);
-  if (c.botIds.includes(author)) postMessage(id, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text: "Side chat closed", detail: why } });
+  if (c.botIds.includes(author)) postMessage(id, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text: SIDE_CHAT_CLOSED, detail: why } });
   const from = db.getConversation(huddle.from);
   if (!db.getBot(huddle.by) || !from?.botIds.includes(huddle.by)) return;
   wakeUp(huddle.by, { kind: "note", conversationId: huddle.from, ...(huddle.request?.length ? { messageIds: huddle.request } : {}), text: huddleReport(c, why) });

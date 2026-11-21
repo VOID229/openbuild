@@ -1125,14 +1125,29 @@ export function roleLine(bot: { role?: string; instructions: string }): string {
   return first.length > ROLE_MAX ? `${first.slice(0, ROLE_MAX - 1).trimEnd()}…` : first;
 }
 
+/** Where an activity line is, for the wordings that read by it (eventText). */
+export interface EventPlace {
+  /** How many bots its chat has: a chat between bots is a DM with two and a meeting with more. */
+  members?: number;
+}
+
 /**
  * An activity line's text. Older follow-ups were saved as "Wrote to a thread" or "Wrote a prompt"; they
- * read as "Wrote a prompt in", before the thread's title, now.
+ * read as "Wrote a prompt in", before the thread's title, now. For people (`at`, the line's chat as far
+ * as it's known), a chat between bots' "Side chat closed" reads as a DM's or a meeting's; bots, whose
+ * tool calls it a side chat, read it as it was saved.
  */
-export const eventText = (event: { kind?: string; text: string }) =>
+export const eventText = (event: { kind?: string; text: string }, at?: EventPlace) =>
   event.text === "Wrote to a thread" || event.text === "Wrote a prompt" ? "Wrote a prompt in"
   : event.kind === "model" ? event.text.replace(LEGACY_SWITCH, "Switched to ")
+  : at && event.kind === "changed" && event.text === SIDE_CHAT_CLOSED ? botChatClosed(at.members ?? 2)
   : event.text;
+
+/** The line a side chat ends with, as the server saves it and its bots read it. */
+export const SIDE_CHAT_CLOSED = "Side chat closed";
+
+/** That line as people read it: "DM closed", or "Meeting closed" for three bots or more. */
+export const botChatClosed = (members: number) => `${members > 2 ? "Meeting" : "DM"} closed`;
 
 /** A model switch as saved before: "Switched to fallback model GPT 6.1 Sol", "Switched to first priority model Grok 4.7". */
 const LEGACY_SWITCH = /^Switched to (?:fallback model|\S+ priority model) /;
@@ -1224,7 +1239,8 @@ const RUN_WORDINGS: Record<string, RunWording> = {
   "Followed up": FOLLOWED_UP,
   "Follow-up": FOLLOWED_UP,
   "Poll closed": wording("Closed", "poll"),
-  "Side chat closed": wording("Closed", "side chat"),
+  // A DM or a meeting: a run doesn't know how many bots each had.
+  "Side chat closed": wording("Closed", "chat between bots", "chats between bots"),
   "New bot": wording("Made", "new bot"),
 };
 
@@ -1498,7 +1514,28 @@ export function resolveMentions<B extends Pick<Bot, "name" | "formerNames">>(tex
  */
 export const marksUnread = (c: Pick<Conversation, "kind">, m: Pick<BotMessage, "author" | "event">) => m.author !== "me" && !(c.kind === "direct" && m.event);
 
-/** A conversation's name: the group's, the bot's, or its bots' for a side chat (a huddle goes by its topic). */
+/**
+ * A chat between bots as people read it, by who's in it: two bots are a DM, three or more a meeting.
+ * "Pip and Scout DM", "Pip, Scout and Tally meeting", "Pip, Scout and Tally and 2 more meeting".
+ * `names`: their first names, in the chat's order (botChatNames).
+ */
+export function botChatName(names: readonly string[]): string {
+  if (names.length <= 2) return `${names.join(" and ")} DM`;
+  const more = names.length - 3;
+  return `${names[0]}, ${names[1]} and ${names[2]}${more ? ` and ${more} more` : ""} meeting`;
+}
+
+/** What a chat between bots is, for "This DM has closed": a DM with two bots, a meeting with more. */
+export const botChatKind = (names: readonly unknown[]): "DM" | "meeting" => (names.length > 2 ? "meeting" : "DM");
+
+/** The first names of the bots in a chat between bots, without their " · tags". */
+export const botChatNames = (c: Pick<Conversation, "botIds">, bots: Pick<Bot, "id" | "name">[]): string[] =>
+  c.botIds.map((id) => mentionName(bots.find((b) => b.id === id)?.name ?? "Deleted bot"));
+
+/** A chat between bots that has closed (a side chat a bot opened and wrapped up): it leaves the sidebar. */
+export const closedBotChat = (c: Pick<Conversation, "kind" | "huddle">): boolean => c.kind === "side" && !!c.huddle?.closedAt;
+
+/** A conversation's name for a bot to read: the group's, the bot's, or its bots' for a side chat (a huddle goes by its topic). People read conversationName (the app's store), where a side chat goes by who's in it. */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   if (c.kind === "group") return c.name || "Untitled group";
   if (c.kind === "side" && c.name) return c.name;
