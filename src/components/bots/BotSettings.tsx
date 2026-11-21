@@ -4,6 +4,7 @@
 // search, the harnesses they may start threads on, extra Pi extensions, and friends.
 import { Archive, ArchiveRestore, ChevronRight, MessageCircle, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { botNameError } from "../../../shared/bots";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
 import { useBotModels } from "../../lib/bots/models";
@@ -15,7 +16,7 @@ import { SettingsHeading } from "../primitives";
 import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
 import { BotMachines, BotModel, BotModelSelect, BotWorksIn, DefaultFallbacks, WORKS_IN_DESC } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
-import { ConfirmDeleteDialog, DeleteBotDialog, LookPicker, RetireBotDialog } from "./BotDialogs";
+import { ConfirmDeleteDialog, DeleteBotDialog, LookPicker, NameError, RetireBotDialog } from "./BotDialogs";
 import { Instructions, Members, RoleField, Routines } from "./BotDetails";
 import { useBusyBots } from "./common";
 import { BotClaude } from "./BotClaude";
@@ -55,10 +56,14 @@ function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversat
   const pulses = useBots((s) => s.pulses);
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
   const st = useBots.getState();
+  const bots = useBots((s) => s.bots);
   const [name, setName] = useState(bot.name);
   useEffect(() => setName(bot.name), [bot.name]);
+  const error = botNameError(bots, name, bot);
+  // A name another bot has stays in the field, with why under it, until it's changed.
   const saveName = () => {
     const next = name.trim();
+    if (error) return;
     if (next && next !== bot.name) st.updateBot(bot.id, { name: next });
     else setName(bot.name);
   };
@@ -73,10 +78,19 @@ function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversat
             value={name}
             maxLength={48}
             aria-label="Name"
+            aria-invalid={!!error || undefined}
+            aria-describedby={error ? "bot-name-error" : undefined}
             onChange={(e) => setName(e.target.value)}
             onBlur={saveName}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape" && name !== bot.name) {
+                e.stopPropagation();
+                setName(bot.name);
+              }
+            }}
           />
+          <NameError id="bot-name-error" error={error} />
           {(bot.primary || bot.retiredAt) && (
             <div className="bots-details-sub">
               {bot.primary && <span className="bots-pill">Primary</span>}

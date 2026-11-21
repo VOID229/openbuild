@@ -4956,6 +4956,27 @@ button.bots-details-name:hover {
   text-align: center;
 }
 
+/* Why a name can't be used, right under its field: a bot's name another of the user's bots has. */
+.field-help.bots-name-error {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.bots-dialog-body > .bots-name-error {
+  margin-top: -8px;
+  text-align: center;
+}
+
+.bots-details-hero .bots-name-error {
+  max-width: 260px;
+  text-align: center;
+}
+
+.bots-small-dialog .bots-name-error {
+  margin-top: 6px;
+}
+
 .bots-look-picker {
   display: flex;
   flex-direction: column;

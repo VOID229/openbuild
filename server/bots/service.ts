@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { ArrangeRequest, Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, sideChatAsk, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, botNameClash, botNameTaken, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, sideChatAsk, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -579,7 +579,11 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
   const conversationId = input.conversationId && isBotId(input.conversationId) ? input.conversationId : crypto.randomUUID();
   if (db.getConversation(conversationId)) throw new BotsError("That conversation already exists.");
   const now = Date.now();
-  const primary = db.listBots().length === 0;
+  const mine = db.listBots();
+  // One name per bot, or @mentions can't tell them apart. Refused with 400: a 409 from a bots route
+  // tells the app its workspace is gone.
+  if (botNameClash(mine, name)) throw new BotsError(botNameTaken(name));
+  const primary = mine.length === 0;
   const bot: db.StoredBot = {
     id,
     name,
@@ -611,6 +615,8 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
   if (typeof patch.name === "string") {
     const name = clip(patch.name, 80);
     if (!name) throw new BotsError("A bot needs a name.");
+    // No other bot's name. Keeping its own passes, so two with one name from before can both still save.
+    if (botNameClash(db.listBots(), name, bot)) throw new BotsError(botNameTaken(name));
     // Its old names still reach it: other bots' sessions are full of them.
     if (name !== bot.name) {
       const former = [bot.name, ...(bot.formerNames ?? [])].filter((n, i, all) => n.toLowerCase() !== name.toLowerCase() && all.findIndex((o) => o.toLowerCase() === n.toLowerCase()) === i);

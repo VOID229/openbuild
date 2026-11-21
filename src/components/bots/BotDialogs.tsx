@@ -7,7 +7,7 @@ import { COLORS, SHAPES, randomLook, shapeOf, type BotLook } from "../../lib/bot
 import { useBots } from "../../lib/bots/store";
 import type { Bot } from "../../lib/bots/types";
 import { uid } from "../../lib/id";
-import { makePoll, POLL_OPTIONS, ROLE_MAX } from "../../../shared/bots";
+import { botNameError, makePoll, POLL_OPTIONS, ROLE_MAX } from "../../../shared/bots";
 import { cx, useMediaQuery } from "../../lib/ui";
 import { IconButton } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
@@ -73,6 +73,16 @@ export function useModal(onClose: () => void) {
   };
 }
 
+/** Why a name can't be used, under its field: the field points at it with aria-describedby. */
+export function NameError({ id, error }: { id: string; error?: string }) {
+  if (!error) return null;
+  return (
+    <p id={id} className="field-help bots-name-error" role="alert">
+      {error}
+    </p>
+  );
+}
+
 export function DialogHead({ title, onClose }: { title: string; onClose: () => void }) {
   return (
     <div className="bots-dialog-head">
@@ -91,8 +101,10 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
   const [role, setRole] = useState("");
+  const bots = useBots((s) => s.bots);
+  const error = botNameError(bots, name);
   const create = () => {
-    if (!name.trim()) return;
+    if (!name.trim() || error) return;
     const id = useBots.getState().createBot({ name: name.trim(), look, instructions: instructions.trim(), role });
     onClose();
     onCreated?.(id);
@@ -111,7 +123,18 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
             {/* Only the shape being picked, blinking and following the pointer: no tricks of its own. */}
             <BotAvatar look={look} size={112} track plain />
           </div>
-          <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your bot" aria-label="Name" autoFocus={!touch} onChange={(e) => setName(e.target.value)} />
+          <input
+            className="input bots-name-input"
+            value={name}
+            maxLength={48}
+            placeholder="Name your bot"
+            aria-label="Name"
+            aria-invalid={!!error || undefined}
+            aria-describedby={error ? "new-bot-name-error" : undefined}
+            autoFocus={!touch}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <NameError id="new-bot-name-error" error={error} />
           <LookPicker look={look} onChange={setLook} />
           <label className="bots-field">
             <span className="bots-field-label">Role <span className="bots-field-optional">optional</span></span>
@@ -132,7 +155,7 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
           <button type="button" className="btn bots-btn" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn bots-btn bots-btn-primary" disabled={!name.trim()}>
+          <button type="submit" className="btn bots-btn bots-btn-primary" disabled={!name.trim() || !!error}>
             Create
           </button>
         </div>
@@ -330,27 +353,43 @@ export function PollDialog({ conversationId, onClose }: { conversationId: string
   );
 }
 
-/** Ask for a name: renaming a bot or group, or naming a new section. */
-export function NameDialog({ title, initial = "", action, placeholder, onSubmit, onClose }: { title: string; initial?: string; action: string; placeholder?: string; onSubmit: (name: string) => void; onClose: () => void }) {
+/**
+ * Ask for a name: renaming a bot or group, or naming a new section. `check`: why a name can't be used
+ * (a bot's name another bot has), shown under the field; none passes.
+ */
+export function NameDialog({ title, initial = "", action, placeholder, check, onSubmit, onClose }: { title: string; initial?: string; action: string; placeholder?: string; check?: (name: string) => string | undefined; onSubmit: (name: string) => void; onClose: () => void }) {
   const modal = useModal(onClose);
   const [value, setValue] = useState(initial);
+  const error = check?.(value);
   return (
     <dialog {...modal} className="confirm-dialog bots-small-dialog" aria-label={title}>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!value.trim()) return;
+          if (!value.trim() || error) return;
           onSubmit(value.trim());
           onClose();
         }}
       >
         <h2>{title}</h2>
-        <input className="input" value={value} maxLength={48} placeholder={placeholder} aria-label={title} autoFocus onFocus={(e) => e.currentTarget.select()} onChange={(e) => setValue(e.target.value)} />
+        <input
+          className="input"
+          value={value}
+          maxLength={48}
+          placeholder={placeholder}
+          aria-label={title}
+          aria-invalid={!!error || undefined}
+          aria-describedby={error ? "name-dialog-error" : undefined}
+          autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => setValue(e.target.value)}
+        />
+        <NameError id="name-dialog-error" error={error} />
         <div className="confirm-actions">
           <button type="button" className="btn btn-sm" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-sm btn-primary" disabled={!value.trim()}>
+          <button type="submit" className="btn btn-sm btn-primary" disabled={!value.trim() || !!error}>
             {action}
           </button>
         </div>

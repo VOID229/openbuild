@@ -1293,6 +1293,30 @@ export function routineSet(event: { kind: string; text: string; detail?: string 
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
 
 /**
+ * What tells one of the user's bots from another: its mention name, spaces folded, in any case. Two bots
+ * with one key show twice in the @mention list and can't be told apart there, so no two get one.
+ */
+export const botNameKey = (name: string) => mentionName(name.normalize("NFC").replace(/\s+/g, " ")).toLowerCase();
+
+/**
+ * The bot in `bots` whose name `name` would clash with, or undefined when it's free. `self`, the bot being
+ * renamed, never clashes with itself, and keeping its name (in any case) passes: bots with one name from
+ * before the check still load and save, and renaming either to a free name is how that's fixed. A
+ * retired bot keeps its name too: it can be rehired.
+ */
+export function botNameClash<B extends { id: string; name: string }>(bots: readonly B[], name: string, self?: { id: string; name: string }): B | undefined {
+  const key = botNameKey(name);
+  if (!key || (self && botNameKey(self.name) === key)) return undefined;
+  return bots.find((b) => b.id !== self?.id && botNameKey(b.name) === key);
+}
+
+/** What the server and the app's name fields say about a name `botNameClash` refused: the name as typed. */
+export const botNameTaken = (name: string) => `You already have a bot named ${name.trim()}`;
+
+/** `botNameTaken` for a name that clashes (see botNameClash), else undefined: what a name field shows under it. */
+export const botNameError = (bots: readonly { id: string; name: string }[], name: string, self?: { id: string; name: string }) => (botNameClash(bots, name, self) ? botNameTaken(name) : undefined);
+
+/**
  * How well a typed @query fits a bot's mention name, lower being better; -1 when it doesn't fit.
  * Exact, then prefix, then a word start ("manager" in "ob-manager"), then a substring, then a tight
  * subsequence ("obmgr"), which needs three letters so a stray pair never drags in everyone.

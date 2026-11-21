@@ -8,7 +8,7 @@ import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
 import type { Bot, Conversation } from "../../lib/bots/types";
-import { TYPING } from "../../../shared/bots";
+import { botNameError, TYPING } from "../../../shared/bots";
 import { awayAlone, waitingOnThreadsLine } from "../../lib/bots/activity";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
@@ -515,16 +515,19 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   if (!conversation) return null;
   const st = useBots.getState();
   const name = conversationName(conversation, bots);
-  if (dialog.kind === "rename")
+  if (dialog.kind === "rename") {
+    const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
     return (
       <NameDialog
         title={conversation.kind === "direct" ? "Rename bot" : "Rename group"}
         initial={conversation.friend ? (conversation.name ?? "") : name}
         action="Rename"
+        check={bot && ((next) => botNameError(bots, next, bot))}
         onClose={onClose}
         onSubmit={(next) => (conversation.kind === "direct" ? st.updateBot(conversation.botIds[0]!, { name: next }, conversation.id) : st.updateConversation(conversation.id, { name: next }))}
       />
     );
+  }
   if (dialog.kind === "section")
     return (
       <NameDialog
