@@ -83,13 +83,15 @@ interface RouteStore {
 type Browser = Pick<Window, "location" | "history" | "addEventListener" | "removeEventListener">;
 
 /**
- * What a history entry holds besides its thread. `back`: how many entries back the page this entry
- * shows (Settings or Usage) was opened from, when this app pushed them, so leaving it can return
- * there through the browser's history. `up`: this entry went one level deeper inside Settings (a
- * page inside a section, or a section from a phone's list) or the Marketplace (an app's page from
- * the catalog), so going up is the browser's back.
+ * What a history entry holds besides its thread. `home`: on a page's entry (Settings, Usage, the
+ * Marketplace), how many entries back whatever showed before the first of those pages is (a thread,
+ * the new-thread screen, the bot chat), when this app pushed the entries in between. Leaving a page
+ * goes back that far through the browser's history, past any page opened on the way, rather than
+ * stacking a new entry. `up`: this entry went one level deeper inside Settings (a page inside a
+ * section, or a section from a phone's list) or the Marketplace (an app's page from the catalog), so
+ * going up is the browser's back.
  */
-export type PageHistory = { threadId?: string; back?: number; up?: boolean };
+export type PageHistory = { threadId?: string; home?: number; up?: boolean };
 
 let routed: Browser | undefined;
 
@@ -109,6 +111,15 @@ function deeper(prev: RouteState, next: RouteState) {
 
 /** The Marketplace is showing: a page of OpenBots' own, under Settings and Usage. */
 const inMarketplace = (state: RouteState) => !!state.botsOpen && !!state.marketplaceOpen && !state.settingsOpen && !state.usageOpen;
+
+/** A page showing over the app: Settings, Usage or the Marketplace. */
+const onPage = (state: RouteState) => state.settingsOpen || !!state.usageOpen || inMarketplace(state);
+
+/** Whether the address is one of those pages'. */
+function pagePath(pathname: string) {
+  const route = readRoute(pathname);
+  return !!route.section || !!route.usage || !!route.marketplace;
+}
 
 /** Start only after threads load, so a deep link isn't mistaken for a deleted thread. */
 export function startRouting(store: RouteStore, browser: Browser = window): () => void {
@@ -132,8 +143,10 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
     const context: PageHistory = { threadId: state.activeChatId };
     written = `${url} ${state.activeChatId}`;
     const current = (history.state ?? {}) as PageHistory;
+    const page = onPage(state);
     // The same entry keeps whatever else it holds: which of OpenBots' screens it is, on a phone (see gestures.ts).
-    const same = { ...history.state, ...context };
+    // Only a page's entry counts its way out.
+    const same = { ...history.state, ...context, ...(!page && { home: undefined }) };
     // Moving between sections of Settings, or back up a level inside it, is the same visit: replaced, not stacked.
     const within = !!prev?.settingsOpen && state.settingsOpen;
     // The same goes for the Marketplace: into an app's page is a level down, anything else the same visit.
@@ -141,9 +154,10 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
     const marketDeeper = market && !prev!.marketplaceApp && !!state.marketplaceApp;
     if (replace || (within && !deeper(prev!, state)) || (market && !marketDeeper)) history.replaceState(same, "", url);
     else if (location.pathname + location.search + location.hash !== url) {
-      const pushed: PageHistory = within || marketDeeper
-        ? { ...context, back: current.back ? current.back + 1 : undefined, up: true }
-        : state.settingsOpen || (state.usageOpen && !prev?.usageOpen) || (inMarketplace(state) && !(prev && inMarketplace(prev))) ? { ...context, back: 1 } : context;
+      // A page pushed on a page is one entry further from where they were opened, if that one knows
+      // the way; pushed on anything else, that is one entry back.
+      const home = !page ? undefined : !pagePath(location.pathname) ? 1 : current.home ? current.home + 1 : undefined;
+      const pushed: PageHistory = within || marketDeeper ? { ...context, home, up: true } : { ...context, home };
       history.pushState(pushed, "", url);
     } else if (history.state?.threadId !== state.activeChatId) history.replaceState(same, "", url);
   };

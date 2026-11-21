@@ -68,12 +68,12 @@ describe("clean URLs", () => {
     h.store.setState({ settingsOpen: true, settingsSection: "general" });
     expect(h.count()).toBe(3);
     // Settings was opened from the thread one entry back, so leaving it can go back there.
-    expect(h.history.state).toMatchObject({ threadId: "abc", back: 1 });
+    expect(h.history.state).toMatchObject({ threadId: "abc", home: 1 });
     // Moving between sections is the same visit: the entry is replaced, not stacked.
     h.store.setState({ settingsSection: "pi" });
     expect(h.location.pathname).toBe("/settings/pi");
     expect(h.count()).toBe(3);
-    expect(h.history.state).toMatchObject({ back: 1 });
+    expect(h.history.state).toMatchObject({ home: 1 });
     h.go(-1);
     expect(h.store.getState().settingsOpen).toBe(false);
     expect(h.store.getState().activeChatId).toBe("abc");
@@ -84,14 +84,14 @@ describe("clean URLs", () => {
     h.stop();
   });
 
-  test("pages inside a section stack as entries that count their way back, and going up or across replaces", () => {
+  test("pages inside a section stack as entries that count their way out, and going up or across replaces", () => {
     const h = harness("/thread-abc");
     h.store.setState({ settingsOpen: true, settingsSection: "bots" });
     h.store.setState({ settingsPage: "models" });
     expect(h.location.pathname).toBe("/settings/bots/models");
     expect(h.count()).toBe(3);
     // One level deeper: Back goes up to the section, and leaving Settings is two entries back.
-    expect(h.history.state).toMatchObject({ threadId: "abc", back: 2, up: true });
+    expect(h.history.state).toMatchObject({ threadId: "abc", home: 2, up: true });
     h.store.setState({ settingsPage: "bot/b 1" });
     expect(h.location.pathname).toBe("/settings/bots/bot/b%201");
     // A page beside it (not inside it) takes its place.
@@ -100,17 +100,21 @@ describe("clean URLs", () => {
     expect(h.store.getState()).toMatchObject({ settingsOpen: true, settingsSection: "bots", settingsPage: undefined });
     h.go(1);
     expect(h.store.getState()).toMatchObject({ settingsSection: "bots", settingsPage: "bot/b 1" });
-    // Another section replaces the page's entry, still counting the way back.
+    // Another section replaces the page's entry, still counting the way out.
     h.store.setState({ settingsSection: "general", settingsPage: undefined });
     expect(h.location.pathname).toBe("/settings/general");
     expect(h.count()).toBe(3);
-    expect(h.history.state).toMatchObject({ back: 2 });
+    expect(h.history.state).toMatchObject({ home: 2 });
     h.go(-2);
     expect(h.store.getState()).toMatchObject({ settingsOpen: false, activeChatId: "abc" });
     // Opened by a link, there's no entry behind it to go back to.
     const deep = harness("/settings/pi/skills");
     expect(deep.store.getState()).toMatchObject({ settingsOpen: true, settingsSection: "pi", settingsPage: "skills" });
-    expect(deep.history.state?.back).toBeUndefined();
+    expect(deep.history.state?.home).toBeUndefined();
+    // A level down from there still knows no way out.
+    deep.store.setState({ settingsPage: "skills/one" });
+    expect(deep.location.pathname).toBe("/settings/pi/skills/one");
+    expect(deep.history.state?.home).toBeUndefined();
     deep.stop();
     h.stop();
   });
@@ -119,8 +123,55 @@ describe("clean URLs", () => {
     const h = harness("/thread-abc");
     h.store.setState({ usageOpen: true } as never);
     expect(h.location.pathname).toBe("/usage");
-    expect(h.history.state).toMatchObject({ threadId: "abc", back: 1 });
+    expect(h.history.state).toMatchObject({ threadId: "abc", home: 1 });
     h.stop();
+  });
+
+  test("Usage opened from the Marketplace counts its way to the bot chat, not to the Marketplace", () => {
+    const h = harness("/bots");
+    h.store.setState({ botsOpen: true });
+    h.store.setState({ marketplaceOpen: true } as never);
+    expect(h.history.state).toMatchObject({ home: 1 });
+    h.store.setState({ usageOpen: true, marketplaceOpen: false } as never);
+    expect(h.location.pathname).toBe("/bots/usage");
+    expect(h.history.state).toMatchObject({ home: 2 });
+    // Settings from there, and around its sections: still counting from the bot chat.
+    h.store.setState({ settingsOpen: true, settingsSection: "general", usageOpen: false } as never);
+    expect(h.history.state).toMatchObject({ home: 3 });
+    h.store.setState({ settingsSection: "appearance" });
+    expect(h.history.state).toMatchObject({ home: 3 });
+    // All the way out is the bot chat's own entry, which counts nothing.
+    h.go(-3);
+    expect(h.location.pathname).toBe("/bots");
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, settingsOpen: false, usageOpen: false, marketplaceOpen: false });
+    expect(h.history.state?.home).toBeUndefined();
+    // Forward steps through the pages again, each knowing its way out.
+    h.go(2);
+    expect(h.location.pathname).toBe("/bots/usage");
+    expect(h.history.state).toMatchObject({ home: 2 });
+    h.stop();
+  });
+
+  test("a thread or chat counts nothing, also when a page is closed by the store and its address is pushed", () => {
+    // A thread opened from the Marketplace is no page: Settings from it leaves for the thread.
+    const h = harness("/bots");
+    h.store.setState({ botsOpen: true });
+    h.store.setState({ marketplaceOpen: true } as never);
+    h.store.setState({ activeChatId: "abc", botsThread: true, marketplaceOpen: false } as never);
+    expect(h.location.pathname).toBe("/bots/thread-abc");
+    expect(h.history.state?.home).toBeUndefined();
+    h.store.setState({ settingsOpen: true, settingsSection: "general" });
+    expect(h.history.state).toMatchObject({ threadId: "abc", home: 1 });
+    h.stop();
+    // Opened at a page's link, nothing is behind it: closing it pushes what is under it, and from there on the way back is known.
+    const deep = harness("/usage");
+    expect(deep.history.state?.home).toBeUndefined();
+    deep.store.setState({ usageOpen: false } as never);
+    expect(deep.location.pathname).toBe("/new");
+    expect(deep.history.state?.home).toBeUndefined();
+    deep.store.setState({ usageOpen: true } as never);
+    expect(deep.history.state).toMatchObject({ home: 1 });
+    deep.stop();
   });
 
   test("settings reload retains underlying thread and unrelated updates don't push history", () => {
@@ -194,11 +245,11 @@ describe("clean URLs", () => {
     const count = h.count();
     h.store.setState({ marketplaceOpen: true } as never);
     expect(h.location.pathname).toBe("/bots/marketplace");
-    expect(h.history.state).toMatchObject({ back: 1 });
+    expect(h.history.state).toMatchObject({ home: 1 });
     // Into an app's page: a new entry, one level down.
     h.store.setState({ marketplaceApp: "github" } as never);
     expect(h.location.pathname).toBe("/bots/marketplace/github");
-    expect(h.history.state).toMatchObject({ back: 2, up: true });
+    expect(h.history.state).toMatchObject({ home: 2, up: true });
     expect(h.count()).toBe(count + 2);
     // Back from the app is the catalog, still in OpenBots.
     h.go(-1);
@@ -212,10 +263,11 @@ describe("clean URLs", () => {
     expect(h.location.pathname).toBe("/bots/marketplace/notion");
     h.store.setState({ marketplaceApp: undefined } as never);
     expect(h.location.pathname).toBe("/bots/marketplace");
-    expect(h.history.state).toMatchObject({ back: 1 });
-    // Settings over it covers it, at its own address.
+    expect(h.history.state).toMatchObject({ home: 1 });
+    // Settings over it covers it, at its own address, one entry further from the bot chat.
     h.store.setState({ settingsOpen: true, settingsSection: "bots" });
     expect(h.location.pathname).toBe("/bots/settings/bots");
+    expect(h.history.state).toMatchObject({ home: 2 });
     h.stop();
   });
 

@@ -220,8 +220,10 @@ const layerOf = (state: unknown) => (state as { botsLayer?: BotsLayer } | null)?
 /** Put a screen on the stack, so the browser's back (Safari's edge swipe, Android's button) takes it off again. */
 function pushLayer(botsLayer: BotsLayer) {
   if (layerOf(history.state) === botsLayer) return;
-  const depth = (history.state as { botsDepth?: number } | null)?.botsDepth ?? 0;
-  history.pushState({ ...history.state, botsLayer, botsDepth: depth + 1 }, "", location.href);
+  const state = history.state as { botsDepth?: number; home?: number } | null;
+  const depth = state?.botsDepth ?? 0;
+  // A page's entry counting its way out (routes.ts) is one further from there now.
+  history.pushState({ ...state, botsLayer, botsDepth: depth + 1, ...(state?.home && { home: state.home + 1 }) }, "", location.href);
 }
 
 /** Open a chat from the list on a phone: the list stays underneath, one step back. */

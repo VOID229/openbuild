@@ -2,9 +2,9 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 
 // OpenBots' Marketplace as a page in the main pane, clicked at in a DOM: every way in opens it (the
-// sidebar's button, a bot's Connect card), an app's page sits a level under the catalog, and Back and
-// Esc step up and then out, leaving the sidebar and the world as they were. tests/routes.test.ts
-// covers its addresses and history. Each test file runs in its own process (scripts/test.ts), so the
+// sidebar's button, a bot's Connect card), an app's page sits a level under the catalog with its trail
+// the way up, and Back and Esc leave, with the sidebar and the world as they were. tests/routes.test.ts
+// covers its addresses and history, tests/pageExits.test.ts leaving it in a browser. Each test file runs in its own process (scripts/test.ts), so the
 // globals stay here.
 const win = new Window({ url: "http://localhost/bots" });
 const g = globalThis as any;
@@ -49,7 +49,7 @@ const escape = () => act(async () => { window.dispatchEvent(new win.KeyboardEven
 const Page = () => (useStore((s) => s.marketplaceOpen) ? createElement(MarketplacePage) : createElement("p", { id: "chat" }, "Bot chat"));
 const sides = () => ({ botsOpen: useStore.getState().botsOpen, botsSidebarOpen: useStore.getState().botsSidebarOpen, sidebarOpen: useStore.getState().sidebarOpen });
 
-test("the catalog opens as a page, an app's page is a level under it, and Back and Esc step up and then out", async () => {
+test("the catalog opens as a page, an app's page is a level under it, the trail steps up, and Back and Esc leave", async () => {
   const before = sides();
   await act(async () => root.render(createElement(Page)));
   await act(async () => useStore.getState().openMarketplace());
@@ -69,24 +69,21 @@ test("the catalog opens as a page, an app's page is a level under it, and Back a
   expect([...host.querySelectorAll(".app-card-title")].map((t) => t.textContent)).toEqual(["Connection", "Tools", "Danger zone"]);
   expect(host.querySelector(".app-list-card .app-card-count")!.textContent).toBe("1");
 
-  // Esc: up to the catalog, then out to the bot chat.
+  // Esc: out to the bot chat from the app's page, not up to the catalog.
   await escape();
-  expect(useStore.getState()).toMatchObject({ marketplaceOpen: true, marketplaceApp: undefined });
-  await escape();
-  expect(useStore.getState().marketplaceOpen).toBe(false);
+  expect(useStore.getState()).toMatchObject({ marketplaceOpen: false, marketplaceApp: undefined });
   expect(host.querySelector("#chat")).not.toBeNull();
 
-  // The header's back does the same (and the trail's first step goes to the catalog).
+  // The trail's first step is the way up to the catalog.
   await act(async () => useStore.getState().openMarketplace("linear"));
   await frames();
   await click(host.querySelector(".mpage-crumb")!);
   expect(useStore.getState()).toMatchObject({ marketplaceOpen: true, marketplaceApp: undefined });
+  // The header's back leaves, as Esc does.
   await act(async () => useStore.getState().openMarketplace("linear"));
   await frames();
   await click(host.querySelector(".page-back")!);
-  expect(useStore.getState()).toMatchObject({ marketplaceOpen: true, marketplaceApp: undefined });
-  await click(host.querySelector(".page-back")!);
-  expect(useStore.getState().marketplaceOpen).toBe(false);
+  expect(useStore.getState()).toMatchObject({ marketplaceOpen: false, marketplaceApp: undefined });
   // Neither sidebar nor world changed on the way.
   expect(sides()).toEqual(before);
 });

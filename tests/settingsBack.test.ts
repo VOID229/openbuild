@@ -1,7 +1,7 @@
 // Settings is a page in the main pane, and the pages inside its sections (a bot's, a group's, a Pi
 // file's) go back with an arrow at the start of their own header, beside the trail to them
-// ("Bots / Scout"). The page's header goes back out of Settings; Esc goes up one level at a time. On
-// a phone there's one header: the sections are its first screen, and its back goes up a level.
+// ("Bots / Scout"). The page's header and Esc leave Settings from anywhere in it. On a phone there's
+// one header: the sections are its first screen, and its back goes up a level.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page } from "./chromePage";
 
@@ -170,15 +170,13 @@ describe.skipIf(!browser)("Settings as a page", () => {
     expect(await text(page, ".subpage-title")).toBe("Skills");
   }, 60_000);
 
-  test("Esc goes up a level at a time: out of a page, then out of Settings", async () => {
+  test("Esc leaves Settings from a page inside a section, not up a level", async () => {
     const page = await open("bots");
     await press(page, "Bot 0");
     await page.until("!!document.querySelector('.subpage-back')");
     await key(page, "Escape");
-    await page.until("!document.querySelector('.subpage-back')");
-    expect(await page.eval<boolean>("store.getState().settingsOpen")).toBe(true);
-    await key(page, "Escape");
     await page.until("store.getState().settingsOpen === false");
+    expect(await page.eval<boolean>("!!document.querySelector('.spage')")).toBe(false);
   }, 60_000);
 
   test("on a phone, the sections are the first screen and the header goes back one level at a time", async () => {
@@ -346,7 +344,7 @@ for (const [device, width, height] of [["desktop", 1000, 520], ["phone", 390, 64
       expect(await page.eval<string>("store.getState().settingsPage")).toBe("skills");
     }, 60_000);
 
-    test("into a page again, it starts at its top, and Esc goes back up", async () => {
+    test("into a page again, it starts at its top, and Esc leaves Settings", async () => {
       const page = await open("bots", width, height);
       await press(page, "Bot 0");
       await backOpensAtTop(page, () => page.click(backFrom(device)), "Your bots");
@@ -356,8 +354,7 @@ for (const [device, width, height] of [["desktop", 1000, 520], ["phone", 390, 64
       await page.settle();
       expect((await scroll(page)).top).toBe(0);
       await key(page, "Escape");
-      await page.until("!document.querySelector('.subpage')");
-      expect(await page.eval<boolean>("store.getState().settingsOpen")).toBe(true);
+      await page.until("store.getState().settingsOpen === false");
     }, 60_000);
   });
 }

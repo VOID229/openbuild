@@ -91,6 +91,7 @@
   "tests/newProject.test.ts": 2.4,
   "tests/opencodeOrphans.test.ts": 2.2,
   "tests/opencodeServerRestart.test.ts": 3.1,
+  "tests/pageExits.test.ts": 17,
   "tests/pairConnect.test.ts": 3.3,
   "tests/pairingSurvivesStart.test.ts": 10.5,
   "tests/phoneLayout.test.ts": 6.3,

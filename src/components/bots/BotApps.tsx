@@ -7,10 +7,9 @@ import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS,
 import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
 import { useRemoteWorkspace } from "../../lib/bots/store";
 import { useGithub } from "../../lib/github";
-import { leaveMarketplace, marketplaceBack, marketplaceUp, openMarketplaceApp } from "../../lib/pages";
+import { escapeLeavesPage, leavePage, marketplaceBack, marketplaceUp, openMarketplaceApp } from "../../lib/pages";
 import { useStore } from "../../lib/store";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
-import { useLightbox } from "../Lightbox";
 import { OptionSelect } from "../ModelSelect";
 import { IconButton, Spinner } from "../primitives";
 import { Hint, PageHeader } from "../SettingsUI";
@@ -521,21 +520,19 @@ export function MarketplacePage() {
     else if (document.activeElement === document.body) root.current?.focus({ preventScroll: true });
   }, [app?.id]);
 
-  // One step back: from an app to the catalog it was opened from (or out, opened straight at it), then out of the Marketplace.
-  const goBack = app ? marketplaceBack : leaveMarketplace;
-  const latest = useRef(goBack);
-  latest.current = goBack;
+  // Esc, and the header on a wide screen, leave the Marketplace from anywhere in it; there the trail
+  // ("Marketplace / GitHub") is the way up to the catalog. A phone's header, its only way back, goes
+  // a step: from an app to the catalog it was opened from, then out.
+  const goBack = app && phone ? marketplaceBack : leavePage;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
-      // Whatever is over the page (a dialog, a menu, a lightbox) takes its own Escape.
-      if (useLightbox.getState().open || document.querySelector("dialog[open], .modal-root, .popover-portal, .context-menu")) return;
-      const el = document.activeElement as HTMLElement | null;
-      if (el && el !== document.body && el.closest("[role='menu'], [role='listbox'], [role='dialog']")) return;
+      // Whatever is over the page (a dialog, a menu, a lightbox), or uses Escape itself, takes it first.
+      if (!escapeLeavesPage(e)) return;
       // A field with something in it keeps it (a search clears itself); an empty one doesn't hold the page.
+      const el = document.activeElement;
       if (el instanceof HTMLInputElement && el.value) return;
       e.preventDefault();
-      latest.current();
+      leavePage();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

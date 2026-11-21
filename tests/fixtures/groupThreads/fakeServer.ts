@@ -89,6 +89,15 @@ window.fetch = (async (input: RequestInfo | URL) => {
   if (path === "/api/projects") return Response.json({ projects: [] });
   if (path === "/api/plugins") return Response.json({ plugins: [] });
   if (path === "/api/chats") return Response.json({ chats: w.serverChats });
+  // Settings → Bots, with no models set up.
+  if (path.endsWith("/api/bots/models") || path === "/api/pi/models") return Response.json({ models: [], checkedAt: Date.now() });
+  // Usage, with nothing used yet.
+  if (path === "/api/usage/limits") return Response.json({ providers: [], checkedAt: Date.now() });
+  if (path === "/api/usage") {
+    const zero = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+    const now = Date.now();
+    return Response.json({ range: "30d", bucket: "day", start: now - 30 * 86_400_000, end: now, providers: [], series: [], totals: { ...zero, cost: 0, sessions: 0, requests: 0, cacheSavings: 0 }, costByType: { ...zero, other: 0 }, models: [], days: [], unpriced: [], problems: [], generatedAt: now });
+  }
   // The side panel's pull requests tab: there's no GitHub here, which it says rather than showing one.
   if (path.startsWith("/api/workspaces/pulls")) return Response.json({ error: "No GitHub here" }, { status: 500 });
   const one = /^\/api\/chats\/([^/]+)$/.exec(path);
