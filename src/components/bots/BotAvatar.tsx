@@ -707,7 +707,10 @@ export const BotLineup = memo(function BotLineup({ looks, size, alive = true, bu
   );
 });
 
-/** OpenBots' icon for the sidebar: a puff outline with two eyes, in the text colour like the other icons. */
+/**
+ * OpenBots' icon for Settings' nav and the New menu: a puff outline with two eyes, in the text colour
+ * like the other icons. It holds still, as they do: the bots themselves are the ones that blink.
+ */
 export function BotsGlyph({ size = 18, className }: { size?: number; className?: string; "aria-hidden"?: boolean }) {
   return (
     <svg className={cx("bots-glyph", className)} viewBox="0 0 24 24" width={size} height={size} aria-hidden>

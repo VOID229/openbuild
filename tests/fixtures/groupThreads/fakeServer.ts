@@ -80,15 +80,34 @@ window.open = ((url?: string | URL) => (w.opened.push(String(url)), null)) as ty
 
 // Threads' streams would go over /api/stream's socket; this page has none, so they fall back to fetch.
 w.WebSocket = undefined;
-window.fetch = (async (input: RequestInfo | URL) => {
+// What the page asked the server to change, for a test to read: the path as OpenBots' own (no workspace prefix).
+w.sent = [] as { method: string; path: string; body: unknown }[];
+window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const path = new URL(String(input instanceof Request ? input.url : input), location.href).pathname;
+  const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+  if (method !== "GET") {
+    let body: unknown;
+    try {
+      body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    } catch {}
+    w.sent.push({ method, path: path.replace(`/api/workspace/to/${ID}`, ""), body });
+  }
   if (path === "/api/config") return Response.json({ mode: "local", convexUrl: null, serverId: ID, machine: "imac" });
   if (path === `/api/workspace/to/${ID}/api/bots`) return Response.json({ bots, conversations, settings: SETTINGS, status: {}, typing: {}, drafts: [] }, { headers: { "x-openbuild-server": ID } });
   if (path === `/api/workspace/to/${ID}/api/bots/stream`) return stream();
   if (path === "/api/devices") return Response.json({ devices: [] });
+  // No models: Settings → Bots and a bot's page read the listing, which has none here.
+  if (path.endsWith("/api/bots/models") || path === "/api/pi/models") return Response.json({ models: [], checkedAt: Date.now() });
   if (path === "/api/projects") return Response.json({ projects: [] });
   if (path === "/api/plugins") return Response.json({ plugins: [] });
   if (path === "/api/chats") return Response.json({ chats: w.serverChats });
+  // Usage, with nothing used yet.
+  if (path === "/api/usage/limits") return Response.json({ providers: [], checkedAt: Date.now() });
+  if (path === "/api/usage") {
+    const zero = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+    const now = Date.now();
+    return Response.json({ range: "30d", bucket: "day", start: now - 30 * 86_400_000, end: now, providers: [], series: [], totals: { ...zero, cost: 0, sessions: 0, requests: 0, cacheSavings: 0 }, costByType: { ...zero, other: 0 }, models: [], days: [], unpriced: [], problems: [], generatedAt: now });
+  }
   // The side panel's pull requests tab: there's no GitHub here, which it says rather than showing one.
   if (path.startsWith("/api/workspaces/pulls")) return Response.json({ error: "No GitHub here" }, { status: 500 });
   const one = /^\/api\/chats\/([^/]+)$/.exec(path);

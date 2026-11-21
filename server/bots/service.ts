@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { ArrangeRequest, Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { answersCard, answerText, applyTodo, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
+import { answersCard, answerText, applyTodo, botNameClash, botNameTaken, todoTidy, betweenTurns, BOT_EFFORTS, FORMER_NAMES, castVote, cleanRole, conversationTitle, roleLine, sideChatAsk, SIDE_CHAT_CLOSED, DEFAULT_SETTINGS, DEFAULT_THREAD_ACCESS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isRetired, isStopRequest, validTarget, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, QUESTION_REASON_MAX, reactionId, toggleReactionIn, type Question, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -472,6 +472,10 @@ export function ensureStarted() {
   updateSettings({ onboarding: "active" });
 }
 
+/** What a check-in asks of a bot: to look for work in its role and do it, not only whether there's something to say. */
+export const CHECK_IN =
+  "Nobody has messaged you in a while. Look at your memory, routines and recent chats for work in your role that is unfinished, stuck or worth starting, and do what you can now. Then tell the user what you did, or what needs their decision. If there is truly nothing, reply [silent].";
+
 /** What the welcome is waiting on, shown in the primary bot's chat until Pi is ready. */
 const setup = (mem.openbotsSetup ??= {});
 export const piSetup = () => setup.value;
@@ -575,7 +579,11 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
   const conversationId = input.conversationId && isBotId(input.conversationId) ? input.conversationId : crypto.randomUUID();
   if (db.getConversation(conversationId)) throw new BotsError("That conversation already exists.");
   const now = Date.now();
-  const primary = db.listBots().length === 0;
+  const mine = db.listBots();
+  // One name per bot, or @mentions can't tell them apart. Refused with 400: a 409 from a bots route
+  // tells the app its workspace is gone.
+  if (botNameClash(mine, name)) throw new BotsError(botNameTaken(name));
+  const primary = mine.length === 0;
   const bot: db.StoredBot = {
     id,
     name,
@@ -607,6 +615,8 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
   if (typeof patch.name === "string") {
     const name = clip(patch.name, 80);
     if (!name) throw new BotsError("A bot needs a name.");
+    // No other bot's name. Keeping its own passes, so two with one name from before can both still save.
+    if (botNameClash(db.listBots(), name, bot)) throw new BotsError(botNameTaken(name));
     // Its old names still reach it: other bots' sessions are full of them.
     if (name !== bot.name) {
       const former = [bot.name, ...(bot.formerNames ?? [])].filter((n, i, all) => n.toLowerCase() !== name.toLowerCase() && all.findIndex((o) => o.toLowerCase() === n.toLowerCase()) === i);
@@ -728,7 +738,7 @@ export function settingChanges(before: db.StoredBot, after: db.StoredBot): strin
 
 /**
  * One activity line in the bot's own chat for a save that changed something, however it was made: the
- * app's settings or the primary's manage_bot. "Juniper's model: Grok 4.7 → GPT 6.1 Sol; effort: high → max".
+ * app's settings or the primary's manage_bot. "Juniper's model: Grok 4.7 → GPT 6.1 Sol · effort: high → max".
  * A save that changed nothing says nothing.
  *
  * A new name is also said where it was changed, when that's a chat the bot is in ("Juniper is now Atlas"):
@@ -744,7 +754,7 @@ function announceChanges(before: db.StoredBot, after: db.StoredBot, by?: "me", c
     if (here === where) changes = changes.filter((c) => !c.startsWith("name: "));
   }
   if (!changes.length || !where) return;
-  postMessage(where, { id: crypto.randomUUID(), author: after.id, at: Date.now(), text: "", event: { kind: "changed", text: `${before.name}'s ${changes.join("; ")}`, bot: after.id } });
+  postMessage(where, { id: crypto.randomUUID(), author: after.id, at: Date.now(), text: "", event: { kind: "changed", text: `${before.name}'s ${changes.join(" · ")}`, bot: after.id } });
 }
 
 // ------------------------------------------------------------------ what the user changed
@@ -1925,7 +1935,7 @@ export function openHuddle(by: string, from: string, botIds: string[], topic: st
   const name = (id: string) => mentionName(db.getBot(id)?.name ?? "a bot");
   const list = others.map(name);
   const who = list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0];
-  postMessage(from, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "message", text: `${name(by)} is talking it over with ${who}`, detail: clip(text, 120), conversationId: side.id } });
+  postMessage(from, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "message", text: `${name(by)} asked ${who}`, detail: sideChatAsk(text), conversationId: side.id } });
   postMessage(side.id, { id: crypto.randomUUID(), author: by, at: Date.now(), text });
   return db.getConversation(side.id)!;
 }
@@ -1937,7 +1947,7 @@ export function closeHuddle(id: string, why: string, author: string) {
   const huddle = { ...c.huddle, closedAt: Date.now() };
   db.putConversation({ ...c, huddle });
   emitConversation(id);
-  if (c.botIds.includes(author)) postMessage(id, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text: "Side chat closed", detail: why } });
+  if (c.botIds.includes(author)) postMessage(id, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text: SIDE_CHAT_CLOSED, detail: why } });
   const from = db.getConversation(huddle.from);
   if (!db.getBot(huddle.by) || !from?.botIds.includes(huddle.by)) return;
   wakeUp(huddle.by, { kind: "note", conversationId: huddle.from, ...(huddle.request?.length ? { messageIds: huddle.request } : {}), text: huddleReport(c, why) });
@@ -2391,7 +2401,7 @@ export function tick(busy: (botId: string) => boolean) {
     wakeUp(bot.id, {
       kind: "heartbeat",
       conversationId: homeId(bot.id),
-      text: "Nobody has messaged you in a while. Look at your memory, routines and recent chats. If something is worth telling the user, send it. If not, reply [silent].",
+      text: CHECK_IN,
     });
   }
 }

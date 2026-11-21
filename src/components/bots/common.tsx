@@ -9,6 +9,7 @@ import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
 import { eventDetail, eventText } from "../../../shared/bots";
 import type { FriendFrom } from "../../../shared/friends";
 import { accountName } from "../../lib/models";
+import { oneLine } from "../../lib/chatText";
 import { BotAvatar, BotHuddle, BotLineup } from "./BotAvatar";
 import { clock } from "../../lib/clock";
 
@@ -65,9 +66,10 @@ export function messageText(m: BotMessage): string {
   if (m.html) return `📄 ${m.html.title}`;
   if (m.event) {
     const detail = eventDetail(m.event);
-    return [eventText(m.event), detail && m.event.kind === "model" ? `(${accountName(detail)})` : detail].filter(Boolean).join(" ");
+    return [eventText(m.event, {}), detail && m.event.kind === "model" ? `(${accountName(detail)})` : detail].filter(Boolean).join(" ");
   }
-  const text = m.text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
+  // Without Markdown's own marks ("**", a list's "-", a heading's "#"): a line that names the message.
+  const text = oneLine(m.text);
   if (text) return text;
   if (m.files?.length) return m.files.length === 1 ? `📎 ${m.files[0]!.name}` : `📎 ${m.files.length + (m.images?.length ?? 0)} files`;
   return m.images?.length ? (m.images.length === 1 ? "📷 Photo" : `📷 ${m.images.length} photos`) : "";
@@ -195,12 +197,6 @@ export function FitText({ lines, within, onFit, className, ...rest }: { lines: s
 
 /** Whether each of these bots is reading something right now (`reading`): its mascot reads along. */
 export const useReading = (botIds: string[]): boolean[] => useBots(useShallow((s) => botIds.map((id) => reading(s.status[id]))));
-
-/** Who a side chat is between, as a sentence names them: "Pip and Manager", "Pip, Manager and Scout". */
-export function betweenNames(c: Pick<Conversation, "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
-  const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A deleted bot");
-  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? "");
-}
 
 /**
  * The mark on a side chat's bots: a speech bubble with three dots, ringed in the background it sits

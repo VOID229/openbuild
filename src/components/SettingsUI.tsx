@@ -11,7 +11,7 @@ import { IconButton, SettingsBack } from "./primitives";
 export function PageHeader({ title, onBack, backLabel = "Back", children, className }: { title: ReactNode; onBack: () => void; backLabel?: string; children?: ReactNode; className?: string }) {
   return (
     <header className={cx("page-head", className)}>
-      <IconButton label={backLabel} tooltipSide="bottom" className="page-back" onClick={onBack}>
+      <IconButton label={backLabel} tooltip={false} className="page-back" onClick={onBack}>
         <ArrowLeft size={17} />
       </IconButton>
       <h1 className="page-title">{title}</h1>

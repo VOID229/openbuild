@@ -106,7 +106,7 @@
 .bm-hold-reactions {
   order: -1;
   padding: 4px;
-  border-radius: 26px;
+  border-radius: var(--radius-xl);
 }
 
 .bm-hold-quick {
@@ -121,7 +121,7 @@
   gap: 2px;
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bm-hold-reactions .bm-react-btn {
@@ -167,7 +167,7 @@
 .bm-hold-menu {
   min-width: 220px;
   padding: 5px;
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
 }
 
 .bm-hold-item {
@@ -178,7 +178,7 @@
   width: 100%;
   min-height: 44px;
   padding: 0 12px 0 14px;
-  border-radius: 13px;
+  border-radius: var(--radius);
   font-size: 16px;
   text-align: left;
   color: var(--text);
@@ -473,7 +473,7 @@
     height: 40px;
     margin: 2px 16px 10px;
     padding: 0 12px;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
   }
 
   .bots-sidebar .history-wrap {
@@ -493,7 +493,7 @@
 
   .bots-tile {
     padding: 10px 2px 8px;
-    border-radius: 18px;
+    border-radius: var(--radius-xl);
   }
 
   .bots-tile-active {
@@ -520,7 +520,7 @@
     top: 0;
     left: 78px;
     right: 0;
-    height: 1px;
+    height: var(--hairline);
     background: var(--border);
   }
 
@@ -560,7 +560,7 @@
   .bots-sidebar .settings-row {
     margin: 0;
     padding: 6px max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
-    border-top: 1px solid var(--border);
+    border-top: var(--hairline) solid var(--border);
   }
 
   .bots-sidebar .settings-btn {
@@ -582,7 +582,7 @@
     justify-content: flex-start;
     height: var(--bots-head-h);
     padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(2px, env(safe-area-inset-left));
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--hairline) solid var(--border);
     /* Solid: Safari tints its status bar from this, and nothing shows through to read past. */
     background: var(--surface);
     pointer-events: auto;
@@ -606,7 +606,7 @@
     height: 20px;
     margin: 0 2px 0 -4px;
     padding: 0 5px;
-    border-radius: 10px;
+    border-radius: var(--radius-sm);
     background: var(--hover);
     color: var(--text-2);
     font-size: 12.5px;
@@ -624,7 +624,7 @@
     height: 48px;
     padding: 0 6px 0 4px;
     border: 0;
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     background: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -666,7 +666,7 @@
     right: 10px;
     z-index: 7;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-md);
   }
 
@@ -747,7 +747,7 @@
 
   .bm-reaction-pill {
     padding: 0 8px;
-    border-radius: 14px;
+    border-radius: var(--radius);
   }
 
   .bm-reaction-emoji {
@@ -815,7 +815,7 @@
 
   .bm-own .input {
     height: 42px;
-    border-radius: 21px;
+    border-radius: var(--radius-lg);
     padding: 0 14px;
   }
 
@@ -858,6 +858,16 @@
   .bots-composer-input {
     max-height: min(148px, 30dvh);
     -webkit-overflow-scrolling: touch;
+  }
+
+  /* The model under the box: a row a finger can hit. */
+  .bots-opts {
+    margin-top: 2px;
+    padding: 0 10px;
+  }
+
+  .bots-opts-model-btn {
+    height: 32px;
   }
 
   .bots-composer-textarea::placeholder {

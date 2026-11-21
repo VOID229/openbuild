@@ -353,7 +353,7 @@ interface State {
   openSettings: (section?: SettingsSection, page?: string) => void;
   closeSettings: () => void;
   setUsageOpen: (open: boolean) => void;
-  /** Open OpenBots' Marketplace, at an app's page or the catalog. Leaving it is pages.ts's leaveMarketplace. */
+  /** Open OpenBots' Marketplace, at an app's page or the catalog. Leaving it is pages.ts's leavePage. */
   openMarketplace: (app?: string) => void;
   setBotsOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;

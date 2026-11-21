@@ -102,7 +102,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     expect(await page.eval<unknown>(`${row("Fix the flaky")}.querySelector('svg').outerHTML !== ${row("Trace the slow")}.querySelector('svg').outerHTML`)).toBe(true);
     // Rows look like the Members tab's.
     const style = await page.eval(`(() => { const s = getComputedStyle(document.querySelector('.bots-details .bots-cards')); return [s.borderRadius, s.borderStyle]; })()`);
-    expect(style).toEqual(["12px", "solid"]);
+    expect(style).toEqual(["8px", "solid"]);
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
     await shoot(page, "threads-tab");
   }, 60_000);

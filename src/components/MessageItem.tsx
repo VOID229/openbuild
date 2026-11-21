@@ -29,7 +29,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <IconButton
       label={copied ? "Copied" : "Copy"}
-      tooltipSide="top"
+      tooltip={false}
       className="msg-action"
       onClick={async () => {
         await copyText(text);

@@ -896,14 +896,46 @@ export function isStopRequest(text: string): boolean {
   return said.length <= 60 && STOP_REQUEST.test(said);
 }
 
-/** A bot's plain reply as chat bubbles, one per paragraph. */
-export const replyBubbles = (text: string) =>
-  text
-    .split(/\n{2,}/)
-    // The marker closing a paragraph ("Done.[silent]", a reply and then silence run together) goes; the words stay.
-    .map((s) => s.replace(/(?:\s*\[\s*silent\s*\])+\s*$/i, "").trim())
-    .filter((s) => s && !onlySilent(s))
-    .slice(0, 6);
+/** A list line, as the chat draws it: a dash, a star, a dot or a number, and its "." or ")". */
+const LIST_LINE = /^ {0,3}(?:[-*•]|\d{1,3}[.)])[ \t]+/;
+/** Code, as the chat draws it (lib/chatText.ts): from a fence to the next one, or to the end when it is never closed. */
+const CODE = /```[\s\S]*?(?:```|$)/g;
+
+/**
+ * A reply's bubbles: its paragraphs, split at blank lines. A blank line inside a code block stays in
+ * the block, and so does one between two items of a list, so neither is cut in two.
+ */
+export const replyBubbles = (text: string) => {
+  const code = [...text.matchAll(CODE)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length] as const);
+  const lines = text.split("\n");
+  const starts: number[] = [];
+  lines.reduce((at, l) => (starts.push(at), at + l.length + 1), 0);
+  const inCode = (at: number) => code.some(([from, to]) => at > from && at < to);
+  // The next line that isn't blank, and the last one already in the bubble.
+  const nextText = (from: number) => lines.slice(from).find((l) => l !== "");
+  const parts: string[][] = [[]];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const bubble = parts.at(-1)!;
+    if (line === "" && !inCode(starts[i]!)) {
+      const before = [...bubble].reverse().find((l) => l !== "");
+      const next = nextText(i + 1);
+      if (!(before !== undefined && LIST_LINE.test(before) && next !== undefined && LIST_LINE.test(next))) {
+        parts.push([]);
+        continue;
+      }
+    }
+    bubble.push(line);
+  }
+  return (
+    parts
+      .map((p) => p.join("\n"))
+      // The marker closing a paragraph ("Done.[silent]", a reply and then silence run together) goes; the words stay.
+      .map((s) => s.replace(/(?:\s*\[\s*silent\s*\])+\s*$/i, "").trim())
+      .filter((s) => s && !onlySilent(s))
+      .slice(0, 6)
+  );
+};
 
 export const DEFAULT_SETTINGS: BotsSettings = { quietHours: { from: 22, to: 8 }, sections: [] };
 
@@ -1058,6 +1090,33 @@ export function firstSentence(text: string): string {
   return line;
 }
 
+/** Words a question starts with, lowercased after "asked Tracer": "asked Tracer how we split it?". A name keeps its capital. */
+const ASK_STARTS = new Set(["how", "what", "why", "when", "where", "which", "who", "whether", "can", "could", "should", "would", "will", "is", "are", "do", "does", "did", "please", "help", "review", "check", "look", "find", "pick", "decide", "agree", "work", "figure", "tell", "give", "suggest", "plan"]);
+
+/**
+ * A side chat's topic as the line in the chat it came from shows it ("Dr asked Tracer how we split the
+ * release?"): its first sentence that asks something, else its first, at most 80 characters.
+ */
+export function sideChatAsk(topic: string): string {
+  let rest = topic.replace(/\s+/g, " ").trim();
+  let pick = "";
+  for (let i = 0; rest && i < 12; i++) {
+    const sentence = firstSentence(rest);
+    if (!pick) pick = sentence;
+    if (sentence.endsWith("?")) {
+      pick = sentence;
+      break;
+    }
+    rest = rest.slice(sentence.length).trim();
+  }
+  const word = /^\p{L}+/u.exec(pick)?.[0] ?? "";
+  const lowered = ASK_STARTS.has(word.toLowerCase()) ? word.toLowerCase() + pick.slice(word.length) : pick;
+  return fitWords(lowered.replace(/[.!]+$/, ""), 80);
+}
+
+/** A side chat's opening line, "Dr asked Tracer and Manager". Lines saved before said "is talking it over with". */
+export const sideChatAsked = (text: string) => text.replace(/ is talking it over with /, " asked ");
+
 /** What a bot is for, in a line: its role when it has one, else its instructions' first sentence, cut to ROLE_MAX. Empty with neither. */
 export function roleLine(bot: { role?: string; instructions: string }): string {
   const role = cleanRole(bot.role);
@@ -1066,14 +1125,29 @@ export function roleLine(bot: { role?: string; instructions: string }): string {
   return first.length > ROLE_MAX ? `${first.slice(0, ROLE_MAX - 1).trimEnd()}…` : first;
 }
 
+/** Where an activity line is, for the wordings that read by it (eventText). */
+export interface EventPlace {
+  /** How many bots its chat has: a chat between bots is a DM with two and a meeting with more. */
+  members?: number;
+}
+
 /**
  * An activity line's text. Older follow-ups were saved as "Wrote to a thread" or "Wrote a prompt"; they
- * read as "Wrote a prompt in", before the thread's title, now.
+ * read as "Wrote a prompt in", before the thread's title, now. For people (`at`, the line's chat as far
+ * as it's known), a chat between bots' "Side chat closed" reads as a DM's or a meeting's; bots, whose
+ * tool calls it a side chat, read it as it was saved.
  */
-export const eventText = (event: { kind?: string; text: string }) =>
+export const eventText = (event: { kind?: string; text: string }, at?: EventPlace) =>
   event.text === "Wrote to a thread" || event.text === "Wrote a prompt" ? "Wrote a prompt in"
   : event.kind === "model" ? event.text.replace(LEGACY_SWITCH, "Switched to ")
+  : at && event.kind === "changed" && event.text === SIDE_CHAT_CLOSED ? botChatClosed(at.members ?? 2)
   : event.text;
+
+/** The line a side chat ends with, as the server saves it and its bots read it. */
+export const SIDE_CHAT_CLOSED = "Side chat closed";
+
+/** That line as people read it: "DM closed", or "Meeting closed" for three bots or more. */
+export const botChatClosed = (members: number) => `${members > 2 ? "Meeting" : "DM"} closed`;
 
 /** A model switch as saved before: "Switched to fallback model GPT 6.1 Sol", "Switched to first priority model Grok 4.7". */
 const LEGACY_SWITCH = /^Switched to (?:fallback model|\S+ priority model) /;
@@ -1165,7 +1239,8 @@ const RUN_WORDINGS: Record<string, RunWording> = {
   "Followed up": FOLLOWED_UP,
   "Follow-up": FOLLOWED_UP,
   "Poll closed": wording("Closed", "poll"),
-  "Side chat closed": wording("Closed", "side chat"),
+  // A DM or a meeting: a run doesn't know how many bots each had.
+  "Side chat closed": wording("Closed", "chat between bots", "chats between bots"),
   "New bot": wording("Made", "new bot"),
 };
 
@@ -1232,6 +1307,30 @@ export function routineSet(event: { kind: string; text: string; detail?: string 
 
 /** The name an @mention uses: "Dr Eggbot · notes" → "Dr Eggbot". */
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
+
+/**
+ * What tells one of the user's bots from another: its mention name, spaces folded, in any case. Two bots
+ * with one key show twice in the @mention list and can't be told apart there, so no two get one.
+ */
+export const botNameKey = (name: string) => mentionName(name.normalize("NFC").replace(/\s+/g, " ")).toLowerCase();
+
+/**
+ * The bot in `bots` whose name `name` would clash with, or undefined when it's free. `self`, the bot being
+ * renamed, never clashes with itself, and keeping its name (in any case) passes: bots with one name from
+ * before the check still load and save, and renaming either to a free name is how that's fixed. A
+ * retired bot keeps its name too: it can be rehired.
+ */
+export function botNameClash<B extends { id: string; name: string }>(bots: readonly B[], name: string, self?: { id: string; name: string }): B | undefined {
+  const key = botNameKey(name);
+  if (!key || (self && botNameKey(self.name) === key)) return undefined;
+  return bots.find((b) => b.id !== self?.id && botNameKey(b.name) === key);
+}
+
+/** What the server and the app's name fields say about a name `botNameClash` refused: the name as typed. */
+export const botNameTaken = (name: string) => `You already have a bot named ${name.trim()}`;
+
+/** `botNameTaken` for a name that clashes (see botNameClash), else undefined: what a name field shows under it. */
+export const botNameError = (bots: readonly { id: string; name: string }[], name: string, self?: { id: string; name: string }) => (botNameClash(bots, name, self) ? botNameTaken(name) : undefined);
 
 /**
  * How well a typed @query fits a bot's mention name, lower being better; -1 when it doesn't fit.
@@ -1302,6 +1401,17 @@ export function findMentions<B extends Pick<Bot, "name">>(text: string, bots: B[
     i += hit.name.length;
   }
   return out;
+}
+
+/**
+ * The @mention being typed at the end of `before` (the text up to the caret): where its "@" is and what
+ * follows it, or undefined. An "@" starts one wherever findMentions would tag it: after a space, a
+ * newline, the start, or punctuation such as "(" and quotes; not after a letter or digit, which is an
+ * email address. The query can run over spaces ("@Dr Eg"); the caller decides whether it still names anyone.
+ */
+export function mentionQuery(before: string): { at: number; query: string } | undefined {
+  const m = /(?<![\p{L}\d_])@([^@\n]*)$/u.exec(before);
+  return m ? { at: m.index, query: m[1]! } : undefined;
 }
 
 /**
@@ -1404,7 +1514,28 @@ export function resolveMentions<B extends Pick<Bot, "name" | "formerNames">>(tex
  */
 export const marksUnread = (c: Pick<Conversation, "kind">, m: Pick<BotMessage, "author" | "event">) => m.author !== "me" && !(c.kind === "direct" && m.event);
 
-/** A conversation's name: the group's, the bot's, or its bots' for a side chat (a huddle goes by its topic). */
+/**
+ * A chat between bots as people read it, by who's in it: two bots are a DM, three or more a meeting.
+ * "Pip and Scout DM", "Pip, Scout and Tally meeting", "Pip, Scout and Tally and 2 more meeting".
+ * `names`: their first names, in the chat's order (botChatNames).
+ */
+export function botChatName(names: readonly string[]): string {
+  if (names.length <= 2) return `${names.join(" and ")} DM`;
+  const more = names.length - 3;
+  return `${names[0]}, ${names[1]} and ${names[2]}${more ? ` and ${more} more` : ""} meeting`;
+}
+
+/** What a chat between bots is, for "This DM has closed": a DM with two bots, a meeting with more. */
+export const botChatKind = (names: readonly unknown[]): "DM" | "meeting" => (names.length > 2 ? "meeting" : "DM");
+
+/** The first names of the bots in a chat between bots, without their " · tags". */
+export const botChatNames = (c: Pick<Conversation, "botIds">, bots: Pick<Bot, "id" | "name">[]): string[] =>
+  c.botIds.map((id) => mentionName(bots.find((b) => b.id === id)?.name ?? "Deleted bot"));
+
+/** A chat between bots that has closed (a side chat a bot opened and wrapped up): it leaves the sidebar. */
+export const closedBotChat = (c: Pick<Conversation, "kind" | "huddle">): boolean => c.kind === "side" && !!c.huddle?.closedAt;
+
+/** A conversation's name for a bot to read: the group's, the bot's, or its bots' for a side chat (a huddle goes by its topic). People read conversationName (the app's store), where a side chat goes by who's in it. */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   if (c.kind === "group") return c.name || "Untitled group";
   if (c.kind === "side" && c.name) return c.name;

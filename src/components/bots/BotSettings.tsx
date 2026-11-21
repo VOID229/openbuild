@@ -2,21 +2,21 @@
 // instructions, routines, model, how often it checks in; a group's members and goal), making and
 // deleting them, and pages for what they share: their models, the Claude logins they run on, web
 // search, the harnesses they may start threads on, extra Pi extensions, and friends.
-import { Archive, ArchiveRestore, ChevronRight, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
+import { Archive, ArchiveRestore, ChevronRight, MessageCircle, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { botNameError } from "../../../shared/bots";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
-import { useBotModels } from "../../lib/bots/models";
+import { modelLabel, useBotModels } from "../../lib/bots/models";
 import { useStore } from "../../lib/store";
-import type { BotGroupDrop } from "../../lib/types";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
 import { openSettingsPage, settingsUp } from "../../lib/pages";
 import { SettingsHeading } from "../primitives";
-import { NavRow, SettingRow, SettingsGroup, SubPage } from "../SettingsUI";
+import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
 import { BotMachines, BotModel, BotModelSelect, BotWorksIn, DefaultFallbacks, WORKS_IN_DESC } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
-import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, LookPicker, RetireBotDialog } from "./BotDialogs";
+import { ConfirmDeleteDialog, DeleteBotDialog, LookPicker, NameError, RetireBotDialog } from "./BotDialogs";
 import { Instructions, Members, RoleField, Routines } from "./BotDetails";
 import { useBusyBots } from "./common";
 import { BotClaude } from "./BotClaude";
@@ -25,7 +25,7 @@ import { BotFriends } from "./BotFriends";
 import { BotHarnesses, BotThreads, useAllowedHarnesses } from "./BotThreads";
 import { BotWebSearch, useConfiguredProviders } from "./BotWebSearch";
 
-type Dialog = { kind: "bot" } | { kind: "group" } | { kind: "delete"; conversationId: string } | { kind: "retire"; botId: string } | { kind: "reset" };
+type Dialog = { kind: "delete"; conversationId: string } | { kind: "retire"; botId: string } | { kind: "reset" };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -56,10 +56,14 @@ function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversat
   const pulses = useBots((s) => s.pulses);
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
   const st = useBots.getState();
+  const bots = useBots((s) => s.bots);
   const [name, setName] = useState(bot.name);
   useEffect(() => setName(bot.name), [bot.name]);
+  const error = botNameError(bots, name, bot);
+  // A name another bot has stays in the field, with why under it, until it's changed.
   const saveName = () => {
     const next = name.trim();
+    if (error) return;
     if (next && next !== bot.name) st.updateBot(bot.id, { name: next });
     else setName(bot.name);
   };
@@ -74,10 +78,19 @@ function BotEditor({ bot, onDelete, onRetire }: { bot: Bot; onDelete: (conversat
             value={name}
             maxLength={48}
             aria-label="Name"
+            aria-invalid={!!error || undefined}
+            aria-describedby={error ? "bot-name-error" : undefined}
             onChange={(e) => setName(e.target.value)}
             onBlur={saveName}
-            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") e.currentTarget.blur();
+              if (e.key === "Escape" && name !== bot.name) {
+                e.stopPropagation();
+                setName(bot.name);
+              }
+            }}
           />
+          <NameError id="bot-name-error" error={error} />
           {(bot.primary || bot.retiredAt) && (
             <div className="bots-details-sub">
               {bot.primary && <span className="bots-pill">Primary</span>}
@@ -316,32 +329,6 @@ function BotModels({ bots }: { bots: Bot[] }) {
   );
 }
 
-const GROUP_DROPS: { value: BotGroupDrop; label: string }[] = [
-  { value: "ask", label: "Ask each time" },
-  { value: "add", label: "Add it to the group" },
-  { value: "swap", label: "Swap places" },
-];
-
-/** How the OpenBots sidebar's drag and drop behaves, and its order back to the usual one. */
-function SidebarSettings() {
-  const groupDrop = useStore((s) => s.settings.botGroupDrop ?? "ask");
-  const placed = useBots((s) => s.order.length > 0);
-  return (
-    <SettingsGroup title="Sidebar" className="sgroup-rows">
-      <SettingRow label="Dropping a bot on a group" desc="Add the bot to the group, or swap the two's places in the sidebar.">
-        <OptionSelect label="Dropping a bot on a group" value={groupDrop} options={GROUP_DROPS} onChange={(botGroupDrop) => useStore.getState().updateSettings({ botGroupDrop })} />
-      </SettingRow>
-      <SettingRow label="Order" desc={placed ? "Some bots and groups are where you dragged them." : "Pins as you pinned them, the rest by their latest message. Drag them to put them in your own order."}>
-        {placed && (
-          <button type="button" className="btn btn-sm" onClick={() => useBots.getState().resetOrder()}>
-            <RotateCcw size={14} /> Reset order
-          </button>
-        )}
-      </SettingRow>
-    </SettingsGroup>
-  );
-}
-
 export function BotsSettingsSection() {
   const bots = useBots((s) => s.bots);
   const conversations = useBots((s) => s.conversations);
@@ -352,7 +339,7 @@ export function BotsSettingsSection() {
   const searching = useConfiguredProviders();
   const harnesses = useAllowedHarnesses();
   const extensions = useExtensionsSummary();
-  const { listing } = useBotModels();
+  const models = useBotModels();
   // Saves show no progress; only a failed one is worth interrupting for.
   const syncStatus = error && <div className="bots-sync-status" role="alert">
     <span>{error}</span>
@@ -365,7 +352,6 @@ export function BotsSettingsSection() {
   const groups = conversations.filter((c) => c.kind === "group").sort((a, b) => b.updatedAt - a.updatedAt);
   // Primary first, then oldest first: the order they were made in. Retired ones come last, marked.
   const sorted = [...bots].sort((a, b) => Number(!!a.retiredAt) - Number(!!b.retiredAt) || Number(!!b.primary) - Number(!!a.primary) || a.createdAt - b.createdAt);
-  const working = bots.filter((b) => !b.retiredAt);
   // A bot's or a group's page: settings/bots/bot/<id>, settings/bots/group/<id>.
   const [kind, rawId] = page?.split("/") ?? [];
   const id = rawId && decodeURIComponent(rawId);
@@ -384,16 +370,6 @@ export function BotsSettingsSection() {
 
   const dialogs = (
     <>
-      {dialog?.kind === "bot" && (
-        <CreateBotDialog
-          onClose={closeDialog}
-          onCreated={(id) => {
-            const botId = useBots.getState().conversations.find((c) => c.id === id)?.botIds[0];
-            if (botId) openSettingsPage(`bot/${encodeURIComponent(botId)}`);
-          }}
-        />
-      )}
-      {dialog?.kind === "group" && <CreateGroupDialog onClose={closeDialog} onCreated={(id) => openSettingsPage(`group/${encodeURIComponent(id)}`)} />}
       {retiring && <RetireBotDialog bot={retiring} onClose={closeDialog} />}
       {deletingBot && (deletingBot.retiredAt ? <DeleteBotDialog bot={deletingBot} onClose={closeDialog} onDone={() => useStore.getState().settingsPage && settingsUp()} /> : <RetireBotDialog bot={deletingBot} onClose={closeDialog} />)}
       {deleting && !deletingBot && (
@@ -449,20 +425,15 @@ export function BotsSettingsSection() {
       </>
     );
 
-  const modelName = defaultModel ? (listing?.models.find((m) => m.id === defaultModel)?.name ?? defaultModel) : "Pi's default";
+  // Not named yet: a quiet space, never the raw id (BotModelSelect does the same).
+  const modelName = defaultModel ? (modelLabel(defaultModel, models) ?? <span className="model-name-pending" aria-label="Loading model" />) : "Pi's default";
   return (
     <>
       <SettingsHeading>Bots</SettingsHeading>
       {syncStatus}
 
-      <SettingsGroup
-        title="Your bots"
-        action={
-          <button type="button" className="btn btn-sm" onClick={() => setDialog({ kind: "bot" })}>
-            <Plus size={14} /> New bot
-          </button>
-        }
-      >
+      {/* Bots and groups are made from the sidebar's "+" (BotsSidebar.tsx). */}
+      <SettingsGroup title="Your bots">
         <ul className="pi-list">
           {sorted.map((b) => (
             <BotRow key={b.id} bot={b} />
@@ -471,14 +442,7 @@ export function BotsSettingsSection() {
         </ul>
       </SettingsGroup>
 
-      <SettingsGroup
-        title="Groups"
-        action={
-          <button type="button" className="btn btn-sm" disabled={working.length < 2} title={working.length < 2 ? "A group needs at least two bots" : undefined} onClick={() => setDialog({ kind: "group" })}>
-            <UsersRound size={14} /> New group
-          </button>
-        }
-      >
+      <SettingsGroup title="Groups">
         <ul className="pi-list">
           {groups.map((g) => (
             <GroupRow key={g.id} group={g} bots={bots} />
@@ -486,8 +450,6 @@ export function BotsSettingsSection() {
           {!groups.length && <li className="pi-empty">No groups yet.</li>}
         </ul>
       </SettingsGroup>
-
-      <SidebarSettings />
 
       <SettingsGroup title="Shared by every bot" className="sgroup-rows">
         <NavRow label="Models" value={modelName} to="models" />

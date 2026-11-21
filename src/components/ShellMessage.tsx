@@ -34,7 +34,7 @@ function CopyOutput({ text }: { text: string }) {
   return (
     <IconButton
       label={copied ? "Copied" : "Copy output"}
-      tooltipSide="top"
+      tooltip={false}
       className="shell-action"
       onClick={async (e) => {
         e.stopPropagation();

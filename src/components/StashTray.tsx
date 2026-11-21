@@ -54,7 +54,7 @@ export function StashTray({ inline, items, open, active, onToggle, onClose, onHo
                     {image && <img className="queued-thumb" src={image.dataUrl} alt="" />}
                     <span className="stash-time">{ago(item.createdAt)}</span>
                   </button>
-                  <IconButton label="Remove from stash" tooltipSide="top" className="queued-btn" onMouseDown={keepFocus} onClick={() => onRemove(item.id)}>
+                  <IconButton label="Remove from stash" tooltip={false} className="queued-btn" onMouseDown={keepFocus} onClick={() => onRemove(item.id)}>
                     <X size={15} />
                   </IconButton>
                 </div>
@@ -76,7 +76,7 @@ export function StashTray({ inline, items, open, active, onToggle, onClose, onHo
             </button>
           )}
           {only && (
-            <IconButton label="Remove from stash" tooltipSide="top" className="queued-btn" onMouseDown={keepFocus} onClick={() => onRemove(only.id)}>
+            <IconButton label="Remove from stash" tooltip={false} className="queued-btn" onMouseDown={keepFocus} onClick={() => onRemove(only.id)}>
               <X size={15} />
             </IconButton>
           )}

@@ -249,7 +249,7 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
         >
           <WrapText size={14} />
         </IconButton>
-        <IconButton label="Refresh the diff" className="fv-tool" onClick={() => void load(true)}>
+        <IconButton label="Refresh the diff" tooltip={false} className="fv-tool" onClick={() => void load(true)}>
           <RotateCcw size={13} />
         </IconButton>
       </div>

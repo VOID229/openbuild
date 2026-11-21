@@ -1,7 +1,7 @@
 // The OpenBots sidebar's order (src/lib/bots/sidebarOrder.ts): how each list sorts with and without
 // the user's own order, and what a drag or a keyboard move changes: places, pins and sections.
 import { describe, expect, test } from "bun:test";
-import { canJoin, movableLists, planMove, planStep, sidebarLists } from "../src/lib/bots/sidebarOrder";
+import { botChatsLabel, canJoin, leavesSidebar, movableLists, planMove, planStep, railLists, sidebarLists } from "../src/lib/bots/sidebarOrder";
 import type { Bot, Conversation } from "../src/lib/bots/types";
 
 const bot = (id: string, retiredAt?: number): Bot => ({ id, name: id, look: { shape: "cloud", color: "white" }, instructions: "", memory: [], routines: [], createdAt: 1, retiredAt });
@@ -56,6 +56,59 @@ describe("sorting", () => {
     expect(ids(lists.rest)).toEqual(["b", "d", "c"]);
     const pins = sidebarLists([...conversations, chat("e", { pinnedAt: 5 })], [...bots, bot("e")], sections, ["crew", "a"]).pinned;
     expect(ids(pins)).toEqual(["crew", "a", "e"]);
+  });
+});
+
+describe("chats between bots", () => {
+  const side = (id: string, botIds: string[], more: Partial<Conversation> = {}) => chat(id, { kind: "side", botIds, ...more });
+  const closed = { by: "a", from: "crew", topic: "Port?", limit: 6, closedAt: 5 } as Conversation["huddle"];
+
+  test("a closed one is in no list, pinned or hidden as it may be; an open one and a plain DM stay", () => {
+    const list = [
+      ...conversations,
+      side("shut", ["a", "b"], { huddle: closed, updatedAt: 500 }),
+      side("shut-pin", ["a", "c"], { huddle: closed, pinnedAt: 30 }),
+      side("shut-hidden", ["b", "c"], { huddle: closed, hidden: true }),
+      side("open", ["a", "b", "c"], { huddle: { ...closed, closedAt: undefined } as Conversation["huddle"], updatedAt: 400 }),
+    ];
+    expect(list.filter(leavesSidebar).map((c) => c.id)).toEqual(["shut", "shut-pin", "shut-hidden"]);
+    const lists = sidebarLists(list, bots, sections, []);
+    expect(ids(lists.side)).toEqual(["open", "side"]);
+    expect(ids(lists.pinned)).toEqual(["a", "crew"]);
+    expect(ids(lists.hidden)).toEqual([]);
+    const every = [...lists.pinned, ...lists.rest, ...lists.shared, ...lists.filed.flatMap(([, l]) => l), ...lists.side, ...lists.hidden, ...lists.retired];
+    expect(every.some((c) => c.id.startsWith("shut"))).toBe(false);
+    // A group or a bot's own chat never leaves this way.
+    expect(conversations.some(leavesSidebar)).toBe(false);
+  });
+
+  test("their heading says what they are: DMs, Meetings, or both", () => {
+    expect(botChatsLabel([side("x", ["a", "b"])])).toBe("DMs");
+    expect(botChatsLabel([side("x", ["a", "b", "c"])])).toBe("Meetings");
+    expect(botChatsLabel([side("x", ["a", "b"]), side("y", ["a", "b", "c", "d"])])).toBe("DMs and meetings");
+  });
+});
+
+describe("the rail", () => {
+  const rail = (folded: string[], order: string[] = []) => {
+    const r = railLists(sidebarLists(conversations, bots, sections, order), folded, order.length > 0);
+    return { pinned: ids(r.pinned), rest: ids(r.rest), side: ids(r.side) };
+  };
+
+  test("leaves out every section folded shut in the list, and keeps the rest", () => {
+    // All open: the rows, Work's chats and the friends' run together by their latest message.
+    expect(rail([])).toEqual({ pinned: ["a", "crew"], rest: ["b", "c", "d", "w1", "w2", "pals"], side: ["side"] });
+    // Work, With friends and the chats between bots folded: none of theirs. Pins and the unfiled rows have no fold.
+    expect(rail(["Work"]).rest).toEqual(["b", "c", "d", "pals"]);
+    expect(rail(["friends"]).rest).toEqual(["b", "c", "d", "w1", "w2"]);
+    expect(rail(["Work", "friends", "side"])).toEqual({ pinned: ["a", "crew"], rest: ["b", "c", "d"], side: [] });
+    // Hidden is folded by default and never on the rail, like Retired; a name that's no section changes nothing.
+    expect(rail(["hidden", "retired:open", "Nope"])).toEqual(rail([]));
+  });
+
+  test("placed by hand, it keeps the list's order, still without a folded section", () => {
+    expect(rail([], ["d", "b"]).rest).toEqual(["c", "d", "b", "w1", "w2", "pals"]);
+    expect(rail(["Work"], ["d", "b"]).rest).toEqual(["c", "d", "b", "pals"]);
   });
 });
 

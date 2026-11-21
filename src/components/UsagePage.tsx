@@ -10,10 +10,9 @@ import { createRedemptionClient } from "../../shared/redemptionClient";
 import { useStore } from "../lib/store";
 import { cx, useMediaQuery } from "../lib/ui";
 import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport, type UsageScope } from "../lib/usageStats";
-import { leaveUsage } from "../lib/pages";
+import { escapeLeavesPage, leavePage } from "../lib/pages";
 import { IconButton, PiMark, Popover, Spinner } from "./primitives";
 import { PageHeader } from "./SettingsUI";
-import { useLightbox } from "./Lightbox";
 import { formatTime } from "../lib/clock";
 
 const resetFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -68,15 +67,13 @@ export function UsagePage() {
   const report = useUsageReport(range, machine);
   const lim = useUsageLimits();
   const mobile = useMediaQuery("(max-width: 768px)");
-  // Back, Esc and the browser's back all return to wherever Usage was opened from.
-  const close = leaveUsage;
-  // Leave Escape to whatever is on top (a lightbox, a menu) and only take it when Usage itself has focus.
+  // Back and Esc leave for whatever was showing before Usage, the Marketplace or Settings was opened;
+  // the browser's back steps back through them.
+  const close = leavePage;
+  // Leave Escape to whatever is on top (a lightbox, a menu), or uses it itself, and take the next one.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
-      if (useStore.getState().settingsOpen || useLightbox.getState().open) return;
-      const el = document.activeElement as HTMLElement | null;
-      if (el && el !== document.body && el.closest("[role='menu'], [role='dialog']")) return;
+      if (useStore.getState().settingsOpen || !escapeLeavesPage(e)) return;
       e.preventDefault();
       close();
     };
@@ -127,7 +124,7 @@ export function UsagePage() {
               </button>
             ))}
           </div>
-          <IconButton label="Refresh" tooltip="Refresh" onClick={() => void refresh()} disabled={busy} className={cx("ustats-refresh", busy && "ustats-spinning")}>
+          <IconButton label="Refresh" tooltip={false} onClick={() => void refresh()} disabled={busy} className={cx("ustats-refresh", busy && "ustats-spinning")}>
             <RefreshCw size={15} />
           </IconButton>
         </div>

@@ -3,7 +3,7 @@
 import { ArrowUp, Check, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { providerName, providerOf } from "../../lib/models";
-import { useBotModels } from "../../lib/bots/models";
+import { modelLabel, useBotModels } from "../../lib/bots/models";
 import { useBots } from "../../lib/bots/store";
 import { useShallow } from "zustand/react/shallow";
 import type { Bot } from "../../lib/bots/types";
@@ -18,31 +18,51 @@ import { BotThreads } from "./BotThreads";
 /**
  * A model to run bots on, with an option on top for leaving it unset and following what's `inherited` (Pi's own default without one).
  * Without `unset` there's no such option and an empty value reads `placeholder`. `account` tags the model with its own provider,
- * so a second login ("openai-codex-2") reads apart from the first.
+ * so a second login ("openai-codex-2") reads apart from the first. `compact`: the small trigger under a bot's chat box
+ * (ComposerOptions), the model's name alone in muted text.
  */
-export function BotModelSelect({ label, value, unset, inherited, placeholder, account, onChange }: { label: string; value?: string; unset?: string; inherited?: string; placeholder?: string; account?: boolean; onChange: (model: string) => void }) {
+export function BotModelSelect({ label, value, unset, inherited, placeholder, account, compact, onChange }: { label: string; value?: string; unset?: string; inherited?: string; placeholder?: string; account?: boolean; compact?: boolean; onChange: (model: string) => void }) {
   const [open, setOpen] = useState(false);
-  const { listing, failed } = useBotModels();
+  const state = useBotModels();
+  const { listing, known, failed, confirmed } = state;
   const anchor = useRef<HTMLButtonElement>(null);
-  const models = listing?.models;
-  const fallback = unset ? inherited || listing?.defaultModel : undefined;
-  const nameOf = (id?: string) => models?.find((m) => m.id === id)?.name ?? id;
-  const current = models?.find((m) => m.id === value);
+  const fallback = unset ? inherited || known?.defaultModel : undefined;
+  const current = known?.models?.find((m) => m.id === value);
+  // A model the listing can't name: the name it last had here, or one read from its id, never the raw
+  // id. With nothing to go on before the server answers, a quiet space holds its place.
+  const pending = <span className="model-name-pending" aria-label="Loading model" />;
+  const nameOf = (id: string) => modelLabel(id, state) ?? pending;
   const pick = (model: string) => {
     onChange(model);
     setOpen(false);
   };
+  // Pi's own default isn't known before the first listing: an unset model waits for it, rather than read `unset` and then change.
+  const following = !!unset && (!!fallback || (!known && !failed));
   // Unset reads like the model it follows, tagged with `unset`; without a known fallback it's just `unset`.
-  const unsetLabel = fallback ? nameOf(fallback) : (unset ?? placeholder);
-  const hint = (m: NonNullable<typeof current>) => providerName(account ? (m.provider ?? m.id.split("/")[0]!) : providerOf(m));
+  const unsetLabel = fallback ? nameOf(fallback) : following ? pending : (unset ?? placeholder);
+  const provider = (m: { id: string; provider?: string; custom?: boolean }) => providerName(account ? (m.provider ?? m.id.split("/")[0]!) : providerOf(m));
+  // Once the server has answered, a model it doesn't list is gone; with Pi failing, there's no telling.
+  const gone = !!value && !current && confirmed && !failed;
+  const shown = value ? (current?.name ?? (gone ? `${modelLabel(value, state)} (unavailable)` : nameOf(value))) : unsetLabel;
+  // The line beside the name: the provider, read from the id while the model isn't known yet, so the field doesn't change when it is.
+  const hint = value ? (current ? provider(current) : !confirmed && !failed && provider({ id: value })) : following && unset;
+  const named = shown === undefined || typeof shown === "string" ? shown : "Loading model";
   return (
-    <span className="select-wrap select-grow bots-set-model">
-      <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen((o) => !o)}>
-        {(value || fallback) && <BrandIcon id={value || fallback!} />}
-        <span className="select-value">{value ? (current?.name ?? (listing ? `${value} (unavailable)` : value)) : unsetLabel}</span>
-        {value ? current && <span className="select-hint">{hint(current)}</span> : fallback && <span className="select-hint">{unset}</span>}
-        <ChevronDown size={14} className="select-chevron" />
-      </button>
+    <span className={compact ? "bots-opts-model" : "select-wrap select-grow bots-set-model"}>
+      {compact ? (
+        <button ref={anchor} type="button" className="bots-opts-model-btn" aria-haspopup="listbox" aria-expanded={open} aria-label={`${label}: ${named ?? "none"}`} onClick={() => setOpen((o) => !o)}>
+          {(value || fallback) && <BrandIcon id={value || fallback!} />}
+          <span className="bots-opts-model-name">{shown}</span>
+          <ChevronDown size={12} strokeWidth={2.2} aria-hidden />
+        </button>
+      ) : (
+        <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen((o) => !o)}>
+          {(value || fallback) && <BrandIcon id={value || fallback!} />}
+          <span className="select-value">{shown}</span>
+          {hint && <span className="select-hint">{hint}</span>}
+          <ChevronDown size={14} className="select-chevron" />
+        </button>
+      )}
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">
         <ModelMenu
           selected={{ plan: "pi", id: value ?? "" }}
@@ -187,7 +207,7 @@ export function FallbackList({ list, onChange: set }: { list: string[]; onChange
                 <ArrowUp size={14} />
               </IconButton>
             )}
-            <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => set(list.filter((_, j) => j !== i))}>
+            <IconButton label="Remove" tooltip={false} className="key-icon-btn key-remove" onClick={() => set(list.filter((_, j) => j !== i))}>
               <Trash2 size={14} />
             </IconButton>
           </span>

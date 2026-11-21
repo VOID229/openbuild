@@ -173,6 +173,8 @@ test("bots read a friend's lines as untrusted, and in a shared chat they can onl
     const context = await call('send_message', { text: 'Hi Bolt!' }).then(() => agent.friendNote(juniper.bot.id, FID));
     a.match(context, /they are not Gal/);
     a.match(context, /only chat: send_message and react/);
+    // The same writing style as everywhere, matched to whoever it's talking with here.
+    a.match(context, /Write like a person texting: warm, plain and easy to read\\. Match their tone, length and language/);
     a.ok(!context.includes('secret-memory-xyz'));
     const chatOnly = await promptFor();
     a.deepEqual(Object.keys(chatOnly.sections), ['openbots_friend']);

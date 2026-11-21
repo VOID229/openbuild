@@ -728,39 +728,11 @@
   background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-.bots-glyph-eyes rect {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform 120ms var(--ease);
-}
-
-@media (hover: hover) {
-  :hover > .bots-glyph .bots-glyph-eyes rect {
-    animation: bots-glyph-blink 1.6s var(--ease) infinite;
-  }
-}
-
-@keyframes bots-glyph-blink {
-  0%,
-  8%,
-  100% {
-    transform: none;
-  }
-  4% {
-    transform: scaleY(0.1);
-  }
-  40%,
-  70% {
-    transform: translateX(1.2px);
-  }
-}
-
 /* Reduced motion: no life of their own, and a dozing bot simply holds the pose. */
 @media (prefers-reduced-motion: reduce) {
   .bot-alive,
   .bot .bot-act,
-  .bot-zzz > span,
-  .bots-glyph-eyes rect {
+  .bot-zzz > span {
     animation: none !important;
   }
   .bot .bot-dots i {
@@ -1137,7 +1109,7 @@
   gap: 7px;
   max-width: 220px;
   padding: 4px 11px 4px 5px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
   font-size: 13px;
@@ -1349,7 +1321,7 @@
   place-items: center;
   width: 58px;
   height: 58px;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -1534,7 +1506,7 @@
 .bots-rail-sep {
   flex: none;
   width: 40px;
-  height: 1px;
+  height: var(--hairline);
   margin: 4px 0;
   background: var(--border);
 }
@@ -1648,7 +1620,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--hairline) solid var(--border);
   background: var(--surface);
   color: var(--text-2);
   font-size: 13px;
@@ -2147,6 +2119,143 @@
   font-size: 0.86em;
 }
 
+/* A message's blocks (ChatText.tsx, lib/chatText.ts): paragraphs, list items and code blocks. */
+.chat-code {
+  max-width: 100%;
+  margin: 6px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+  letter-spacing: 0;
+  white-space: pre;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.chat-p,
+.chat-item {
+  display: block;
+}
+
+.chat-item {
+  display: flex;
+  gap: 8px;
+}
+
+.chat-item-mark {
+  flex: none;
+  min-width: 10px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chat-item-body {
+  min-width: 0;
+}
+
+.chat-p + .chat-item,
+.chat-item + .chat-p,
+.chat-p + .chat-p {
+  margin-top: 8px;
+}
+
+.chat-item + .chat-item {
+  margin-top: 3px;
+}
+
+.chat-code:first-child {
+  margin-top: 2px;
+}
+
+.chat-code:last-child {
+  margin-bottom: 2px;
+}
+
+.bm-text .chat-code code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: inherit;
+}
+
+.bm-mine .chat-code {
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+/* Headings, quotes, dividers and tables (lib/chatText.ts). A heading is bold text, as its draft shows it. */
+.chat-h,
+.chat-quote,
+.chat-rule,
+.chat-table-wrap {
+  margin: 8px 0;
+}
+
+.chat-h:first-child,
+.chat-quote:first-child,
+.chat-rule:first-child,
+.chat-table-wrap:first-child {
+  margin-top: 0;
+}
+
+.chat-h:last-child,
+.chat-quote:last-child,
+.chat-rule:last-child,
+.chat-table-wrap:last-child {
+  margin-bottom: 0;
+}
+
+.chat-h {
+  font-weight: 600;
+}
+
+/* A quote has a rule down its side, in the colour of its own text, so it reads on either side. */
+.chat-quote {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 12px;
+  border-left: 3px solid color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.chat-rule {
+  height: 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+}
+
+/* A table wider than its bubble scrolls sideways inside it, rather than stretching the bubble. The
+   pixel under it is room for its last line, which a wrap ending part-way through a pixel cuts off. */
+.chat-table-wrap {
+  max-width: 100%;
+  padding-bottom: 1px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.chat-table {
+  width: max-content;
+  border-collapse: collapse;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: normal;
+}
+
+.chat-table th,
+.chat-table td {
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  vertical-align: top;
+  text-align: left;
+}
+
+.chat-table th {
+  font-weight: 600;
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
 /* Links in a message are blue as well as underlined, so they read as clickable at a glance. */
 .bm-text .link {
   color: var(--file-link);
@@ -2280,7 +2389,7 @@
 .bm-image {
   display: block;
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   cursor: zoom-in;
 }
 
@@ -2486,7 +2595,7 @@
   gap: 4px;
   height: var(--bm-chip-h, 24px);
   padding: 0 8px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface);
   font-size: 13px;
@@ -2529,7 +2638,7 @@
   width: 20px;
   height: 20px;
   margin-left: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   color: var(--text-3);
   transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
@@ -2545,7 +2654,6 @@
   }
 
   .bm-reaction-reply:hover {
-    background: var(--hover);
     color: var(--text);
   }
 }
@@ -2669,7 +2777,7 @@
 .bm-event-times {
   flex: none;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   color: var(--text-2);
   font-size: 11px;
@@ -2820,7 +2928,6 @@
 
 @media (hover: hover) {
   .bm-events-toggle:hover {
-    background: var(--hover);
     color: var(--text-2);
   }
 }
@@ -3154,7 +3261,7 @@
   width: 32px;
   height: 32px;
   margin: -46px 4px 0 0;
-  border-radius: 50%;
+  border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--surface-raised);
   box-shadow: var(--shadow-md);
@@ -3186,7 +3293,7 @@
   gap: 1px;
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bm-react-btn {
@@ -3311,7 +3418,7 @@
   gap: 6px;
   margin-top: 10px;
   padding-top: 9px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
   font-size: 13px;
   line-height: 1.45;
   color: var(--text-2);
@@ -3622,20 +3729,94 @@
   margin: 0 auto;
 }
 
+/* The line under a bot's chat box (ComposerOptions): the model it runs on, in the box's muted words
+   and no frame of its own, starting where the box's straight edge does. A hover lights the words,
+   as the box's buttons do. */
+.bots-opts {
+  display: flex;
+  align-items: center;
+  max-width: var(--bots-composer-w);
+  min-height: 24px;
+  margin: 4px auto 0;
+  /* The model's mark sits right under the box's paperclip. */
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-3);
+}
+
+/* As wide as the dock lets it be: a long model name is cut short, never widening the chat. */
+.bots-opts-model {
+  min-width: 0;
+  display: flex;
+}
+
+.bots-opts-model-btn {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  transition: color var(--fast) var(--ease);
+}
+
+.bots-opts-model-btn .brand-icon,
+.bots-opts-model-btn svg {
+  flex-shrink: 0;
+}
+
+.bots-opts-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-opts-model-btn[aria-expanded="true"] {
+  color: var(--text);
+}
+
+@media (hover: hover) {
+  .bots-opts-model-btn:hover {
+    color: var(--text);
+  }
+}
+
+/* A window too short for it (a phone on its side): the messages keep the room. */
+@media (max-height: 360px) {
+  .bots-opts {
+    display: none;
+  }
+}
+
+/* A model's name before the first listing ever came (BotModelSelect, Settings → Bots): a quiet bar in
+   the text's own colour, about a name's width, so nothing moves when the name takes its place. */
+.model-name-pending {
+  display: inline-block;
+  width: 6em;
+  max-width: 100%;
+  height: 0.7em;
+  border-radius: var(--radius-sm);
+  background: currentColor;
+  opacity: 0.14;
+  vertical-align: -0.05em;
+}
+
 /* Like the thread composer: flat on the pane, drawn by a faint hairline alone, its tools in
-   monochrome on either side of the text. A pill: one line of it has round ends, centred on the send
-   button and the files button, each `--bots-pad` in from the hairline. Its corners stay that size
-   as a long draft or attachments make it taller, so they never cut into the text. */
+   monochrome on either side of the text, the send button and the files button each `--bots-pad` in
+   from the hairline. Its corners stay that size as a long draft or attachments make it taller. */
 .bots-composer {
   /* The row's tallest control (the send button) and the room around it. */
   --bots-ctl: 36px;
   --bots-pad: 6px;
-  --bots-composer-r: calc(var(--bots-ctl) / 2 + var(--bots-pad) + 1px);
+  /* Concentric with the buttons inside: their corner plus the room around them. */
+  --bots-composer-r: calc(var(--radius) + var(--bots-pad));
   position: relative;
   max-width: var(--bots-composer-w);
   margin: 0 auto;
   border-radius: var(--bots-composer-r);
-  corner-shape: round;
   border: 1px solid var(--composer-border);
   background: var(--surface);
   transition: border-color var(--fast) var(--ease);
@@ -3652,12 +3833,12 @@
   padding: var(--bots-pad);
 }
 
-/* Round, to sit concentric in the pill's ends; on one line, centred on the send button beside them. */
+/* On one line, centred on the send button beside them. */
 .bots-composer-btn {
   width: 34px;
   height: 34px;
   margin-bottom: calc((var(--bots-ctl) - 34px) / 2);
-  border-radius: 50%;
+  border-radius: var(--radius);
   color: var(--text-2);
 }
 
@@ -3672,7 +3853,7 @@
   animation: bots-fade var(--fast) var(--ease-out) both;
 }
 
-/* As tall as the send button on one line, so its text sits on the pill's middle. */
+/* As tall as the send button on one line, so its text sits on the box's middle. */
 .bots-composer-input {
   flex: 1;
   min-width: 0;
@@ -3711,6 +3892,13 @@
      the page's, or the drawn text runs short of the caret, further each character and line. */
   letter-spacing: inherit;
   word-spacing: inherit;
+  /* Italic in a draft is the upright face slanted, which a browser lays out without font hinting. On
+     a screen that hints (some Linux desktops) upright text is a little wider or narrower than that,
+     and the caret would drift from the drawn text. So both lay all of it out unhinted. And without
+     kerning: a slanted word and the upright "*" beside it are two runs of text, with no kerning
+     between them, where the textarea has one run and kerns the pair. */
+  text-rendering: geometricPrecision;
+  font-kerning: none;
 }
 
 .bots-composer-textarea {
@@ -3728,6 +3916,63 @@
   inset: 0;
   overflow: hidden;
   pointer-events: none;
+}
+
+/* The draft as its message will show it (lib/chatText.ts). The caret is the textarea's, so nothing
+   here may change a character's width: bold is a stroke rather than a heavier face, italic the
+   slant the browser makes of the upright face (no italic face is loaded), and code keeps the font. */
+.bots-draft-number {
+  color: var(--text-3);
+}
+
+.bots-draft-bold {
+  -webkit-text-stroke: 0.55px currentColor;
+}
+
+.bots-draft-italic {
+  font-style: italic;
+}
+
+.bots-draft-code {
+  border-radius: 3px;
+  background: var(--code-bg);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.bots-draft-fence {
+  color: var(--text-2);
+}
+
+.bots-draft-link {
+  color: var(--file-link);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
+}
+
+/* Markdown's own characters ("**", a backtick, a link's address) stay, quiet and upright, whatever they are in. */
+.bots-draft-mark {
+  color: var(--text-3);
+  font-style: normal;
+  -webkit-text-stroke: 0;
+  text-decoration: none;
+}
+
+/* A list's "-" is drawn as the bullet its message shows, over the dash and as wide as it. */
+.bots-draft-bullet {
+  position: relative;
+  color: transparent;
+  -webkit-text-stroke: 0;
+}
+
+.bots-draft-bullet::after {
+  content: "•";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  color: var(--text-3);
+  font-style: normal;
+  transform: translateX(-50%);
 }
 
 .bots-draft-mention {
@@ -3770,7 +4015,7 @@
   width: 36px;
   height: 36px;
   margin-left: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius);
   background: var(--surface-3);
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease), transform var(--fast) var(--ease);
@@ -3833,7 +4078,7 @@
 .bots-reply-x {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
 }
 
 .bots-composer-images {
@@ -3887,7 +4132,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 50%;
+  border-radius: var(--radius-sm);
   border: 2px solid var(--surface);
   background: var(--ink);
   color: var(--ink-fg);
@@ -4070,7 +4315,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-details-top {
@@ -4412,7 +4657,7 @@ button.bots-details-name:hover {
 }
 
 .bots-card-row + .bots-card-row {
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-cards > .bots-hint {
@@ -4732,7 +4977,7 @@ button.bots-details-name:hover {
   justify-content: space-between;
   min-height: 56px;
   padding: 12px 12px 12px 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--hairline) solid var(--border);
 }
 
 .bots-dialog-head h2 {
@@ -4784,6 +5029,27 @@ button.bots-details-name:hover {
   font-size: 15px;
   font-weight: 500;
   text-align: center;
+}
+
+/* Why a name can't be used, right under its field: a bot's name another of the user's bots has. */
+.field-help.bots-name-error {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.bots-dialog-body > .bots-name-error {
+  margin-top: -8px;
+  text-align: center;
+}
+
+.bots-details-hero .bots-name-error {
+  max-width: 260px;
+  text-align: center;
+}
+
+.bots-small-dialog .bots-name-error {
+  margin-top: 6px;
 }
 
 .bots-look-picker {
@@ -4939,7 +5205,7 @@ button.bots-details-name:hover {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-btn {
@@ -5539,7 +5805,7 @@ a.bots-btn.bots-btn-primary {
 
 .apps-nav-sep {
   flex: none;
-  height: 1px;
+  height: var(--hairline);
   margin: 6px 10px;
   background: var(--border);
 }
@@ -5690,7 +5956,7 @@ a.bots-btn.bots-btn-primary {
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--text-2);
 }
 
@@ -5880,7 +6146,7 @@ a.bots-btn.bots-btn-primary {
 .app-card-row,
 .app-card-block,
 .app-card-sub {
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .app-card > .app-card-row:first-child {
@@ -6069,7 +6335,7 @@ a.bots-btn.bots-btn-primary {
   flex-direction: column;
   gap: 2px;
   padding: 10px 16px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
   font-size: 13px;
 }
 
@@ -6176,7 +6442,7 @@ a.bots-btn.bots-btn-primary {
   margin: 32px auto 8px;
   padding: 22px 22px 16px;
   border: 1px solid var(--bm-them-border);
-  border-radius: 22px;
+  border-radius: var(--radius-xl);
   background: var(--bm-them);
   text-align: center;
 }
@@ -6250,7 +6516,7 @@ a.bots-btn.bots-btn-primary {
     overflow-x: auto;
     overflow-y: hidden;
     padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--hairline) solid var(--border);
     scrollbar-width: none;
   }
 
@@ -6375,7 +6641,7 @@ a.bots-btn.bots-btn-primary {
 }
 
 .bots-adv-card > .setting-row + .setting-row {
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-advanced .setting-label {
@@ -6671,7 +6937,7 @@ a.bots-btn.bots-btn-primary {
 /* Changes a workspace didn't confirm, kept with it. */
 .bots-unconfirmed {
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--hairline) solid var(--border);
   background: var(--surface);
   font-size: 13px;
 }
@@ -6960,7 +7226,6 @@ a.bots-btn.bots-btn-primary {
 
 @media (hover: hover) {
   .bots-head-tasks:hover {
-    background: var(--hover);
     color: var(--text-2);
   }
 }

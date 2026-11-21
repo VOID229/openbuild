@@ -17,6 +17,7 @@ import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { expandBotsThread, Sidebar, toggleBots } from "./components/Sidebar";
 import { BotsSidebar } from "./components/bots/BotsSidebar";
+import { SidebarGrip } from "./components/SidebarGrip";
 import { BotsView } from "./components/bots/BotsView";
 import { MarketplacePage } from "./components/bots/BotApps";
 import { UsagePage } from "./components/UsagePage";
@@ -423,7 +424,7 @@ function Main() {
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
               <>
-                <IconButton label="Back to chat" tooltipSide="right" onClick={closeBotsThread}>
+                <IconButton label="Back to chat" tooltip={false} onClick={closeBotsThread}>
                   <ArrowLeft size={18} />
                 </IconButton>
                 <IconButton label="Open in OpenBuild" tooltipSide="right" onClick={expandBotsThread}>
@@ -475,6 +476,8 @@ function Main() {
             </>
           )}
         </main>
+        {/* Over the line by whichever sidebar is open: its edge drags to resize both (they're one width). */}
+        {!phone && !settingsOpen && (botsOpen ? botsListShowing : sidebarOpen) && <SidebarGrip key={botsOpen ? "bots" : "threads"} />}
       </div>
       <HarnessSetup />
       <Notices />

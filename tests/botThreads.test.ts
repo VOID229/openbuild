@@ -1455,7 +1455,7 @@ test("the guide and the tool's description give a way to judge, with numbers as 
 
 test("a bot the user deletes leaves its open threads, what they wait on and its unsent messages to the primary", async () => {
   expect(svc.fullBot(bot.id)!.primary).toBe(true);
-  const { bot: helper } = svc.createBot({ name: "Sorrel" });
+  const { bot: helper } = svc.createBot({ name: "Yarrow" });
   svc.updateBot(helper.id, { threads: { enabled: true, projects: [project.id] } });
   const as = (action: string, p: object = {}) => handle(helper.id, { action, ...p }) as Promise<any>;
   // Working, and waiting on a question; with a message queued behind its turn.

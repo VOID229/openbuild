@@ -232,7 +232,7 @@ test("a folded run of activity says what was done, with a count, most done first
   expect(runLabel([{ kind: "joined", text: "Added", detail: "Scout" }, { kind: "joined", text: "Added", detail: "Juniper" }, { kind: "left", text: "Removed", detail: "Tally" }])).toBe("Added 2 bots, removed 1");
   expect(runLabel([{ kind: "message", text: "Sent a message to Scout" }, { kind: "message", text: "Sent a message to Juniper" }])).toBe("Sent 2 messages");
   // Lines with no wording of their own count only among the rest, or as the generic label when that's all there is.
-  const huddle = { kind: "message", text: "Scout is talking it over with Juniper" };
+  const huddle = { kind: "message", text: "Scout asked Juniper" };
   expect(runLabel([closed, closed, huddle])).toBe("Closed 2 threads, 1 more");
   expect(runLabel(times(3, huddle))).toBe("3 background actions");
   expect(runLabel([huddle, { kind: "model", text: "Switched to GPT 6" }])).toBe("2 background actions");
@@ -316,4 +316,47 @@ test("a model switch names the bot and its model, and the account only to tell t
   expect(accountName("openai-codex-2")).toBe("Codex 2");
   expect(accountName("openai-codex")).toBe("Codex");
   expect(accountName("glm-local")).toBe("Glm Local");
+});
+
+test("a side chat's line says who was asked what, in a short sentence", async () => {
+  const { sideChatAsk, sideChatAsked } = await import("../shared/bots");
+  expect(sideChatAsk("How do we split the release? Answer in a line.")).toBe("how do we split the release?");
+  expect(sideChatAsk("Gal wants a CSS redesign and a PR against the main repo. Which tokens should change first? Be brief.")).toBe("which tokens should change first?");
+  expect(sideChatAsk("Review the plan for the new sidebar.\nKeep it short.")).toBe("review the plan for the new sidebar");
+  expect(sideChatAsk("Gal wants me to redesign the app's CSS and file a PR, no merge, against the main repo, with screenshots of every view that changed")).toBe("Gal wants me to redesign the app's CSS and file a PR, no merge, against the…");
+  // Lines saved before read the same way.
+  expect(sideChatAsked("Dr Eggbot is talking it over with Tracer and Manager")).toBe("Dr Eggbot asked Tracer and Manager");
+});
+
+test("a chat between bots is a DM with two bots and a meeting with more, named for who's in it", async () => {
+  const { botChatName, botChatNames, botChatKind, botChatClosed, closedBotChat, conversationTitle, eventText, runLabel } = await import("../shared/bots");
+  const { conversationName } = await import("../src/lib/bots/store");
+  expect(botChatName(["Pip", "Scout"])).toBe("Pip and Scout DM");
+  expect(botChatName(["Pip", "Scout", "Tally"])).toBe("Pip, Scout and Tally meeting");
+  expect(botChatName(["Pip", "Scout", "Tally", "Rex"])).toBe("Pip, Scout and Tally and 1 more meeting");
+  expect(botChatName(["Pip", "Scout", "Tally", "Rex", "Juniper", "Bolt"])).toBe("Pip, Scout and Tally and 3 more meeting");
+  expect([botChatKind(["a", "b"]), botChatKind(["a", "b", "c"])]).toEqual(["DM", "meeting"]);
+  const bot = (id: string, name: string) => ({ id, name, look: { shape: "puff", color: "blue" }, instructions: "", memory: [], routines: [], createdAt: 1 }) as never;
+  const bots = [bot("p", "Pip · ops"), bot("s", "Scout"), bot("t", "Tally")];
+  const side = { id: "x", kind: "side" as const, botIds: ["p", "s"], name: "Which hotel fits the budget?", createdAt: 1, updatedAt: 1, messages: [] };
+  // People read who's in it, not the topic; bots still read the topic (conversationTitle).
+  expect(conversationName(side, bots)).toBe("Pip and Scout DM");
+  expect(conversationTitle(side, bots)).toBe("Which hotel fits the budget?");
+  expect(conversationName({ ...side, botIds: ["p", "s", "t"] }, bots)).toBe("Pip, Scout and Tally meeting");
+  expect(botChatNames({ botIds: ["p", "gone"] }, bots)).toEqual(["Pip", "Deleted bot"]);
+  // Groups and bots keep their names.
+  expect(conversationName({ ...side, kind: "group", name: "Crew" }, bots)).toBe("Crew");
+  expect(conversationName({ ...side, kind: "direct", botIds: ["p"] }, bots)).toBe("Pip · ops");
+  // Closed, it leaves the sidebar. A side chat with no huddle (a message between two bots) never closes.
+  expect(closedBotChat({ ...side, huddle: { by: "p", from: "g", topic: "t", limit: 6, closedAt: 5 } })).toBe(true);
+  expect(closedBotChat({ ...side, huddle: { by: "p", from: "g", topic: "t", limit: 6 } })).toBe(false);
+  expect(closedBotChat(side)).toBe(false);
+  // Its last line is saved as the bots read it, and people read which it was, where the chat is known.
+  expect([botChatClosed(2), botChatClosed(3)]).toEqual(["DM closed", "Meeting closed"]);
+  const closing = { kind: "changed", text: "Side chat closed" };
+  expect([eventText(closing, { members: 2 }), eventText(closing, { members: 4 }), eventText(closing, {})]).toEqual(["DM closed", "Meeting closed", "DM closed"]);
+  expect(eventText(closing)).toBe("Side chat closed");
+  // Only that line: a bot's settings line that happens to say so keeps its words.
+  expect(eventText({ kind: "changed", text: "Side chat closed early's model: A → B" }, { members: 2 })).toBe("Side chat closed early's model: A → B");
+  expect(runLabel([closing, closing, { kind: "thread", text: "Closed a thread" }])).toBe("Closed 2 chats between bots, 1 thread");
 });

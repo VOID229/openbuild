@@ -172,7 +172,7 @@ function Tab({ active, title, icon, label, onSelect, onClose, closeLabel, closeT
         {icon}
         {label}
       </button>
-      <button type="button" className={cx("side-tab-close", dirty && "side-tab-dirty")} aria-label={closeLabel ?? `Close ${label}`} data-tooltip={closeTip ?? "Close"} data-tooltip-side="bottom" onClick={onClose}>
+      <button type="button" className={cx("side-tab-close", dirty && "side-tab-dirty")} aria-label={closeLabel ?? `Close ${label}`} data-tooltip={closeTip} data-tooltip-side="bottom" onClick={onClose}>
         <X size={11.5} />
       </button>
     </div>

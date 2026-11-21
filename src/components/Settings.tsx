@@ -4,18 +4,16 @@ import { lowestEffort, nearestEffort, TEXT_RUNTIMES, type RuntimeStatus, type Te
 import { cloudConfigured } from "../lib/cloud";
 import { codexRemoteControl, setCodexRemoteControl, type CodexDaemon } from "../lib/pi";
 import { fastTarget } from "../lib/models";
-import { leaveSettings, openSettingsSection, settingsUp } from "../lib/pages";
+import { escapeLeavesPage, leavePage, openSettingsSection, settingsUp } from "../lib/pages";
 import { UPDATABLE_RUNTIMES, runtimeEnabled, runtimeName } from "../lib/runtimes";
 import { cachedRuntimeStatuses, loadRuntimeStatuses } from "../lib/runtimeStatus";
-import { isShortcutRecording } from "../lib/shortcuts";
 import { loadPlanModels, planDetection, useStore, type SettingsSection } from "../lib/store";
-import type { FontStyle, NamingModel, Theme } from "../lib/types";
+import type { BotGroupDrop, FontStyle, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, useMediaQuery } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DevicesSection } from "./DeviceSettings";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
-import { useLightbox } from "./Lightbox";
 import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
 import { Avatar, IconButton, SettingsBackContext, SettingsHeading, Toggle, type SettingsBackTarget } from "./primitives";
 import { ShortcutsSection } from "./ShortcutSettings";
@@ -93,7 +91,7 @@ function ProfileSection() {
       <Heading>Profile</Heading>
       <div className="avatar-edit">
         <Avatar src={profile.avatar} name={profile.name} size={72} />
-        <button type="button" className="avatar-pencil" aria-label="Change photo" data-tooltip="Change photo" onClick={() => file.current?.click()}>
+        <button type="button" className="avatar-pencil" aria-label="Change photo" onClick={() => file.current?.click()}>
           <Pencil size={13} />
         </button>
         {profile.avatar && (
@@ -182,6 +180,12 @@ function NotificationsSection() {
 
 // ------------------------------------------------------------------ General
 
+const GROUP_DROPS: { value: BotGroupDrop; label: string }[] = [
+  { value: "ask", label: "Ask each time" },
+  { value: "add", label: "Add it to the group" },
+  { value: "swap", label: "Swap places" },
+];
+
 function GeneralSection() {
   const s = useStore((st) => st.settings);
   const page = useStore((st) => st.settingsPage);
@@ -213,7 +217,7 @@ function GeneralSection() {
       <SettingRow label="Share the stash with OpenBots">
         <Toggle checked={s.crossStash ?? false} onChange={(crossStash) => update({ crossStash })} label="Cross-stashing" />
       </SettingRow>
-      <SettingRow label="Follow new output">
+      <SettingRow label="Autoscroll">
         <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Auto scroll" />
       </SettingRow>
       <SettingRow label="Confirm before deleting threads">
@@ -221,6 +225,13 @@ function GeneralSection() {
       </SettingRow>
 
       <RemoteControlSettings />
+
+      {/* How the OpenBots sidebar's drag and drop behaves (BotsSidebar.tsx). */}
+      <SettingsGroup title="Sidebar" className="sgroup-rows">
+        <SettingRow label="Dropping a bot on a group" desc="Add the bot to the group, or swap the two's places in the OpenBots sidebar.">
+          <OptionSelect label="Dropping a bot on a group" value={s.botGroupDrop ?? "ask"} options={GROUP_DROPS} onChange={(botGroupDrop) => update({ botGroupDrop })} />
+        </SettingRow>
+      </SettingsGroup>
 
       <SettingsGroup title="Text generation" className="sgroup-rows">
         <SettingRow label="Name threads automatically" desc="After their first prompt.">
@@ -379,7 +390,7 @@ function TextGeneration() {
                     <ArrowUp size={14} />
                   </IconButton>
                 )}
-                <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
+                <IconButton label="Remove" tooltip={false} className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
                   <Trash2 size={14} />
                 </IconButton>
               </span>
@@ -595,9 +606,9 @@ const PHONE = "(max-width: 768px)";
 
 /**
  * Settings, a page in the main pane with its own URL (/settings/<section>[/<page>]): the sections
- * beside it on a wide screen, or as its first screen on a phone. Back in its header, Esc and the
- * browser's back all go back the same way: up from a page inside a section, and out of Settings to
- * wherever it was opened from (a thread, OpenBots, Usage).
+ * beside it on a wide screen, or as its first screen on a phone. Esc, and Back in its header on a
+ * wide screen, leave from anywhere in it for whatever showed before Settings, Usage or the
+ * Marketplace was opened (a thread, the bot chat); the browser's back steps back a page at a time.
  */
 export function SettingsPage() {
   const requestedSection = useStore((s) => s.settingsSection);
@@ -624,24 +635,22 @@ export function SettingsPage() {
     if (!phone && index) useStore.setState({ settingsIndex: false });
   }, [phone, index]);
 
-  /** One level back: out of a page inside a section, then (on a phone) to the list, then out of Settings. */
+  /**
+   * A phone's header, the only way back there: one level at a time, out of a page inside a section,
+   * then to the list, then out of Settings. Esc, and the header on a wide screen, leave from anywhere.
+   */
   const goBack = () => {
     if (back) back.onBack();
     else if (phone && !index) settingsUp();
-    else leaveSettings();
+    else leavePage();
   };
-  const latest = useRef(goBack);
-  latest.current = goBack;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || isShortcutRecording()) return;
-      // Whatever is over the page (a dialog, a menu, a lightbox) takes its own Escape.
-      if (useLightbox.getState().open || document.querySelector("dialog[open], .modal-root, .popover-portal, .context-menu")) return;
-      const el = document.activeElement;
-      if (el && el !== document.body && el.closest("[role='menu'], [role='listbox'], [role='dialog']")) return;
+      // Whatever is over the page (a dialog, a menu, a lightbox), or uses Escape itself, takes it first.
+      if (!escapeLeavesPage(e)) return;
       e.preventDefault();
-      latest.current();
+      leavePage();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -699,7 +708,7 @@ export function SettingsPage() {
 
   return (
     <div ref={root} className={cx("spage", showIndex && "spage-index", back && "has-back")} role="region" aria-label="Settings" tabIndex={-1}>
-      <PageHeader title={title} backLabel={backLabel} onBack={phone ? goBack : leaveSettings} />
+      <PageHeader title={title} backLabel={backLabel} onBack={phone ? goBack : leavePage} />
       <div className="spage-body">
         {(!phone || showIndex) && (
           <nav className="settings-nav" aria-label="Settings sections" onKeyDown={(e) => arrowNav(e)}>

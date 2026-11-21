@@ -85,7 +85,7 @@ describe.skipIf(!browser)("page previews", () => {
         const at = document.elementFromPoint(r.left + 4, r.top + r.height / 2);
         return { h: r.height, radius: s.borderTopLeftRadius, border: s.borderTopWidth, hit: at === c.querySelector('.html-render-chip-open') };
       })()`);
-      expect(row).toEqual({ h: 36, radius: "12px", border: "1px", hit: true });
+      expect(row).toEqual({ h: 36, radius: "8px", border: "1px", hit: true });
     }, 30_000);
 
     test(`the X closes a page to a chip, and the chip opens a fresh one at its size (${surface})`, async () => {

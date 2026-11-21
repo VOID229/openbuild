@@ -91,7 +91,7 @@ function PullListView({ folder, resolving }: { folder: TerminalFolder; resolving
           ))}
         </div>
         {loading && <Spinner />}
-        <IconButton label="Refresh" className="fv-tool" onClick={() => void reload(false, true)}>
+        <IconButton label="Refresh" tooltip={false} className="fv-tool" onClick={() => void reload(false, true)}>
           <RotateCcw size={13} />
         </IconButton>
       </div>
@@ -575,7 +575,7 @@ function CodeTab({ folder, pr, commit, clearCommit }: { folder: TerminalFolder; 
         <IconButton label={wrap ? "Don't wrap lines" : "Wrap lines"} className={cx("fv-tool", wrap && "fv-tool-on")} aria-pressed={wrap} onClick={toggleWrap}>
           <WrapText size={14} />
         </IconButton>
-        <IconButton label="Refresh the diff" className="fv-tool" onClick={() => void reload(false, true)}>
+        <IconButton label="Refresh the diff" tooltip={false} className="fv-tool" onClick={() => void reload(false, true)}>
           <RotateCcw size={13} />
         </IconButton>
       </div>

@@ -10,7 +10,7 @@ import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THR
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Routine } from "../../lib/bots/types";
 import { countdown, formatRun } from "../../../shared/botSchedule";
-import { cleanRole, ROLE_MAX } from "../../../shared/bots";
+import { botChatKind, botNameError, cleanRole, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
@@ -22,14 +22,16 @@ import { HermesMark, IconButton, ProviderIcon, RuntimeIcon, Toggle } from "../pr
 import { expandBotsThread } from "../Sidebar";
 import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
-import { LookPicker } from "./BotDialogs";
+import { LookPicker, NameError } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
 import { TodoList } from "./BotTodos";
 import { ConversationAvatar, useBusyBots, useReading } from "./common";
 
-function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+/** `check`: why a name can't be used (another bot's), shown under the field, which stays open until it's changed or Escape. */
+function InlineName({ value, check, onChange }: { value: string; check?: (name: string) => string | undefined; onChange: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const error = editing ? check?.(draft) : undefined;
   if (!editing)
     return (
       <button
@@ -44,27 +46,33 @@ function InlineName({ value, onChange }: { value: string; onChange: (v: string) 
       </button>
     );
   const commit = () => {
+    if (error) return;
     if (draft.trim() && draft.trim() !== value) onChange(draft.trim());
     setEditing(false);
   };
   return (
-    <input
-      className="input bots-details-name-input"
-      value={draft}
-      maxLength={48}
-      aria-label="Name"
-      autoFocus
-      onFocus={(e) => e.currentTarget.select()}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") {
-          e.stopPropagation();
-          setEditing(false);
-        }
-      }}
-    />
+    <>
+      <input
+        className="input bots-details-name-input"
+        value={draft}
+        maxLength={48}
+        aria-label="Name"
+        aria-invalid={!!error || undefined}
+        aria-describedby={error ? "details-name-error" : undefined}
+        autoFocus
+        onFocus={(e) => e.currentTarget.select()}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setEditing(false);
+          }
+        }}
+      />
+      <NameError id="details-name-error" error={error} />
+    </>
   );
 }
 
@@ -329,14 +337,14 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         {shared && !members.length && <li className="bots-hint">None of your bots yet. Add one below; it answers when mentioned.</li>}
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
-            <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
+            <button type="button" className="bots-member-main" onClick={() => open(b)}>
               <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} reading={readers[conversation.botIds.indexOf(b.id)]} asleep={!working.includes(b.id)} zzz />
               <span className="bots-card-text">{b.name}</span>
             </button>
             {editable && removable && (
               <IconButton
                 label="Remove from group"
-                tooltipSide="left"
+                tooltip={false}
                 className="bots-card-x"
                 onClick={() => {
                   st.updateConversation(conversation.id, { botIds: conversation.botIds.filter((id) => id !== b.id) });
@@ -350,7 +358,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         ))}
         {away.map((b) => (
           <li key={b.id} className="bots-card-row bots-member bots-member-retired">
-            <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
+            <button type="button" className="bots-member-main" onClick={() => open(b)}>
               <BotAvatar look={b.look} size={28} alive={false} />
               <span className="bots-card-text">{b.name}</span>
             </button>
@@ -370,7 +378,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
                 </span>
                 <IconButton
                   label="Add to group"
-                  tooltipSide="left"
+                  tooltip={false}
                   className="bots-card-x bots-card-add"
                   onClick={() => {
                     st.updateConversation(conversation.id, { botIds: [...conversation.botIds, b.id] });
@@ -428,7 +436,7 @@ function Threads({ threads, bots, open, empty }: { threads: { chat: Chat; bot: s
           const activity = threadActivity(chat);
           return (
             <li key={chat.id} className="bots-card-row bots-member">
-              <button type="button" className="bots-member-main" onClick={() => open(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
+              <button type="button" className="bots-member-main" onClick={() => open(chat.id)}>
                 {/* Only whose thread it is: a still mascot, whatever its bot is doing. */}
                 {bot && <BotAvatar look={bot.look} size={28} alive={false} />}
                 <span className="bots-card-text">
@@ -510,11 +518,11 @@ function ThreadPane({ chat, phone, back, closes, size }: { chat: Chat; phone: bo
       {!phone && <ThreadGrip {...size} />}
       <div className="bots-details-top bots-details-thread-top">
         {closes ? (
-          <IconButton label="Close thread" tooltipSide="right" onClick={closes}>
+          <IconButton label="Close thread" tooltip={false} onClick={closes}>
             <X size={phone ? 24 : 18} />
           </IconButton>
         ) : (
-          <IconButton label="Back to threads" tooltipSide="right" onClick={back}>
+          <IconButton label="Back to threads" tooltip={false} onClick={back}>
             <ChevronLeft size={phone ? 26 : 18} />
           </IconButton>
         )}
@@ -664,7 +672,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
       {showing && <ThreadPane chat={threadChat} phone={phone} back={back} closes={closes} size={size} />}
       <div className="bots-details-inner" hidden={showing}>
         <div className="bots-details-top">
-          <IconButton label="Close details" tooltipSide="left" onClick={close}>
+          <IconButton label="Close details" tooltip={false} onClick={close}>
             {phone ? <ChevronLeft size={26} /> : <X size={18} />}
           </IconButton>
         </div>
@@ -688,7 +696,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
             {conversation.kind === "side" ? (
               <div className="bots-details-name bots-details-name-static">{name}</div>
             ) : (
-              <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }, conversation.id) : st.updateConversation(conversation.id, { name: v }))} />
+              <InlineName value={conversation.friend ? (conversation.name ?? "") : name} check={bot && ((v) => botNameError(bots, v, bot))} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }, conversation.id) : st.updateConversation(conversation.id, { name: v }))} />
             )}
             {bot ? (
               (bot.primary || bot.retiredAt) && (
@@ -703,7 +711,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   ? `Shared with ${conversation.friend.friendName}${conversation.friend.ended ? " · not syncing" : ""}`
                   : conversation.kind === "group"
                     ? `${conversation.botIds.length} bots`
-                    : "Side chat between bots"}
+                    : (conversation.name ?? `${botChatKind(conversation.botIds) === "DM" ? "DM" : "Meeting"} between bots`)}
               </div>
             )}
           </div>

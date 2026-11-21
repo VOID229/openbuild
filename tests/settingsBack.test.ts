@@ -1,7 +1,7 @@
 // Settings is a page in the main pane, and the pages inside its sections (a bot's, a group's, a Pi
 // file's) go back with an arrow at the start of their own header, beside the trail to them
-// ("Bots / Scout"). The page's header goes back out of Settings; Esc goes up one level at a time. On
-// a phone there's one header: the sections are its first screen, and its back goes up a level.
+// ("Bots / Scout"). The page's header and Esc leave Settings from anywhere in it. On a phone there's
+// one header: the sections are its first screen, and its back goes up a level.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page } from "./chromePage";
 
@@ -108,6 +108,36 @@ describe.skipIf(!browser)("Settings as a page", () => {
     expect(await text(page, ".settings-content .md-h1")).toContain("Harnesses");
   }, 60_000);
 
+  test("General calls following new output Autoscroll, and holds the OpenBots sidebar's drop setting under Sidebar", async () => {
+    const page = await open("general");
+    const labels = await page.eval<string[]>("[...document.querySelectorAll('.settings-content .setting-label')].map((l) => l.textContent.trim())");
+    expect(labels).toContain("Autoscroll");
+    expect(labels).not.toContain("Follow new output");
+    expect(labels).toContain("Dropping a bot on a group");
+    expect(await page.eval<string[]>("[...document.querySelectorAll('.settings-content .sgroup-title')].map((t) => t.textContent.trim())")).toContain("Sidebar");
+    // The same setting the sidebar's own question saves: picking here is what a drop does from then on.
+    // It's below the fold of this window: bring it up, so the click lands on it.
+    await page.eval(`(() => { document.querySelector('.settings-content button[aria-label="Dropping a bot on a group"]').scrollIntoView({ block: "center" }); return true; })()`);
+    await page.settle();
+    await page.click('.settings-content button[aria-label="Dropping a bot on a group"]');
+    await page.until("!!document.querySelector('[role=option]')");
+    await page.eval(`(() => { [...document.querySelectorAll('[role=option]')].find((o) => o.textContent.trim() === 'Swap places').click(); return true; })()`);
+    await page.until("store.getState().settings.botGroupDrop === 'swap'");
+  }, 60_000);
+
+  test("Settings → Bots lists the bots and groups and what they share, with nothing to make new ones and no Sidebar or Order", async () => {
+    const page = await open("bots");
+    const bots = await text(page, ".settings-content");
+    // Harnesses and Custom extensions stay: OpenBuild's bots start threads on harnesses.
+    for (const kept of ["Your bots", "Groups", "Models", "Web search", "Harnesses", "Custom extensions", "Reset OpenBots"]) expect(bots).toContain(kept);
+    for (const gone of ["Sidebar", "Dropping a bot on a group", "Reset order"]) expect(bots).not.toContain(gone);
+    expect(await page.eval<string[]>("[...document.querySelectorAll('.settings-content .setting-label')].map((l) => l.textContent.trim())")).not.toContain("Order");
+    // Bots and groups are made from the sidebar's "+", not here.
+    const buttons = await page.eval<string[]>("[...document.querySelectorAll('.settings-content button')].map((b) => b.textContent.trim())");
+    for (const gone of ["New bot", "New group"]) expect(buttons).not.toContain(gone);
+    expect(await page.eval<number>("document.querySelectorAll('.settings-content .sgroup-head button').length")).toBe(0);
+  }, 60_000);
+
   test("a bot's page: arrow and trail, and back to all bots with focus kept on the page", async () => {
     const page = await open("bots");
     await press(page, "Bot 0");
@@ -170,15 +200,13 @@ describe.skipIf(!browser)("Settings as a page", () => {
     expect(await text(page, ".subpage-title")).toBe("Skills");
   }, 60_000);
 
-  test("Esc goes up a level at a time: out of a page, then out of Settings", async () => {
+  test("Esc leaves Settings from a page inside a section, not up a level", async () => {
     const page = await open("bots");
     await press(page, "Bot 0");
     await page.until("!!document.querySelector('.subpage-back')");
     await key(page, "Escape");
-    await page.until("!document.querySelector('.subpage-back')");
-    expect(await page.eval<boolean>("store.getState().settingsOpen")).toBe(true);
-    await key(page, "Escape");
     await page.until("store.getState().settingsOpen === false");
+    expect(await page.eval<boolean>("!!document.querySelector('.spage')")).toBe(false);
   }, 60_000);
 
   test("on a phone, the sections are the first screen and the header goes back one level at a time", async () => {
@@ -346,7 +374,7 @@ for (const [device, width, height] of [["desktop", 1000, 520], ["phone", 390, 64
       expect(await page.eval<string>("store.getState().settingsPage")).toBe("skills");
     }, 60_000);
 
-    test("into a page again, it starts at its top, and Esc goes back up", async () => {
+    test("into a page again, it starts at its top, and Esc leaves Settings", async () => {
       const page = await open("bots", width, height);
       await press(page, "Bot 0");
       await backOpensAtTop(page, () => page.click(backFrom(device)), "Your bots");
@@ -356,8 +384,7 @@ for (const [device, width, height] of [["desktop", 1000, 520], ["phone", 390, 64
       await page.settle();
       expect((await scroll(page)).top).toBe(0);
       await key(page, "Escape");
-      await page.until("!document.querySelector('.subpage')");
-      expect(await page.eval<boolean>("store.getState().settingsOpen")).toBe(true);
+      await page.until("store.getState().settingsOpen === false");
     }, 60_000);
   });
 }

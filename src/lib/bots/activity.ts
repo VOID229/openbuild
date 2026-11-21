@@ -256,11 +256,11 @@ export function awayLines(viewedId: string, botId: string, st: BotStatus | undef
       if (writing && one) add(`messaging ${names}${about}`);
       else if (step || routine) {
         const [exact] = acts("", here);
-        add(`${exact} ${one ? `in its chat with ${names}` : `in a side chat with ${names}`}`);
+        add(`${exact} ${one ? `in its chat with ${names}` : `in a meeting with ${names}`}`);
       }
       add(talking);
       if (!one) add(`talking with ${others.length} bots${about}`);
-      add(`in a side chat${about}`);
+      add(`${one ? "in a DM" : "in a meeting"}${about}`);
     }
   }
   add(AWAY_SHORT);

@@ -10,11 +10,12 @@ import { Spinner, Toggle } from "../primitives";
 
 /** Bots set to a model the extensions loaded now don't provide (one that was switched off), so they don't just fail later. */
 function useMissingModels() {
-  const { listing } = useBotModels();
+  // Only the server's own answer says a model is missing: the copy kept from the last visit may be behind.
+  const { listing, confirmed } = useBotModels();
   const bots = useBots((s) => s.bots);
   const defaultModel = useBots((s) => s.defaultModel);
   const defaultFallbackModels = useBots((s) => s.defaultFallbackModels);
-  return useMemo(() => (listing ? unavailableModels(bots, { defaultModel, defaultFallbackModels }, new Set(listing.models.map((m) => m.id))) : []), [listing, bots, defaultModel, defaultFallbackModels]);
+  return useMemo(() => (listing && confirmed ? unavailableModels(bots, { defaultModel, defaultFallbackModels }, new Set(listing.models.map((m) => m.id))) : []), [listing, confirmed, bots, defaultModel, defaultFallbackModels]);
 }
 
 /** What Settings → Bots says custom extensions are set to: models left unavailable, off, or how many are loaded. */

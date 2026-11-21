@@ -40,7 +40,7 @@ export type TerminalPosition = "bottom" | "side";
 /** How a new Claude Code thread's Remote Control switch starts: on, off, or as the last thread started. */
 export type RemoteControlDefault = "on" | "off" | "last-used";
 
-/** Settings → Bots → Dropping a bot on a group. */
+/** Settings → General → Dropping a bot on a group. */
 export type BotGroupDrop = "ask" | "add" | "swap";
 
 export interface Settings {
