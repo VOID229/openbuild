@@ -78,6 +78,8 @@ describe.skipIf(!browser)("a bot's name another bot has", () => {
         await page.eval(`${menuItem("New bot")}.click()`);
       }
       await page.until("!!document.querySelector('.bots-name-input')");
+      // On a phone the dialog slides up as a sheet: measure it where it rests, not on its way.
+      await page.finish(".bots-dialog");
       const from = await sentSoFar(page);
 
       await type(page, ".bots-name-input", "  Manager ");
@@ -104,6 +106,7 @@ describe.skipIf(!browser)("a bot's name another bot has", () => {
     await page.eval(`${menuItem("Rename bot")}.click()`);
     const field = 'dialog[aria-label="Rename bot"] input';
     await page.until(`!!document.querySelector(${JSON.stringify(field)})`);
+    await page.finish(`dialog[aria-label="Rename bot"]`);
     // Its own name, as it opens, is fine.
     expect(await errorOf(page, field)).toEqual(NO_ERROR);
     const from = await sentSoFar(page);
@@ -125,6 +128,8 @@ describe.skipIf(!browser)("a bot's name another bot has", () => {
     await page.until("!!document.querySelector('button.bots-details-name')");
     await page.eval("document.querySelector('button.bots-details-name').click()");
     await page.until("!!document.querySelector('.bots-details-name-input')");
+    // The panel's contents slide in a few pixels: measure them once they're still.
+    await page.finish(".bots-details");
     const from = await sentSoFar(page);
     await type(page, ".bots-details-name-input", "manager");
     expect(await errorOf(page, ".bots-details-name-input")).toEqual({ text: "You already have a bot named manager", invalid: true, described: true, seen: true, wide: false });
