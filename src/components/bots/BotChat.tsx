@@ -51,6 +51,7 @@ import { BotProfileHover } from "./BotProfileCard";
 const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
+import { ComposerOptions } from "./ComposerOptions";
 import { authorName, ConversationAvatar, dividerTime, FitText, messageLine, messageText, useAwayLines, useBusyBots, usePlainPhases, useReading } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -2266,7 +2267,8 @@ const sameImages = (a: string[], b: string[]) => a.length === b.length && a.ever
  */
 const unsent = new Map<string, (Unsent & { id: string })[]>();
 
-function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
+/** `below`: a line under the box, in the same dock (a bot's chat puts its model there, ComposerOptions). */
+function Composer({ conversation, replyTo, onReply, below }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void; below?: React.ReactNode }) {
   const bots = useBots((s) => s.bots);
   // With nothing typed and a bot at work, the send button is the stop button.
   const canStop = useBots((s) => stoppable(conversation, s.status).length > 0);
@@ -2846,6 +2848,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           )}
         </div>
       </form>
+      {below}
     </div>
   );
 }
@@ -2886,6 +2889,8 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
   // Retired: its chat stays to read, marked so in the header, with the way back where the composer was.
   const retired = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0] && b.retiredAt) : undefined;
+  // The user's own bot in a chat with it alone: its model sits under the box. Another device's bots are set up there.
+  const directBot = conversation.kind === "direct" && !remote ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
   const sub = retired ? "Retired" : (activity ?? away?.[0] ?? members);
   const repo = useStore((s) => conversationRepo(conversation, s.chats));
   return (
@@ -2973,7 +2978,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </div>
         </div>
       ) : (
-        <Composer conversation={conversation} replyTo={replyTo} onReply={setReplyTo} />
+        <Composer conversation={conversation} replyTo={replyTo} onReply={setReplyTo} below={directBot && <ComposerOptions bot={directBot} />} />
       )}
     </div>
   );

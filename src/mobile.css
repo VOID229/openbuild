@@ -860,6 +860,16 @@
     -webkit-overflow-scrolling: touch;
   }
 
+  /* The model under the box: a row a finger can hit. */
+  .bots-opts {
+    margin-top: 2px;
+    padding: 0 12px;
+  }
+
+  .bots-opts-model-btn {
+    height: 32px;
+  }
+
   .bots-composer-textarea::placeholder {
     white-space: nowrap;
   }

@@ -3729,6 +3729,67 @@
   margin: 0 auto;
 }
 
+/* The line under a bot's chat box (ComposerOptions): the model it runs on, in the box's muted words
+   and no frame of its own, starting where the box's straight edge does. A hover lights the words,
+   as the box's buttons do. */
+.bots-opts {
+  display: flex;
+  align-items: center;
+  max-width: var(--bots-composer-w);
+  min-height: 24px;
+  margin: 4px auto 0;
+  padding: 0 14px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-3);
+}
+
+/* As wide as the dock lets it be: a long model name is cut short, never widening the chat. */
+.bots-opts-model {
+  min-width: 0;
+  display: flex;
+}
+
+.bots-opts-model-btn {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  transition: color var(--fast) var(--ease);
+}
+
+.bots-opts-model-btn .brand-icon,
+.bots-opts-model-btn svg {
+  flex-shrink: 0;
+}
+
+.bots-opts-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-opts-model-btn[aria-expanded="true"] {
+  color: var(--text);
+}
+
+@media (hover: hover) {
+  .bots-opts-model-btn:hover {
+    color: var(--text);
+  }
+}
+
+/* A window too short for it (a phone on its side): the messages keep the room. */
+@media (max-height: 360px) {
+  .bots-opts {
+    display: none;
+  }
+}
+
 /* A model's name before the first listing ever came (BotModelSelect, Settings → Bots): a quiet bar in
    the text's own colour, about a name's width, so nothing moves when the name takes its place. */
 .model-name-pending {
