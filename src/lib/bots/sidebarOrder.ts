@@ -83,6 +83,30 @@ export function botChatsLabel(side: Conversation[]): string {
   return kinds.size > 1 ? "DMs and meetings" : kinds.has("meeting") ? "Meetings" : "DMs";
 }
 
+/** What the rail shows of the lists, rows run together. */
+export interface RailLists {
+  pinned: Conversation[];
+  rest: Conversation[];
+  side: Conversation[];
+}
+
+/**
+ * The lists as the rail shows them, with nothing from a section folded shut in the full list (`folded`,
+ * by name: the user's own, "friends", "side"). The pinned tiles and the unfiled rows have no fold. The
+ * rows and the open sections' chats run together by their latest message; once some were put in place
+ * by hand (`ordered`), as the list has them. Hidden and retired chats were never on the rail.
+ */
+export function railLists(lists: SidebarLists, folded: readonly string[], ordered: boolean): RailLists {
+  const open = (name: string) => !folded.includes(name);
+  const filed = lists.filed.filter(([name]) => open(name)).flatMap(([, list]) => list);
+  const shared = open("friends") ? lists.shared : [];
+  return {
+    pinned: lists.pinned,
+    rest: ordered ? [...lists.rest, ...filed, ...shared] : [...lists.rest, ...shared, ...filed].sort(byRecent),
+    side: open("side") ? lists.side : [],
+  };
+}
+
 /** The lists a chat can be dragged in and out of, by key, each in its order. */
 export function movableLists(lists: SidebarLists): Map<ListKey, Conversation[]> {
   return new Map<ListKey, Conversation[]>([

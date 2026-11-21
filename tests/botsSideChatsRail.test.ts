@@ -3,7 +3,8 @@
 // each shows its two bots side by side with a speech bubble between them, so it reads as a DM between
 // those bots and never as a group. Each goes by who's in it ("Pip and Manager DM", a meeting with three
 // bots or more), with its topic in the hover card. Clicking one opens it. The open list draws them the
-// same way. One that has closed leaves the list, the search and the rail.
+// same way. One that has closed leaves the list, the search and the rail, and the rail leaves out
+// whatever a section folded shut in the list holds.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -181,5 +182,33 @@ describe.skipIf(!browser)("chats between bots in the OpenBots sidebar", () => {
       { label: "Pip, Manager and Tracer and 1 more meeting", group: "DMs and meetings" },
       { label: "Tracer and Scout DM", group: "DMs and meetings" },
     ]);
+  }, 30_000);
+
+  test("the rail leaves out what a section folded shut in the list holds: the user's own and the DMs", async () => {
+    const page = await open("rail");
+    await page.eval(`bots.setState((s) => ({ sections: ["Work"], conversations: s.conversations.map((c) => (c.id === "row-group" ? { ...c, section: "Work" } : c)) }))`);
+    const labels = () => page.eval<string[]>(`[...document.querySelectorAll('.bots-rail-list .bots-rail-item')].map((b) => b.getAttribute('aria-label'))`);
+    const groups = () => page.eval<string[]>(`[...document.querySelectorAll('.bots-rail-list [role=group]')].map((g) => g.getAttribute('aria-label'))`);
+    await page.settle();
+    // All open: Work's group and the chats between bots are there.
+    expect(await labels()).toContain("Crew row-group");
+    expect(await groups()).toEqual(["DMs"]);
+    // Folded in the list (the same state the list's headings toggle), each leaves the rail.
+    await page.eval(`["Work", "side"].forEach((name) => bots.getState().toggleFolded(name))`);
+    await page.until("!document.querySelector('.bots-rail-list [role=group]')");
+    await page.settle();
+    // The pinned tiles and the unfiled rows have no fold: they stay. No separator is left dangling at the end.
+    expect(await labels()).toEqual(["Pip", "Crew pinned-group", "Manager", "Crew busy-group"]);
+    expect(await page.eval<boolean>("document.querySelector('.bots-rail-list').lastElementChild?.classList.contains('bots-rail-sep') ?? false")).toBe(false);
+    // Unfolded from the list's own headings, they come back.
+    await page.eval("store.setState({ botsSidebarOpen: true })");
+    await page.until("!!document.querySelector('.bots-list')");
+    for (const name of ["Work", "DMs"]) {
+      await page.eval(`[...document.querySelectorAll('.bots-section .history-heading-toggle')].find((b) => b.firstChild?.textContent === ${JSON.stringify(name)}).click()`);
+    }
+    await page.eval("store.setState({ botsSidebarOpen: false })");
+    await page.until("!document.querySelector('.bots-sidebar-closing') && document.querySelectorAll('.bots-rail-list [role=group]').length === 1");
+    expect(await labels()).toContain("Crew row-group");
+    expect(await groups()).toEqual(["DMs"]);
   }, 30_000);
 });

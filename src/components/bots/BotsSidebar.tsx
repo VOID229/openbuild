@@ -23,7 +23,7 @@ import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, DeleteBotDialog, NameDialog, RetireBotDialog } from "./BotDialogs";
 import { ConversationAvatar, DmMark, FitText, previewOf, shortTime, useAwayLines, useBusyBots } from "./common";
 import { SwitchKeyBadge, useBotSwitchKeys } from "./switchKeys";
-import { botChatsLabel, canJoin, leavesSidebar, movableLists, planMove, planStep, sidebarLists, type ListKey } from "../../lib/bots/sidebarOrder";
+import { botChatsLabel, canJoin, leavesSidebar, movableLists, planMove, planStep, railLists, sidebarLists, type ListKey, type RailLists } from "../../lib/bots/sidebarOrder";
 import { DragGhost, GroupDropMenu, isDragging, useSidebarDrag, type GroupDropState, type Hit } from "./SidebarDrag";
 
 type Dialog =
@@ -570,7 +570,7 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   );
 }
 
-function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: { pinned: Conversation[]; rest: Conversation[]; side: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
+function Rail({ pinned, rest, side, activeId, onMenu, onDialog, peek }: RailLists & { activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
   const remote = !!useRemoteWorkspace();
   const avatar = useStore((s) => s.settings.profile.avatar);
@@ -722,8 +722,9 @@ export function BotsSidebar() {
   const order = useBots((s) => s.order);
   const lists = useMemo(() => sidebarLists(conversations, bots, sections, order), [conversations, sections, bots, order]);
   const { pinned, rest, filed, side, hidden, shared, retired } = lists;
-  // The rail runs the chats together by their latest message; once some were put in place by hand, as the list has them.
-  const railRest = useMemo(() => (order.length ? [...rest, ...filed.flatMap(([, list]) => list), ...shared] : [...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)), [order, rest, filed, shared]);
+  // The rail leaves out what's in a section folded shut here, and runs the rest together (railLists).
+  const folded = useBots((s) => s.folded);
+  const onRail = useMemo(() => railLists(lists, folded, order.length > 0), [lists, folded, order]);
   // The lists chats are dragged in and out of, and moved in from the keyboard or their menu.
   const movable = useMemo(() => movableLists(lists), [lists]);
 
@@ -810,7 +811,7 @@ export function BotsSidebar() {
         {/* Closing, the rail is there from the start and the list fades away over it as the sidebar
             narrows: one sheet collapsing, not a list leaving and a rail arriving after. */}
         {(rail || closing) && (
-          <Rail pinned={pinned} rest={railRest} side={side} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
+          <Rail {...onRail} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
         )}
         {!rail && (
           <div className="sidebar-inner bots-sidebar-inner">
