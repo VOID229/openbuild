@@ -1534,7 +1534,7 @@
 .bots-rail-sep {
   flex: none;
   width: 40px;
-  height: 1px;
+  height: var(--hairline);
   margin: 4px 0;
   background: var(--border);
 }
@@ -1648,7 +1648,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--hairline) solid var(--border);
   background: var(--surface);
   color: var(--text-2);
   font-size: 13px;
@@ -3321,7 +3321,7 @@
   gap: 1px;
   margin-top: 4px;
   padding-top: 4px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bm-react-btn {
@@ -3446,7 +3446,7 @@
   gap: 6px;
   margin-top: 10px;
   padding-top: 9px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
   font-size: 13px;
   line-height: 1.45;
   color: var(--text-2);
@@ -4268,7 +4268,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-details-top {
@@ -4610,7 +4610,7 @@ button.bots-details-name:hover {
 }
 
 .bots-card-row + .bots-card-row {
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-cards > .bots-hint {
@@ -4930,7 +4930,7 @@ button.bots-details-name:hover {
   justify-content: space-between;
   min-height: 56px;
   padding: 12px 12px 12px 20px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--hairline) solid var(--border);
 }
 
 .bots-dialog-head h2 {
@@ -5137,7 +5137,7 @@ button.bots-details-name:hover {
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 16px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-btn {
@@ -5737,7 +5737,7 @@ a.bots-btn.bots-btn-primary {
 
 .apps-nav-sep {
   flex: none;
-  height: 1px;
+  height: var(--hairline);
   margin: 6px 10px;
   background: var(--border);
 }
@@ -6078,7 +6078,7 @@ a.bots-btn.bots-btn-primary {
 .app-card-row,
 .app-card-block,
 .app-card-sub {
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .app-card > .app-card-row:first-child {
@@ -6267,7 +6267,7 @@ a.bots-btn.bots-btn-primary {
   flex-direction: column;
   gap: 2px;
   padding: 10px 16px;
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
   font-size: 13px;
 }
 
@@ -6448,7 +6448,7 @@ a.bots-btn.bots-btn-primary {
     overflow-x: auto;
     overflow-y: hidden;
     padding: 8px 16px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--hairline) solid var(--border);
     scrollbar-width: none;
   }
 
@@ -6573,7 +6573,7 @@ a.bots-btn.bots-btn-primary {
 }
 
 .bots-adv-card > .setting-row + .setting-row {
-  border-top: 1px solid var(--border);
+  border-top: var(--hairline) solid var(--border);
 }
 
 .bots-advanced .setting-label {
@@ -6869,7 +6869,7 @@ a.bots-btn.bots-btn-primary {
 /* Changes a workspace didn't confirm, kept with it. */
 .bots-unconfirmed {
   padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--hairline) solid var(--border);
   background: var(--surface);
   font-size: 13px;
 }

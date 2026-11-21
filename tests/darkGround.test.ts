@@ -84,12 +84,19 @@ describe("dark ground", () => {
     expect(token(light, "--row-focus")).toBe("color-mix(in srgb, var(--text) 4%, transparent)");
     expect(token(light, "--row-hover")).toBe("color-mix(in srgb, var(--text) 5%, transparent)");
     expect(token(light, "--row-on")).toBe("color-mix(in srgb, var(--text) 9%, transparent)");
-    expect(token(light, "--border")).toBe("rgba(0, 0, 0, 0.08)");
+    expect(token(light, "--border")).toBe("rgba(0, 0, 0, 0.06)");
+  });
+
+  test("a dividing line is the hairline: one device pixel on a sharp screen", () => {
+    expect(token(rule(":root"), "--hairline")).toBe("1px");
+    expect(css).toContain("@media (min-resolution: 2dppx) {\n  :root {\n    --hairline: 0.5px;\n  }\n}");
+    expect(rule(".main")).toContain("border-left: var(--hairline) solid var(--border);");
+    expect(rule(".settings-row")).toContain("border-top: var(--hairline) solid var(--border);");
   });
 
   test("the terminal is the pane's black, not a near-black drawer", () => {
     expect(token(dark, "--terminal-bg")).toBe("#000000");
-    expect(rule(".terminal-panel")).toContain("border-top: 1px solid var(--border);");
+    expect(rule(".terminal-panel")).toContain("border-top: var(--hairline) solid var(--border);");
   });
 
   test("no white wash in the dark tokens is too faint to survive a lifted black", () => {
