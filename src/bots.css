@@ -325,7 +325,8 @@
   }
 }
 
-/* Awake, a bot holds quite still between its moves, as the reference's do. Asleep, it breathes:
+/* Awake, a bot holds quite still between its moves, as the reference's do — save for the quiet idle
+   loops below, which keep it alive without moving it anywhere. Asleep, it breathes:
    shallow and slow, with a sigh among the breaths. On the bot's own box, where Chrome runs it on the
    compositor; the long cycle keeps the main thread out of it too, as it's told each time a cycle
    comes round. --bob-delay starts each bot somewhere else in it. */
@@ -353,6 +354,68 @@
   }
   84.75% {
     transform: scale(1.01);
+  }
+}
+
+/* Idle, awake: a bot that is doing nothing at all — not at work, not away, not reading, not dozing,
+   not turning into dots, and not in the middle of a one-off move — still lives a little, on the
+   compositor. Three quiet loops, one on each of the outer layers, so they add up rather than fight:
+   the bot's own box bobs and swells as if breathing, its move layer (.bot-act) sways a degree or two,
+   and its slump layer (.bot-doze) squashes and stretches about its middle in step with the swell.
+   Only transform moves (no opacity, no layout), and --bob-delay starts each bot somewhere else in
+   the cycle, as with the dozing breath. Nothing hops, as nowhere else here. The eyes need no loop of
+   their own: blinking and looking about are already the idle routine's (lib/bots/routines.ts,
+   nextIdle), and the rig writes the eyes frame by frame, so a CSS loop on them could only fight it.
+   The moment the bot is busy, reading, away, dozing, dotted or moved, these stop and the spin, the
+   reading looks and the clips take over untouched: they live on the rig's own layers (.bot-whole,
+   .bot-body, the eyes), which this never touches. One-off moves ride over the sway for their moment
+   (their own animation on .bot-act wins) and the sway is there again after. Plain bots (data-plain,
+   the New bot dialog's preview) are left to their breathing and blinking alone. */
+.bot-alive:not([data-asleep]):not([data-busy]):not([data-away]):not([data-reading]):not([data-action]):not([data-dots]):not([data-plain]) {
+  animation: bot-idle-bob 3.4s ease-in-out infinite;
+  animation-delay: var(--bob-delay, 0s);
+}
+
+.bot-alive:not([data-asleep]):not([data-busy]):not([data-away]):not([data-reading]):not([data-action]):not([data-dots]):not([data-plain]) .bot-act {
+  animation: bot-idle-sway 5.6s ease-in-out infinite;
+  animation-delay: var(--bob-delay, 0s);
+}
+
+.bot-alive:not([data-asleep]):not([data-busy]):not([data-away]):not([data-reading]):not([data-action]):not([data-dots]):not([data-plain]) .bot-doze {
+  animation: bot-idle-squash 3.4s ease-in-out infinite;
+  animation-delay: var(--bob-delay, 0s);
+}
+
+/* Breathing and bobbing, shallow and slow: up a fraction, swelling a little, and back. */
+@keyframes bot-idle-bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-1.4%) scale(1.008);
+  }
+}
+
+/* A slow sway from side to side, a degree or two either way, about the middle. */
+@keyframes bot-idle-sway {
+  0%,
+  100% {
+    transform: rotate(-1.6deg);
+  }
+  50% {
+    transform: rotate(1.6deg);
+  }
+}
+
+/* Squash and stretch about the middle, in step with the bob: squashed wide, then tall, then back. */
+@keyframes bot-idle-squash {
+  0%,
+  100% {
+    transform: scale(1.012, 0.992);
+  }
+  50% {
+    transform: scale(0.996, 1.008);
   }
 }
 
@@ -732,6 +795,7 @@
 @media (prefers-reduced-motion: reduce) {
   .bot-alive,
   .bot .bot-act,
+  .bot .bot-doze,
   .bot-zzz > span {
     animation: none !important;
   }
