@@ -732,7 +732,7 @@ export function settingChanges(before: db.StoredBot, after: db.StoredBot): strin
 
 /**
  * One activity line in the bot's own chat for a save that changed something, however it was made: the
- * app's settings or the primary's manage_bot. "Juniper's model: Grok 4.7 → GPT 6.1 Sol; effort: high → max".
+ * app's settings or the primary's manage_bot. "Juniper's model: Grok 4.7 → GPT 6.1 Sol · effort: high → max".
  * A save that changed nothing says nothing.
  *
  * A new name is also said where it was changed, when that's a chat the bot is in ("Juniper is now Atlas"):
@@ -748,7 +748,7 @@ function announceChanges(before: db.StoredBot, after: db.StoredBot, by?: "me", c
     if (here === where) changes = changes.filter((c) => !c.startsWith("name: "));
   }
   if (!changes.length || !where) return;
-  postMessage(where, { id: crypto.randomUUID(), author: after.id, at: Date.now(), text: "", event: { kind: "changed", text: `${before.name}'s ${changes.join("; ")}`, bot: after.id } });
+  postMessage(where, { id: crypto.randomUUID(), author: after.id, at: Date.now(), text: "", event: { kind: "changed", text: `${before.name}'s ${changes.join(" · ")}`, bot: after.id } });
 }
 
 // ------------------------------------------------------------------ what the user changed

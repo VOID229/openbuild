@@ -107,7 +107,7 @@ test("Run coding agents names its projects and the switches that changed", async
 test("a save that changes several settings is one line; one that changes nothing is none", async () => {
   await run(`${SETUP}
     await patch(helper.id, { model: 'xai/grok-4.7', effort: 'low', computer: { device: 'local', kind: 'host' } });
-    a.deepEqual(texts(helper), ["Juniper's model: default → Grok 4.7; effort: default → low"]);
+    a.deepEqual(texts(helper), ["Juniper's model: default → Grok 4.7 · effort: default → low"]);
     // The same values again, the defaults said out loud, and fields that aren't announced.
     await patch(helper.id, { model: 'xai/grok-4.7', effort: 'low', computer: { device: 'local', kind: 'host' } });
     await patch(primary.id, { proactivity: 'normal', computer: { device: 'local', kind: 'container' }, effort: '' });
@@ -129,7 +129,7 @@ test("the primary's manage_bot changes post the same lines, and a new bot's firs
     await manage(primary.id, { action: 'update', bot: 'Juniper', effort: 'max' });
     await manage(primary.id, { action: 'update', fallback: 'none' });
     a.deepEqual(texts(helper), [
-      "Juniper's model: default → GPT 6.1 Sol; effort: default → max",
+      "Juniper's model: default → GPT 6.1 Sol · effort: default → max",
     ]);
     a.deepEqual(texts(primary), ["Boss's fallbacks: the defaults → none"]);
     // Made with a model: the "New bot" line is all there is.
@@ -167,7 +167,7 @@ test("a model changed while a fallback answers isn't announced again as that mod
     await withFallbacks(helper.id, undefined, chain(), async (model, i, ran) => ran({ name: 'Grok 5' }));
     const events = db.messages(svc.directId(helper.id), 500).map((r) => r.message.event).filter(Boolean).map((e) => [e.kind, e.text]);
     a.deepEqual(events, [
-      ['changed', "Juniper's model: default → Grok 4.7; fallbacks: the defaults → GPT 6.1 Sol"],
+      ['changed', "Juniper's model: default → Grok 4.7 · fallbacks: the defaults → GPT 6.1 Sol"],
       ['model', 'Switched to GPT 6.1 Sol'],
       ['changed', "Juniper's model: Grok 4.7 → grok-5"],
     ]);
